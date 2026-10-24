@@ -9,9 +9,9 @@
   <img src="https://img.shields.io/badge/C%2B%2B-20-blue.svg" alt="C++20" height="20" />
 </p>
 
-**A native C++ Windows Game Explorer reviving the classic Windows 7/Vista Game Explorer directly inside Windows 11 File Explorer.**
+**A native C++20 Windows Shell Extension reviving the classic Windows 7/Vista Game Explorer experience directly inside Windows 11 File Explorer.**
 
-Organize, browse, and launch your entire multi-platform game library with high-resolution box art, rich preview pane, and automated storefront detection without scraping or credentials.
+Organize, browse, and launch your entire multi-platform game library with high-resolution vertical box art, responsive widescreen hero banners, an inspector sidepane, and automated storefront detection—with zero external scrapers required.
 
 <br />
 
@@ -21,22 +21,46 @@ Organize, browse, and launch your entire multi-platform game library with high-r
 
 ---
 
-## ⚡ Quick Start
+## 🌟 Key Capabilities
+
+- **Native File Explorer Integration**: In-process shell extension (`GameExplorerShell.dll`) hosting WinUI 3 XAML Islands with full Windows 11 tabbed UI support.
+- **Two-Section Organization**: Structured grouping into collapsible `▾ Installed Providers` and `▾ Games Library` sections.
+- **Multi-Viewport Presentation**: Seamless switching between 2:3 vertical Cover Art (SteamGridDB standard), 3.1:1 widescreen Hero Banners, and 1:1 Details icon lists.
+- **Storefront-First Discovery**: Automatically detects installed titles and native art from Steam, Epic Games, GOG Galaxy, Ubisoft Connect, EA App, Battle.net, Xbox/Game Pass, Itch.io, Amazon Games, and retro ROMs.
+- **Artwork Discovery Hub**: Companion Manager (`GameExplorerManager.exe`) featuring multi-provider visual search (SteamGridDB, Steam Store, IGDB, and internal Web search) with SafeSearch/NSFW unblock.
+- **Universal Achievements & Cloud Sync**: Live trophy cards with progress bars and automated OneDrive backup snapshots (`backups/`, `metadata/`, `art/`).
+
+---
+
+## 📚 Documentation
+
+Detailed user guides, engineering specifications, and customization references are available in the [`docs/`](./docs/README.md) folder:
+
+- **[Project Overview & Architecture](./docs/overview.md)** — Core design philosophy, system architecture, and supported platform breakdown.
+- **[Quick Start Guide](./docs/quick-start.md)** — Installation methods, navigation pane entry points, and first-time library setup.
+- **[Comprehensive User Guide](./docs/user-guide.md)** — Deep-dive manual for the Manager, Settings, Artwork Discovery, ROMs, and cloud sync.
+- **[Developer & Technical Reference](./docs/developer-guide.md)** — WinUI 3 XAML Islands internals, C++20 core engine, SQLite schema, build gates, and test suites.
+- **[Metadata & Customization Guide](./docs/metadata-customization.md)** — JSON schema specification for per-game overrides and manual imports.
+
+---
+
+## ⚡ Quick Start & Development
 
 ### Prerequisites
 - Windows 11 (Build 22000+)
-- Visual Studio 2022 / Build Tools (C++20 MSVC v143+)
+- Visual Studio 2022 / Build Tools (MSVC v143+ with C++20)
 - CMake 3.25+
 
-### Building Locally
+### Building & Testing
 ```powershell
-cmake -B build -S .
-cmake --build build --config Release
-```
+# Fast incremental build (/W4 /WX zero-warning gate)
+.\build.bat
 
-### Running Tests
-```powershell
-.\build\tests\Release\GameExplorerTests.exe
+# Run the 20-test automated C++ unit test suite
+pwsh -NoProfile -File scripts/test.ps1 -Configuration Release
+
+# Package installer and portable ZIP distributions
+.\release.bat
 ```
 
 ---
