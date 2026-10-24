@@ -111,6 +111,7 @@ bool Database::InitializeSchema() {
             cover_art_path TEXT,
             hero_art_path TEXT,
             icon_path TEXT,
+            details_art_path TEXT,
             developer TEXT,
             publisher TEXT,
             release_date TEXT,
@@ -133,6 +134,21 @@ bool Database::InitializeSchema() {
             key TEXT PRIMARY KEY,
             value TEXT NOT NULL
         );
+
+        CREATE TABLE IF NOT EXISTS achievements (
+            app_id TEXT NOT NULL,
+            achievement_id TEXT NOT NULL,
+            title TEXT NOT NULL,
+            description TEXT,
+            icon_unlocked TEXT,
+            icon_locked TEXT,
+            is_unlocked INTEGER NOT NULL DEFAULT 0,
+            unlock_timestamp INTEGER NOT NULL DEFAULT 0,
+            rarity REAL NOT NULL DEFAULT 0.0,
+            PRIMARY KEY (app_id, achievement_id)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_achievements_app_id ON achievements(app_id);
     )";
 
     char* errMsg = nullptr;
@@ -143,6 +159,9 @@ bool Database::InitializeSchema() {
         }
         return false;
     }
+
+    // Automated column migrations for existing databases
+    sqlite3_exec(m_db, "ALTER TABLE games ADD COLUMN details_art_path TEXT;", nullptr, nullptr, nullptr);
 
     return true;
 }
@@ -173,10 +192,10 @@ bool Database::UpsertGame(const GameItem& item) {
         INSERT INTO games (
             app_id, title, sort_title, platform, executable_path, launch_arguments,
             working_dir, install_path, launch_uri, cover_art_path, hero_art_path,
-            icon_path, developer, publisher, release_date, rating, synopsis,
+            icon_path, details_art_path, developer, publisher, release_date, rating, synopsis,
             official_website, store_page_url, is_installed, is_favorite,
             disk_size_bytes, playtime_minutes, last_played_timestamp
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(app_id) DO UPDATE SET
             title = excluded.title,
             sort_title = excluded.sort_title,
@@ -189,6 +208,7 @@ bool Database::UpsertGame(const GameItem& item) {
             cover_art_path = excluded.cover_art_path,
             hero_art_path = excluded.hero_art_path,
             icon_path = excluded.icon_path,
+            details_art_path = excluded.details_art_path,
             developer = excluded.developer,
             publisher = excluded.publisher,
             release_date = excluded.release_date,
@@ -219,6 +239,7 @@ bool Database::UpsertGame(const GameItem& item) {
     const std::string coverUtf8 = WideToUtf8(item.coverArtPath);
     const std::string heroUtf8 = WideToUtf8(item.heroArtPath);
     const std::string iconUtf8 = WideToUtf8(item.iconPath);
+    const std::string detailsUtf8 = WideToUtf8(item.detailsArtPath);
     const std::string devUtf8 = WideToUtf8(item.developer);
     const std::string pubUtf8 = WideToUtf8(item.publisher);
     const std::string relUtf8 = WideToUtf8(item.releaseDate);
@@ -239,18 +260,19 @@ bool Database::UpsertGame(const GameItem& item) {
     sqlite3_bind_text(stmt, 10, coverUtf8.c_str(), -1, SQLITE_TRANSIENT);
     sqlite3_bind_text(stmt, 11, heroUtf8.c_str(), -1, SQLITE_TRANSIENT);
     sqlite3_bind_text(stmt, 12, iconUtf8.c_str(), -1, SQLITE_TRANSIENT);
-    sqlite3_bind_text(stmt, 13, devUtf8.c_str(), -1, SQLITE_TRANSIENT);
-    sqlite3_bind_text(stmt, 14, pubUtf8.c_str(), -1, SQLITE_TRANSIENT);
-    sqlite3_bind_text(stmt, 15, relUtf8.c_str(), -1, SQLITE_TRANSIENT);
-    sqlite3_bind_text(stmt, 16, ratingUtf8.c_str(), -1, SQLITE_TRANSIENT);
-    sqlite3_bind_text(stmt, 17, synUtf8.c_str(), -1, SQLITE_TRANSIENT);
-    sqlite3_bind_text(stmt, 18, webUtf8.c_str(), -1, SQLITE_TRANSIENT);
-    sqlite3_bind_text(stmt, 19, storeUtf8.c_str(), -1, SQLITE_TRANSIENT);
-    sqlite3_bind_int(stmt, 20, item.isInstalled ? 1 : 0);
-    sqlite3_bind_int(stmt, 21, item.isFavorite ? 1 : 0);
-    sqlite3_bind_int64(stmt, 22, static_cast<sqlite3_int64>(item.diskSizeBytes));
-    sqlite3_bind_int(stmt, 23, static_cast<int>(item.playtimeMinutes));
-    sqlite3_bind_int64(stmt, 24, item.lastPlayedTimestamp);
+    sqlite3_bind_text(stmt, 13, detailsUtf8.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(stmt, 14, devUtf8.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(stmt, 15, pubUtf8.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(stmt, 16, relUtf8.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(stmt, 17, ratingUtf8.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(stmt, 18, synUtf8.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(stmt, 19, webUtf8.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(stmt, 20, storeUtf8.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_int(stmt, 21, item.isInstalled ? 1 : 0);
+    sqlite3_bind_int(stmt, 22, item.isFavorite ? 1 : 0);
+    sqlite3_bind_int64(stmt, 23, static_cast<sqlite3_int64>(item.diskSizeBytes));
+    sqlite3_bind_int(stmt, 24, static_cast<int>(item.playtimeMinutes));
+    sqlite3_bind_int64(stmt, 25, item.lastPlayedTimestamp);
 
     const int rc = sqlite3_step(stmt);
     sqlite3_finalize(stmt);
@@ -274,18 +296,19 @@ GameItem RowToGameItem(sqlite3_stmt* stmt) {
     item.coverArtPath = Utf8ToWide(reinterpret_cast<const char*>(sqlite3_column_text(stmt, 10)));
     item.heroArtPath = Utf8ToWide(reinterpret_cast<const char*>(sqlite3_column_text(stmt, 11)));
     item.iconPath = Utf8ToWide(reinterpret_cast<const char*>(sqlite3_column_text(stmt, 12)));
-    item.developer = Utf8ToWide(reinterpret_cast<const char*>(sqlite3_column_text(stmt, 13)));
-    item.publisher = Utf8ToWide(reinterpret_cast<const char*>(sqlite3_column_text(stmt, 14)));
-    item.releaseDate = Utf8ToWide(reinterpret_cast<const char*>(sqlite3_column_text(stmt, 15)));
-    item.rating = Utf8ToWide(reinterpret_cast<const char*>(sqlite3_column_text(stmt, 16)));
-    item.synopsis = Utf8ToWide(reinterpret_cast<const char*>(sqlite3_column_text(stmt, 17)));
-    item.officialWebsite = Utf8ToWide(reinterpret_cast<const char*>(sqlite3_column_text(stmt, 18)));
-    item.storePageUrl = Utf8ToWide(reinterpret_cast<const char*>(sqlite3_column_text(stmt, 19)));
-    item.isInstalled = (sqlite3_column_int(stmt, 20) != 0);
-    item.isFavorite = (sqlite3_column_int(stmt, 21) != 0);
-    item.diskSizeBytes = static_cast<uint64_t>(sqlite3_column_int64(stmt, 22));
-    item.playtimeMinutes = static_cast<uint32_t>(sqlite3_column_int(stmt, 23));
-    item.lastPlayedTimestamp = sqlite3_column_int64(stmt, 24);
+    item.detailsArtPath = Utf8ToWide(reinterpret_cast<const char*>(sqlite3_column_text(stmt, 13)));
+    item.developer = Utf8ToWide(reinterpret_cast<const char*>(sqlite3_column_text(stmt, 14)));
+    item.publisher = Utf8ToWide(reinterpret_cast<const char*>(sqlite3_column_text(stmt, 15)));
+    item.releaseDate = Utf8ToWide(reinterpret_cast<const char*>(sqlite3_column_text(stmt, 16)));
+    item.rating = Utf8ToWide(reinterpret_cast<const char*>(sqlite3_column_text(stmt, 17)));
+    item.synopsis = Utf8ToWide(reinterpret_cast<const char*>(sqlite3_column_text(stmt, 18)));
+    item.officialWebsite = Utf8ToWide(reinterpret_cast<const char*>(sqlite3_column_text(stmt, 19)));
+    item.storePageUrl = Utf8ToWide(reinterpret_cast<const char*>(sqlite3_column_text(stmt, 20)));
+    item.isInstalled = (sqlite3_column_int(stmt, 21) != 0);
+    item.isFavorite = (sqlite3_column_int(stmt, 22) != 0);
+    item.diskSizeBytes = static_cast<uint64_t>(sqlite3_column_int64(stmt, 23));
+    item.playtimeMinutes = static_cast<uint32_t>(sqlite3_column_int(stmt, 24));
+    item.lastPlayedTimestamp = sqlite3_column_int64(stmt, 25);
     return item;
 }
 
@@ -297,7 +320,7 @@ std::vector<GameItem> Database::GetAllGames() {
     if (m_db == nullptr) return results;
 
     const char* sql = "SELECT id, app_id, title, sort_title, platform, executable_path, launch_arguments, "
-                      "working_dir, install_path, launch_uri, cover_art_path, hero_art_path, icon_path, "
+                      "working_dir, install_path, launch_uri, cover_art_path, hero_art_path, icon_path, details_art_path, "
                       "developer, publisher, release_date, rating, synopsis, official_website, store_page_url, "
                       "is_installed, is_favorite, disk_size_bytes, playtime_minutes, last_played_timestamp "
                       "FROM games ORDER BY sort_title COLLATE NOCASE ASC;";
@@ -320,7 +343,7 @@ std::optional<GameItem> Database::GetGameById(int64_t id) {
     if (m_db == nullptr) return std::nullopt;
 
     const char* sql = "SELECT id, app_id, title, sort_title, platform, executable_path, launch_arguments, "
-                      "working_dir, install_path, launch_uri, cover_art_path, hero_art_path, icon_path, "
+                      "working_dir, install_path, launch_uri, cover_art_path, hero_art_path, icon_path, details_art_path, "
                       "developer, publisher, release_date, rating, synopsis, official_website, store_page_url, "
                       "is_installed, is_favorite, disk_size_bytes, playtime_minutes, last_played_timestamp "
                       "FROM games WHERE id = ? LIMIT 1;";
@@ -345,7 +368,7 @@ std::optional<GameItem> Database::GetGameByAppId(const std::wstring& appId) {
     if (m_db == nullptr) return std::nullopt;
 
     const char* sql = "SELECT id, app_id, title, sort_title, platform, executable_path, launch_arguments, "
-                      "working_dir, install_path, launch_uri, cover_art_path, hero_art_path, icon_path, "
+                      "working_dir, install_path, launch_uri, cover_art_path, hero_art_path, icon_path, details_art_path, "
                       "developer, publisher, release_date, rating, synopsis, official_website, store_page_url, "
                       "is_installed, is_favorite, disk_size_bytes, playtime_minutes, last_played_timestamp "
                       "FROM games WHERE app_id = ? LIMIT 1;";
@@ -459,6 +482,157 @@ std::optional<std::wstring> Database::GetSetting(const std::wstring& key) {
 
     sqlite3_finalize(stmt);
     return result;
+}
+
+bool Database::UpsertAchievements(const std::wstring& appId, const std::vector<AchievementItem>& achievements) {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    if (m_db == nullptr || appId.empty()) return false;
+
+    sqlite3_exec(m_db, "BEGIN IMMEDIATE;", nullptr, nullptr, nullptr);
+
+    const char* sql = R"(
+        INSERT INTO achievements (
+            app_id, achievement_id, title, description,
+            icon_unlocked, icon_locked, is_unlocked, unlock_timestamp, rarity
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(app_id, achievement_id) DO UPDATE SET
+            title = excluded.title,
+            description = excluded.description,
+            icon_unlocked = excluded.icon_unlocked,
+            icon_locked = excluded.icon_locked,
+            is_unlocked = excluded.is_unlocked,
+            unlock_timestamp = excluded.unlock_timestamp,
+            rarity = excluded.rarity;
+    )";
+
+    sqlite3_stmt* stmt = nullptr;
+    if (sqlite3_prepare_v2(m_db, sql, -1, &stmt, nullptr) != SQLITE_OK) {
+        sqlite3_exec(m_db, "ROLLBACK;", nullptr, nullptr, nullptr);
+        return false;
+    }
+
+    const std::string appIdUtf8 = WideToUtf8(appId);
+
+    for (const auto& ach : achievements) {
+        sqlite3_reset(stmt);
+        sqlite3_clear_bindings(stmt);
+
+        const std::string idUtf8 = WideToUtf8(ach.id);
+        const std::string titleUtf8 = WideToUtf8(ach.title);
+        const std::string descUtf8 = WideToUtf8(ach.description);
+        const std::string iconUnlockedUtf8 = WideToUtf8(ach.iconUnlockedUrl);
+        const std::string iconLockedUtf8 = WideToUtf8(ach.iconLockedUrl);
+
+        sqlite3_bind_text(stmt, 1, appIdUtf8.c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_bind_text(stmt, 2, idUtf8.c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_bind_text(stmt, 3, titleUtf8.c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_bind_text(stmt, 4, descUtf8.c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_bind_text(stmt, 5, iconUnlockedUtf8.c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_bind_text(stmt, 6, iconLockedUtf8.c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_bind_int(stmt, 7, ach.isUnlocked ? 1 : 0);
+        sqlite3_bind_int64(stmt, 8, static_cast<sqlite3_int64>(ach.unlockTimestamp));
+        sqlite3_bind_double(stmt, 9, static_cast<double>(ach.rarityPercentage));
+
+        if (sqlite3_step(stmt) != SQLITE_DONE) {
+            sqlite3_finalize(stmt);
+            sqlite3_exec(m_db, "ROLLBACK;", nullptr, nullptr, nullptr);
+            return false;
+        }
+    }
+
+    sqlite3_finalize(stmt);
+    sqlite3_exec(m_db, "COMMIT;", nullptr, nullptr, nullptr);
+    return true;
+}
+
+std::vector<AchievementItem> Database::GetAchievementsForGame(const std::wstring& appId) {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    std::vector<AchievementItem> results;
+    if (m_db == nullptr || appId.empty()) return results;
+
+    const char* sql = R"(
+        SELECT achievement_id, title, description, icon_unlocked, icon_locked,
+               is_unlocked, unlock_timestamp, rarity
+        FROM achievements
+        WHERE app_id = ?
+        ORDER BY is_unlocked DESC, unlock_timestamp DESC, title ASC;
+    )";
+
+    sqlite3_stmt* stmt = nullptr;
+    if (sqlite3_prepare_v2(m_db, sql, -1, &stmt, nullptr) != SQLITE_OK) {
+        return results;
+    }
+
+    const std::string appIdUtf8 = WideToUtf8(appId);
+    sqlite3_bind_text(stmt, 1, appIdUtf8.c_str(), -1, SQLITE_TRANSIENT);
+
+    while (sqlite3_step(stmt) == SQLITE_ROW) {
+        AchievementItem item;
+        item.gameAppId = appId;
+        item.id = Utf8ToWide(reinterpret_cast<const char*>(sqlite3_column_text(stmt, 0)));
+        item.title = Utf8ToWide(reinterpret_cast<const char*>(sqlite3_column_text(stmt, 1)));
+        item.description = Utf8ToWide(reinterpret_cast<const char*>(sqlite3_column_text(stmt, 2)));
+        item.iconUnlockedUrl = Utf8ToWide(reinterpret_cast<const char*>(sqlite3_column_text(stmt, 3)));
+        item.iconLockedUrl = Utf8ToWide(reinterpret_cast<const char*>(sqlite3_column_text(stmt, 4)));
+        item.isUnlocked = (sqlite3_column_int(stmt, 5) != 0);
+        item.unlockTimestamp = static_cast<uint64_t>(sqlite3_column_int64(stmt, 6));
+        item.rarityPercentage = static_cast<float>(sqlite3_column_double(stmt, 7));
+        results.push_back(std::move(item));
+    }
+
+    sqlite3_finalize(stmt);
+    return results;
+}
+
+GameAchievementProgress Database::GetAchievementProgress(const std::wstring& appId) {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    GameAchievementProgress progress{};
+    if (m_db == nullptr || appId.empty()) return progress;
+
+    const char* sql = R"(
+        SELECT COUNT(*),
+               SUM(CASE WHEN is_unlocked = 1 THEN 1 ELSE 0 END)
+        FROM achievements
+        WHERE app_id = ?;
+    )";
+
+    sqlite3_stmt* stmt = nullptr;
+    if (sqlite3_prepare_v2(m_db, sql, -1, &stmt, nullptr) != SQLITE_OK) {
+        return progress;
+    }
+
+    const std::string appIdUtf8 = WideToUtf8(appId);
+    sqlite3_bind_text(stmt, 1, appIdUtf8.c_str(), -1, SQLITE_TRANSIENT);
+
+    if (sqlite3_step(stmt) == SQLITE_ROW) {
+        progress.totalCount = sqlite3_column_int(stmt, 0);
+        progress.unlockedCount = sqlite3_column_int(stmt, 1);
+        if (progress.totalCount > 0) {
+            progress.completionPercentage = (static_cast<float>(progress.unlockedCount) /
+                                             static_cast<float>(progress.totalCount)) * 100.0f;
+        }
+    }
+
+    sqlite3_finalize(stmt);
+    return progress;
+}
+
+bool Database::DeleteAchievementsForGame(const std::wstring& appId) {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    if (m_db == nullptr || appId.empty()) return false;
+
+    const char* sql = "DELETE FROM achievements WHERE app_id = ?;";
+    sqlite3_stmt* stmt = nullptr;
+    if (sqlite3_prepare_v2(m_db, sql, -1, &stmt, nullptr) != SQLITE_OK) {
+        return false;
+    }
+
+    const std::string appIdUtf8 = WideToUtf8(appId);
+    sqlite3_bind_text(stmt, 1, appIdUtf8.c_str(), -1, SQLITE_TRANSIENT);
+
+    const int rc = sqlite3_step(stmt);
+    sqlite3_finalize(stmt);
+    return (rc == SQLITE_DONE);
 }
 
 } // namespace GameExplorer

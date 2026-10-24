@@ -44,7 +44,6 @@ enum class PlatformType : uint32_t {
     EAApp = 5,
     Xbox = 6,
     RetroArch = 7,
-    RPCS3 = 8,
     Dolphin = 9,
     CustomExecutable = 10,
     Itch = 11,
@@ -59,7 +58,17 @@ enum class PlatformType : uint32_t {
     Riot = 20,
     HoYoPlay = 21,
     Paradox = 22,
-    ESDE = 23
+    ESDE = 23,
+    Project64 = 24,
+    PCSX2 = 25,
+    DuckStation = 26,
+    PPSSPP = 27,
+    mGBA = 28,
+    Snes9x = 29,
+    melonDS = 30,
+    Citra = 31,
+    Flycast = 32,
+    RPCS3 = 33
 };
 
 [[nodiscard]] constexpr std::wstring_view PlatformToString(PlatformType platform) noexcept {
@@ -78,10 +87,28 @@ enum class PlatformType : uint32_t {
         return L"Xbox";
     case PlatformType::RetroArch:
         return L"RetroArch";
-    case PlatformType::RPCS3:
-        return L"RPCS3";
     case PlatformType::Dolphin:
         return L"Dolphin";
+    case PlatformType::Project64:
+        return L"Project64";
+    case PlatformType::PCSX2:
+        return L"PCSX2";
+    case PlatformType::DuckStation:
+        return L"DuckStation";
+    case PlatformType::PPSSPP:
+        return L"PPSSPP";
+    case PlatformType::mGBA:
+        return L"mGBA";
+    case PlatformType::Snes9x:
+        return L"Snes9x";
+    case PlatformType::melonDS:
+        return L"melonDS";
+    case PlatformType::Citra:
+        return L"Citra";
+    case PlatformType::Flycast:
+        return L"Flycast";
+    case PlatformType::RPCS3:
+        return L"RPCS3";
     case PlatformType::Itch:
         return L"itch.io";
     case PlatformType::SquareEnix:
@@ -136,8 +163,17 @@ enum class PlatformType : uint32_t {
     if (str == L"Paradox Launcher" || str == L"Paradox") return PlatformType::Paradox;
     if (str == L"ES-DE") return PlatformType::ESDE;
     if (str == L"RetroArch") return PlatformType::RetroArch;
-    if (str == L"RPCS3") return PlatformType::RPCS3;
     if (str == L"Dolphin") return PlatformType::Dolphin;
+    if (str == L"Project64") return PlatformType::Project64;
+    if (str == L"PCSX2") return PlatformType::PCSX2;
+    if (str == L"DuckStation") return PlatformType::DuckStation;
+    if (str == L"PPSSPP") return PlatformType::PPSSPP;
+    if (str == L"mGBA") return PlatformType::mGBA;
+    if (str == L"Snes9x") return PlatformType::Snes9x;
+    if (str == L"melonDS") return PlatformType::melonDS;
+    if (str == L"Citra") return PlatformType::Citra;
+    if (str == L"Flycast") return PlatformType::Flycast;
+    if (str == L"RPCS3") return PlatformType::RPCS3;
     if (str == L"Standalone" || str == L"Custom") return PlatformType::CustomExecutable;
     return PlatformType::Unknown;
 }

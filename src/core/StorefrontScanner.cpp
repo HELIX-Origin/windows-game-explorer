@@ -3,6 +3,7 @@
 #include "GameExplorerCore/Settings.h"
 #include "GameExplorerCore/Storage.h"
 #include "GameExplorerCore/Types.h"
+#include "GameExplorerCore/ImageValidator.h"
 #include "sqlite3.h"
 #include <windows.h>
 #include <shlwapi.h>
@@ -38,6 +39,35 @@ std::wstring Utf8ToWide(const char* utf8) {
     std::wstring wide(sizeNeeded - 1, 0);
     MultiByteToWideChar(CP_UTF8, 0, utf8, -1, wide.data(), sizeNeeded);
     return wide;
+}
+
+std::wstring UrlEncodeForCdn(const std::wstring& s) {
+    std::wstring out;
+    out.reserve(s.size() * 3);
+    for (wchar_t c : s) {
+        if (c == L' ') {
+            out += L"%20";
+        } else if (c == L'"') {
+            out += L"%22";
+        } else if (c == L',') {
+            out += L"%2C";
+        } else if (c == L'\'') {
+            out += L"%27";
+        } else if (c == L'&') {
+            out += L"%26";
+        } else if (c == L':') {
+            out += L"%3A";
+        } else if (c == L'+') {
+            out += L"%2B";
+        } else if (c == L'?') {
+            out += L"%3F";
+        } else if (c == L'=') {
+            out += L"%3D";
+        } else {
+            out += c;
+        }
+    }
+    return out;
 }
 
 std::wstring UnescapeJsonOrVdfString(const std::wstring& raw) {
@@ -125,7 +155,7 @@ std::wstring NormalizeDirKey(const std::wstring& dirPath) {
     return collapsed;
 }
 
-std::wstring CacheRemoteArtwork(const std::wstring& appId, const std::wstring& role, const std::wstring& url) {
+std::wstring CacheRemoteArtwork(const std::wstring& appId, const std::wstring& role, const std::wstring& url, bool forceOverwrite = false) {
     if (url.empty()) return L"";
     if (url.rfind(L"http://", 0) != 0 && url.rfind(L"https://", 0) != 0) {
         return url;
@@ -152,14 +182,12 @@ std::wstring CacheRemoteArtwork(const std::wstring& appId, const std::wstring& r
     }
 
     const fs::path localPath = artDir / (safeId + L"_" + role + ext);
-    if (fs::exists(localPath, ec) && fs::file_size(localPath, ec) > 64) {
+    if (!forceOverwrite && fs::exists(localPath, ec) && fs::file_size(localPath, ec) > 64) {
         return localPath.wstring();
     }
 
-    if (SUCCEEDED(URLDownloadToFileW(nullptr, url.c_str(), localPath.c_str(), 0, nullptr))) {
-        if (fs::exists(localPath, ec) && fs::file_size(localPath, ec) > 64) {
-            return localPath.wstring();
-        }
+    if (StorefrontScanner::DownloadRemoteFile(url, localPath.wstring())) {
+        return localPath.wstring();
     }
     return url;
 }
@@ -199,6 +227,78 @@ std::wstring GetSystemSteamApiLanguage() {
     if (loc.rfind(L"fi", 0) == 0) return L"finnish";
     if (loc.rfind(L"nb", 0) == 0 || loc.rfind(L"nn", 0) == 0 || loc.rfind(L"no", 0) == 0) return L"norwegian";
     return L"english";
+}
+
+static void ReplaceAllSubstrings(std::wstring& str, const std::wstring& from, const std::wstring& to) {
+    if (from.empty()) return;
+    size_t startPos = 0;
+    while ((startPos = str.find(from, startPos)) != std::wstring::npos) {
+        str.replace(startPos, from.length(), to);
+        startPos += to.length();
+    }
+}
+
+std::wstring SanitizeGameTextInternal(const std::wstring& input) {
+    std::wstring s = input;
+    if (s.empty()) return s;
+
+    // 1. HTML entities
+    ReplaceAllSubstrings(s, L"&amp;", L"&");
+    ReplaceAllSubstrings(s, L"&quot;", L"\"");
+    ReplaceAllSubstrings(s, L"&#39;", L"'");
+    ReplaceAllSubstrings(s, L"&apos;", L"'");
+    ReplaceAllSubstrings(s, L"&#x27;", L"'");
+    ReplaceAllSubstrings(s, L"&lt;", L"<");
+    ReplaceAllSubstrings(s, L"&gt;", L">");
+    ReplaceAllSubstrings(s, L"&nbsp;", L" ");
+    ReplaceAllSubstrings(s, L"&#8217;", L"'");
+    ReplaceAllSubstrings(s, L"&#8216;", L"'");
+    ReplaceAllSubstrings(s, L"&#8220;", L"\"");
+    ReplaceAllSubstrings(s, L"&#8221;", L"\"");
+    ReplaceAllSubstrings(s, L"&#8211;", L"–");
+    ReplaceAllSubstrings(s, L"&#8212;", L"—");
+    ReplaceAllSubstrings(s, L"&#8230;", L"...");
+
+    // 2. CP-1252 misinterpretations of UTF-8 byte sequences (mojibake)
+    ReplaceAllSubstrings(s, L"Ã¯Â¿Â½", L"'");
+    ReplaceAllSubstrings(s, L"ï¿½", L"'");
+    ReplaceAllSubstrings(s, L"\uFFFD", L"'");
+    ReplaceAllSubstrings(s, L"â€™", L"'");
+    ReplaceAllSubstrings(s, L"â€˜", L"'");
+    ReplaceAllSubstrings(s, L"â€œ", L"\"");
+    ReplaceAllSubstrings(s, L"â€\x9d", L"\"");
+    ReplaceAllSubstrings(s, L"â€“", L"–");
+    ReplaceAllSubstrings(s, L"â€”", L"—");
+    ReplaceAllSubstrings(s, L"â€¦", L"...");
+    ReplaceAllSubstrings(s, L"Â ", L" ");
+    ReplaceAllSubstrings(s, L"Â", L"");
+
+    // 3. Strip corrupted UTF-8 emoji byte artifacts (e.g. sequences starting with ðŸ)
+    size_t emojiPos = 0;
+    while ((emojiPos = s.find(L"ðŸ", emojiPos)) != std::wstring::npos) {
+        size_t len = 2;
+        if (emojiPos + 4 <= s.size()) len = 4;
+        else if (emojiPos + 3 <= s.size()) len = 3;
+        s.erase(emojiPos, len);
+    }
+
+    // 4. Normalize whitespace and trim
+    std::wstring clean;
+    clean.reserve(s.size());
+    bool prevSpace = false;
+    for (wchar_t ch : s) {
+        if (ch == L' ' || ch == L'\t' || ch == L'\r' || ch == L'\n') {
+            if (!prevSpace && !clean.empty()) {
+                clean.push_back(L' ');
+                prevSpace = true;
+            }
+        } else {
+            clean.push_back(ch);
+            prevSpace = false;
+        }
+    }
+    while (!clean.empty() && clean.back() == L' ') clean.pop_back();
+    return clean;
 }
 
 void EnrichFromExecutableVersionInfo(GameItem& item) {
@@ -279,17 +379,37 @@ uint64_t CalculateDirectoryDiskSize(const fs::path& dirPath) {
     return total;
 }
 
-std::string FetchHttpsUrlUtf8(const wchar_t* host, const std::wstring& path) {
+std::string RequestHttpsUtf8(
+    const wchar_t* host,
+    const std::wstring& path,
+    const wchar_t* verb = L"GET",
+    const std::wstring& headers = L"",
+    const std::string& postBody = ""
+) {
     std::string response;
-    HINTERNET hSession = WinHttpOpen(L"WindowsGameExplorer/2.0", WINHTTP_ACCESS_TYPE_DEFAULT_PROXY, WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
+    HINTERNET hSession = WinHttpOpen(GENERIC_CHROME_USER_AGENT, WINHTTP_ACCESS_TYPE_DEFAULT_PROXY, WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
     if (!hSession) return response;
 
-    WinHttpSetTimeouts(hSession, 1500, 1500, 2000, 2000);
+    DWORD redirectPolicy = WINHTTP_OPTION_REDIRECT_POLICY_ALWAYS;
+    WinHttpSetOption(hSession, WINHTTP_OPTION_REDIRECT_POLICY, &redirectPolicy, sizeof(redirectPolicy));
+
+    WinHttpSetTimeouts(hSession, 4000, 4000, 8000, 8000);
     HINTERNET hConnect = WinHttpConnect(hSession, host, INTERNET_DEFAULT_HTTPS_PORT, 0);
     if (hConnect) {
-        HINTERNET hRequest = WinHttpOpenRequest(hConnect, L"GET", path.c_str(), nullptr, WINHTTP_NO_REFERER, WINHTTP_DEFAULT_ACCEPT_TYPES, WINHTTP_FLAG_SECURE);
+        HINTERNET hRequest = WinHttpOpenRequest(hConnect, verb, path.c_str(), nullptr, WINHTTP_NO_REFERER, WINHTTP_DEFAULT_ACCEPT_TYPES, WINHTTP_FLAG_SECURE);
         if (hRequest) {
-            if (WinHttpSendRequest(hRequest, WINHTTP_NO_ADDITIONAL_HEADERS, 0, WINHTTP_NO_REQUEST_DATA, 0, 0, 0) &&
+            const std::wstring defaultHeaders =
+                L"User-Agent: " + std::wstring(GENERIC_CHROME_USER_AGENT) + L"\r\n"
+                L"Accept: text/html,application/xhtml+xml,application/xml;q=0.9,application/json,image/webp,*/*;q=0.8\r\n"
+                L"Accept-Language: en-US,en;q=0.9\r\n";
+            WinHttpAddRequestHeaders(hRequest, defaultHeaders.c_str(), static_cast<DWORD>(defaultHeaders.length()), WINHTTP_ADDREQ_FLAG_ADD | WINHTTP_ADDREQ_FLAG_REPLACE);
+
+            if (!headers.empty()) {
+                WinHttpAddRequestHeaders(hRequest, headers.c_str(), static_cast<DWORD>(headers.length()), WINHTTP_ADDREQ_FLAG_ADD | WINHTTP_ADDREQ_FLAG_REPLACE);
+            }
+            const void* postData = postBody.empty() ? WINHTTP_NO_REQUEST_DATA : postBody.data();
+            const DWORD postSize = static_cast<DWORD>(postBody.size());
+            if (WinHttpSendRequest(hRequest, WINHTTP_NO_ADDITIONAL_HEADERS, 0, const_cast<void*>(postData), postSize, postSize, 0) &&
                 WinHttpReceiveResponse(hRequest, nullptr)) {
                 DWORD dwSize = 0;
                 do {
@@ -308,6 +428,10 @@ std::string FetchHttpsUrlUtf8(const wchar_t* host, const std::wstring& path) {
     }
     WinHttpCloseHandle(hSession);
     return response;
+}
+
+std::string FetchHttpsUrlUtf8(const wchar_t* host, const std::wstring& path) {
+    return RequestHttpsUtf8(host, path, L"GET");
 }
 
 std::wstring ExtractJsonStringField(const std::wstring& json, const std::wstring& fieldKey, size_t startSearchPos = 0) {
@@ -448,6 +572,357 @@ void EnrichSteamMetadataFromStoreApi(const std::wstring& rawAppId, GameItem& ite
     }
 }
 
+void EnrichFromSteamGridDb(GameItem& item, const std::wstring& apiKey) {
+    if (apiKey.empty() || item.title.empty()) return;
+
+    const std::wstring authHeader = L"Authorization: Bearer " + apiKey + L"\r\n";
+    const std::wstring encTitle = UrlEncodeForCdn(item.title);
+    const std::string searchResp = RequestHttpsUtf8(
+        L"www.steamgriddb.com",
+        L"/api/v2/search/autocomplete/" + encTitle,
+        L"GET",
+        authHeader
+    );
+    if (searchResp.empty()) return;
+
+    const std::wstring searchJson = Utf8ToWide(searchResp.c_str());
+    const size_t dataPos = searchJson.find(L"\"data\":[");
+    if (dataPos == std::wstring::npos) return;
+    const size_t idPos = searchJson.find(L"\"id\":", dataPos);
+    if (idPos == std::wstring::npos) return;
+    size_t numStart = idPos + 5;
+    while (numStart < searchJson.size() && (searchJson[numStart] == L' ' || searchJson[numStart] == L'\t')) ++numStart;
+    size_t numEnd = numStart;
+    while (numEnd < searchJson.size() && iswdigit(searchJson[numEnd])) ++numEnd;
+    if (numEnd <= numStart) return;
+    const std::wstring sgdbId = searchJson.substr(numStart, numEnd - numStart);
+
+    // 1. Vertical Cover Art (SteamGridDB 600x900 standard)
+    const bool needsCover = item.coverArtPath.empty() || !ImageValidator::IsValidCover(item.coverArtPath);
+    if (needsCover) {
+        std::string gridResp = RequestHttpsUtf8(
+            L"www.steamgriddb.com",
+            L"/api/v2/grids/game/" + sgdbId + L"?dimensions=600x900",
+            L"GET",
+            authHeader
+        );
+        if (gridResp.empty() || gridResp.find("\"data\":[]") != std::string::npos) {
+            gridResp = RequestHttpsUtf8(
+                L"www.steamgriddb.com",
+                L"/api/v2/grids/game/" + sgdbId,
+                L"GET",
+                authHeader
+            );
+        }
+        if (!gridResp.empty()) {
+            const std::wstring gridJson = Utf8ToWide(gridResp.c_str());
+            const std::wstring gridUrl = ExtractJsonStringField(gridJson, L"url");
+            if (!gridUrl.empty()) {
+                if (item.detailsArtPath.empty() && !item.coverArtPath.empty()) {
+                    item.detailsArtPath = item.coverArtPath;
+                }
+                const std::wstring cachedCover = CacheRemoteArtwork(item.appId, L"cover", gridUrl);
+                if (!cachedCover.empty() && ImageValidator::IsValidCover(cachedCover)) {
+                    item.coverArtPath = cachedCover;
+                }
+            }
+        }
+    }
+
+    // 2. Widescreen Hero Banner (SteamGridDB 1920x620 / 3.1:1 standard)
+    const bool needsHero = item.heroArtPath.empty() || !ImageValidator::IsValidHero(item.heroArtPath);
+    if (needsHero) {
+        const std::string heroResp = RequestHttpsUtf8(
+            L"www.steamgriddb.com",
+            L"/api/v2/heroes/game/" + sgdbId,
+            L"GET",
+            authHeader
+        );
+        if (!heroResp.empty()) {
+            const std::wstring heroJson = Utf8ToWide(heroResp.c_str());
+            const std::wstring heroUrl = ExtractJsonStringField(heroJson, L"url");
+            if (!heroUrl.empty()) {
+                if (item.detailsArtPath.empty() && !item.heroArtPath.empty()) {
+                    item.detailsArtPath = item.heroArtPath;
+                }
+                const std::wstring cachedHero = CacheRemoteArtwork(item.appId, L"hero", heroUrl);
+                if (!cachedHero.empty() && ImageValidator::IsValidHero(cachedHero)) {
+                    item.heroArtPath = cachedHero;
+                }
+            }
+        }
+    }
+
+    // 3. Square Icon / Logo
+    if (item.iconPath.empty() || !ImageValidator::IsValidIcon(item.iconPath)) {
+        const std::string iconResp = RequestHttpsUtf8(
+            L"www.steamgriddb.com",
+            L"/api/v2/icons/game/" + sgdbId,
+            L"GET",
+            authHeader
+        );
+        if (!iconResp.empty()) {
+            const std::wstring iconJson = Utf8ToWide(iconResp.c_str());
+            const std::wstring iconUrl = ExtractJsonStringField(iconJson, L"url");
+            if (!iconUrl.empty()) {
+                const std::wstring cachedIcon = CacheRemoteArtwork(item.appId, L"icon", iconUrl);
+                if (!cachedIcon.empty() && ImageValidator::IsValidIcon(cachedIcon)) {
+                    item.iconPath = cachedIcon;
+                }
+            }
+        }
+    }
+}
+
+void EnrichFromIgdb(GameItem& item, const std::wstring& clientId, const std::wstring& clientSecret) {
+    if (clientId.empty() || clientSecret.empty() || item.title.empty()) return;
+
+    static std::wstring s_cachedToken;
+    static uint64_t s_tokenExpiry = 0;
+
+    const uint64_t now = GetTickCount64();
+    if (s_cachedToken.empty() || now >= s_tokenExpiry) {
+        const std::wstring tokenPath = L"/oauth2/token?client_id=" + clientId +
+            L"&client_secret=" + clientSecret + L"&grant_type=client_credentials";
+        const std::string tokenResp = RequestHttpsUtf8(
+            L"id.twitch.tv",
+            tokenPath,
+            L"POST"
+        );
+        if (tokenResp.empty()) return;
+        const std::wstring tokenJson = Utf8ToWide(tokenResp.c_str());
+        s_cachedToken = ExtractJsonStringField(tokenJson, L"access_token");
+        if (s_cachedToken.empty()) return;
+        s_tokenExpiry = now + 3600 * 1000;
+    }
+
+    const std::wstring headers = L"Client-ID: " + clientId + L"\r\nAuthorization: Bearer " + s_cachedToken + L"\r\nContent-Type: text/plain\r\n";
+    std::string safeTitle = WideToUtf8(item.title.c_str());
+    std::string escapedTitle;
+    for (char ch : safeTitle) {
+        if (ch == '"' || ch == '\\') escapedTitle.push_back('\\');
+        escapedTitle.push_back(ch);
+    }
+    const std::string igdbBody = "search \"" + escapedTitle + "\"; fields name,summary,storyline,first_release_date,involved_companies.company.name,involved_companies.developer,involved_companies.publisher,genres.name,cover.image_id; limit 1;";
+
+    const std::string gameResp = RequestHttpsUtf8(
+        L"api.igdb.com",
+        L"/v4/games",
+        L"POST",
+        headers,
+        igdbBody
+    );
+    if (gameResp.empty()) return;
+    const std::wstring gameJson = Utf8ToWide(gameResp.c_str());
+
+    // Synopsis
+    if (item.synopsis.empty()) {
+        std::wstring summary = ExtractJsonStringField(gameJson, L"summary");
+        if (summary.empty()) summary = ExtractJsonStringField(gameJson, L"storyline");
+        if (!summary.empty()) item.synopsis = summary;
+    }
+
+    // Release Date
+    if (item.releaseDate.empty()) {
+        const size_t relPos = gameJson.find(L"\"first_release_date\":");
+        if (relPos != std::wstring::npos) {
+            size_t numStart = relPos + 21;
+            while (numStart < gameJson.size() && (gameJson[numStart] == L' ' || gameJson[numStart] == L'\t')) ++numStart;
+            size_t numEnd = numStart;
+            while (numEnd < gameJson.size() && iswdigit(gameJson[numEnd])) ++numEnd;
+            if (numEnd > numStart) {
+                const __time64_t epoch = _wtoi64(gameJson.substr(numStart, numEnd - numStart).c_str());
+                if (epoch > 0) {
+                    struct tm tmTime{};
+                    if (_gmtime64_s(&tmTime, &epoch) == 0) {
+                        wchar_t dateBuf[64] = { 0 };
+                        wcsftime(dateBuf, sizeof(dateBuf) / sizeof(dateBuf[0]), L"%b %d, %Y", &tmTime);
+                        item.releaseDate = dateBuf;
+                    }
+                }
+            }
+        }
+    }
+
+    // Genres
+    if (item.genres.empty()) {
+        const size_t genresPos = gameJson.find(L"\"genres\":");
+        if (genresPos != std::wstring::npos) {
+            const size_t endGenres = gameJson.find(L']', genresPos);
+            if (endGenres != std::wstring::npos) {
+                std::wstring gList;
+                size_t searchCur = genresPos;
+                while (searchCur < endGenres) {
+                    const size_t namePos = gameJson.find(L"\"name\":", searchCur);
+                    if (namePos == std::wstring::npos || namePos >= endGenres) break;
+                    const std::wstring gName = ExtractJsonStringField(gameJson, L"name", namePos - 1);
+                    if (!gName.empty()) {
+                        if (!gList.empty()) gList += L", ";
+                        gList += gName;
+                    }
+                    searchCur = namePos + 7;
+                }
+                if (!gList.empty()) item.genres = gList;
+            }
+        }
+    }
+
+    // Companies (Developer & Publisher)
+    if (item.developer.empty() || item.publisher.empty()) {
+        const size_t compPos = gameJson.find(L"\"involved_companies\":");
+        if (compPos != std::wstring::npos) {
+            const size_t endComp = gameJson.find(L']', compPos);
+            if (endComp != std::wstring::npos) {
+                size_t cur = compPos;
+                while (cur < endComp) {
+                    const size_t objEnd = gameJson.find(L'}', cur);
+                    if (objEnd == std::wstring::npos || objEnd >= endComp) break;
+                    const std::wstring block = gameJson.substr(cur, objEnd - cur + 1);
+                    const std::wstring compName = ExtractJsonStringField(block, L"name");
+                    const bool isDev = (block.find(L"\"developer\":true") != std::wstring::npos);
+                    const bool isPub = (block.find(L"\"publisher\":true") != std::wstring::npos);
+                    if (isDev && item.developer.empty() && !compName.empty()) item.developer = compName;
+                    if (isPub && item.publisher.empty() && !compName.empty()) item.publisher = compName;
+                    cur = objEnd + 1;
+                }
+            }
+        }
+    }
+
+    // Cover Art (t_1080p high resolution)
+    if (item.coverArtPath.empty() || !ImageValidator::IsValidCover(item.coverArtPath)) {
+        const std::wstring imageId = ExtractJsonStringField(gameJson, L"image_id");
+        if (!imageId.empty()) {
+            if (item.detailsArtPath.empty() && !item.coverArtPath.empty()) {
+                item.detailsArtPath = item.coverArtPath;
+            }
+            const std::wstring igdbCoverUrl = L"https://images.igdb.com/igdb/image/upload/t_1080p/" + imageId + L".jpg";
+            const std::wstring cachedCover = CacheRemoteArtwork(item.appId, L"cover", igdbCoverUrl);
+            if (!cachedCover.empty() && ImageValidator::IsValidCover(cachedCover)) {
+                item.coverArtPath = cachedCover;
+            }
+        }
+    }
+}
+
+struct UbisoftConfigData {
+    std::wstring title;
+    std::wstring thumbHash;
+    std::wstring bgHash;
+    std::wstring iconHash;
+    std::wstring logoHash;
+    std::wstring relativeExe;
+};
+
+UbisoftConfigData ParseUbisoftConfig(const std::wstring& installId) {
+    UbisoftConfigData meta;
+    if (installId.empty()) return meta;
+
+    static std::string s_configContent;
+    static bool s_loaded = false;
+
+    if (!s_loaded) {
+        wchar_t localApp[MAX_PATH] = { 0 };
+        if (SUCCEEDED(SHGetFolderPathW(nullptr, CSIDL_LOCAL_APPDATA, nullptr, 0, localApp))) {
+            const fs::path cfgPath = fs::path(localApp) / L"Ubisoft Game Launcher" / L"cache" / L"configuration" / L"configurations";
+            std::ifstream file(cfgPath, std::ios::binary);
+            if (file.is_open()) {
+                file.seekg(0, std::ios::end);
+                const size_t sz = static_cast<size_t>(file.tellg());
+                file.seekg(0, std::ios::beg);
+                if (sz > 0 && sz < 50 * 1024 * 1024) {
+                    s_configContent.resize(sz);
+                    file.read(s_configContent.data(), static_cast<std::streamsize>(sz));
+                }
+            }
+        }
+        s_loaded = true;
+    }
+
+    if (s_configContent.empty()) return meta;
+
+    const std::string idStr = WideToUtf8(installId.c_str());
+    const std::string needle1 = "Installs\\" + idStr + "\\InstallDir";
+    const std::string needle2 = "Installs/" + idStr + "/InstallDir";
+    const std::string needle3 = "Installs\\\\" + idStr + "\\\\InstallDir";
+    const std::string needle4 = "Installs\\" + idStr;
+    const std::string needle5 = "Installs/" + idStr;
+
+    size_t pos = s_configContent.find(needle1);
+    if (pos == std::string::npos) pos = s_configContent.find(needle2);
+    if (pos == std::string::npos) pos = s_configContent.find(needle3);
+    if (pos == std::string::npos) pos = s_configContent.find(needle4);
+    if (pos == std::string::npos) pos = s_configContent.find(needle5);
+
+    if (pos == std::string::npos) return meta;
+
+    size_t docStart = s_configContent.rfind("version:", pos);
+    if (docStart == std::string::npos) {
+        docStart = (pos > 4000) ? pos - 4000 : 0;
+    }
+    size_t docEnd = s_configContent.find("version:", pos);
+    if (docEnd == std::string::npos) {
+        docEnd = s_configContent.size();
+    }
+
+    const std::string doc = s_configContent.substr(docStart, docEnd - docStart);
+
+    auto extractField = [&](const std::string& key) -> std::string {
+        size_t kPos = doc.find(key + ":");
+        if (kPos == std::string::npos) return "";
+        kPos += key.size() + 1;
+        while (kPos < doc.size() && (doc[kPos] == ' ' || doc[kPos] == '\t')) ++kPos;
+        size_t lineEnd = doc.find_first_of("\r\n", kPos);
+        if (lineEnd == std::string::npos) lineEnd = doc.size();
+        std::string val = doc.substr(kPos, lineEnd - kPos);
+        while (!val.empty() && (val.front() == ' ' || val.front() == '"' || val.front() == '\'')) val.erase(0, 1);
+        while (!val.empty() && (val.back() == ' ' || val.back() == '"' || val.back() == '\'')) val.pop_back();
+        return val;
+    };
+
+    const std::string displayName = extractField("display_name");
+    const std::string name = extractField("name");
+    const std::string titleStr = !displayName.empty() ? displayName : name;
+    if (!titleStr.empty()) {
+        const std::wstring wTitle = Utf8ToWide(titleStr.c_str());
+        std::wstring cleaned;
+        cleaned.reserve(wTitle.size());
+        for (wchar_t ch : wTitle) {
+            if (ch == L'\x2122' || ch == L'\x00AE' || ch == 0xFFFD) continue;
+            cleaned.push_back(ch);
+        }
+        while (!cleaned.empty() && cleaned.back() == L' ') cleaned.pop_back();
+        while (!cleaned.empty() && cleaned.front() == L' ') cleaned.erase(0, 1);
+        meta.title = cleaned;
+    }
+
+    const std::string bg = extractField("background_image");
+    const std::string th = extractField("thumb_image");
+    const std::string ic = extractField("icon_image");
+    const std::string lg = extractField("logo_image");
+
+    if (!bg.empty()) meta.bgHash = Utf8ToWide(bg.c_str());
+    if (!th.empty()) meta.thumbHash = Utf8ToWide(th.c_str());
+    if (!ic.empty()) meta.iconHash = Utf8ToWide(ic.c_str());
+    if (!lg.empty()) meta.logoHash = Utf8ToWide(lg.c_str());
+
+    size_t relPos = doc.find("relative:");
+    if (relPos != std::string::npos) {
+        relPos += 9;
+        while (relPos < doc.size() && (doc[relPos] == ' ' || doc[relPos] == '\t')) ++relPos;
+        size_t relEnd = doc.find_first_of("\r\n", relPos);
+        if (relEnd == std::string::npos) relEnd = doc.size();
+        std::string relVal = doc.substr(relPos, relEnd - relPos);
+        while (!relVal.empty() && (relVal.front() == ' ' || relVal.front() == '"' || relVal.front() == '\'')) relVal.erase(0, 1);
+        while (!relVal.empty() && (relVal.back() == ' ' || relVal.back() == '"' || relVal.back() == '\'')) relVal.pop_back();
+        if (!relVal.empty() && relVal.find(".exe") != std::string::npos) {
+            meta.relativeExe = Utf8ToWide(relVal.c_str());
+        }
+    }
+
+    return meta;
+}
+
 std::wstring ReadRegistryString(HKEY hRoot, const wchar_t* subKey, const wchar_t* valueName) {
     HKEY hKey = nullptr;
     if (RegOpenKeyExW(hRoot, subKey, 0, KEY_READ, &hKey) != ERROR_SUCCESS) {
@@ -532,6 +1007,549 @@ std::wstring CleanTitleFromFolderName(const std::wstring& folderName) {
 }
 
 } // namespace
+
+std::wstring StorefrontScanner::SanitizeGameText(const std::wstring& text) {
+    return SanitizeGameTextInternal(text);
+}
+
+std::wstring StorefrontScanner::CacheArtworkFromUrl(const std::wstring& appId, const std::wstring& slot, const std::wstring& url, bool forceOverwrite) {
+    return CacheRemoteArtwork(appId, slot, url, forceOverwrite);
+}
+
+bool StorefrontScanner::DownloadRemoteFile(const std::wstring& url, const std::wstring& destPath) {
+    if (url.empty() || destPath.empty()) return false;
+    if (url.rfind(L"http://", 0) != 0 && url.rfind(L"https://", 0) != 0) return false;
+
+    std::error_code ec;
+    const fs::path p(destPath);
+    if (p.has_parent_path()) {
+        fs::create_directories(p.parent_path(), ec);
+    }
+
+    UrlMkSetSessionOption(URLMON_OPTION_USERAGENT, const_cast<char*>(GENERIC_CHROME_USER_AGENT_A), static_cast<DWORD>(strlen(GENERIC_CHROME_USER_AGENT_A)), 0);
+
+    URL_COMPONENTSW urlComp{};
+    urlComp.dwStructSize = sizeof(urlComp);
+    wchar_t hostName[256] = { 0 };
+    wchar_t urlPath[2048] = { 0 };
+    urlComp.lpszHostName = hostName;
+    urlComp.dwHostNameLength = ARRAYSIZE(hostName);
+    urlComp.lpszUrlPath = urlPath;
+    urlComp.dwUrlPathLength = ARRAYSIZE(urlPath);
+
+    if (WinHttpCrackUrl(url.c_str(), static_cast<DWORD>(url.length()), 0, &urlComp)) {
+        HINTERNET hSession = WinHttpOpen(GENERIC_CHROME_USER_AGENT, WINHTTP_ACCESS_TYPE_DEFAULT_PROXY, WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
+        if (hSession) {
+            DWORD redirectPolicy = WINHTTP_OPTION_REDIRECT_POLICY_ALWAYS;
+            WinHttpSetOption(hSession, WINHTTP_OPTION_REDIRECT_POLICY, &redirectPolicy, sizeof(redirectPolicy));
+            WinHttpSetTimeouts(hSession, 5000, 5000, 10000, 10000);
+
+            const INTERNET_PORT port = (urlComp.nScheme == INTERNET_SCHEME_HTTPS) ? INTERNET_DEFAULT_HTTPS_PORT : INTERNET_DEFAULT_HTTP_PORT;
+            const DWORD reqFlags = (urlComp.nScheme == INTERNET_SCHEME_HTTPS) ? WINHTTP_FLAG_SECURE : 0;
+
+            HINTERNET hConnect = WinHttpConnect(hSession, hostName, port, 0);
+            if (hConnect) {
+                HINTERNET hRequest = WinHttpOpenRequest(hConnect, L"GET", urlPath, nullptr, WINHTTP_NO_REFERER, WINHTTP_DEFAULT_ACCEPT_TYPES, reqFlags);
+                if (hRequest) {
+                    const std::wstring reqHeaders =
+                        L"User-Agent: " + std::wstring(GENERIC_CHROME_USER_AGENT) + L"\r\n"
+                        L"Accept: image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8\r\n"
+                        L"Accept-Language: en-US,en;q=0.9\r\n";
+                    WinHttpAddRequestHeaders(hRequest, reqHeaders.c_str(), static_cast<DWORD>(reqHeaders.length()), WINHTTP_ADDREQ_FLAG_ADD | WINHTTP_ADDREQ_FLAG_REPLACE);
+
+                    if (WinHttpSendRequest(hRequest, WINHTTP_NO_ADDITIONAL_HEADERS, 0, WINHTTP_NO_REQUEST_DATA, 0, 0, 0) &&
+                        WinHttpReceiveResponse(hRequest, nullptr)) {
+                        DWORD statusCode = 0;
+                        DWORD statusSize = sizeof(statusCode);
+                        if (WinHttpQueryHeaders(hRequest, WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER, WINHTTP_HEADER_NAME_BY_INDEX, &statusCode, &statusSize, WINHTTP_NO_HEADER_INDEX) &&
+                            (statusCode >= 200 && statusCode < 300)) {
+                            std::ofstream outFile(destPath, std::ios::binary | std::ios::trunc);
+                            if (outFile.is_open()) {
+                                DWORD dwSize = 0;
+                                DWORD totalBytes = 0;
+                                do {
+                                    if (!WinHttpQueryDataAvailable(hRequest, &dwSize) || dwSize == 0) break;
+                                    std::vector<char> buffer(dwSize);
+                                    DWORD dwDownloaded = 0;
+                                    if (WinHttpReadData(hRequest, buffer.data(), dwSize, &dwDownloaded) && dwDownloaded > 0) {
+                                        outFile.write(buffer.data(), dwDownloaded);
+                                        totalBytes += dwDownloaded;
+                                    }
+                                } while (dwSize > 0);
+                                outFile.close();
+
+                                if (totalBytes > 64 && fs::exists(p, ec) && fs::file_size(p, ec) > 64) {
+                                    WinHttpCloseHandle(hRequest);
+                                    WinHttpCloseHandle(hConnect);
+                                    WinHttpCloseHandle(hSession);
+                                    return true;
+                                }
+                            }
+                        }
+                    }
+                    WinHttpCloseHandle(hRequest);
+                }
+                WinHttpCloseHandle(hConnect);
+            }
+            WinHttpCloseHandle(hSession);
+        }
+    }
+
+    if (SUCCEEDED(URLDownloadToFileW(nullptr, url.c_str(), destPath.c_str(), 0, nullptr))) {
+        if (fs::exists(p, ec) && fs::file_size(p, ec) > 64) {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool StorefrontScanner::ResetArtworkCache() {
+    std::error_code ec;
+    const fs::path artDir = Storage::GetArtPath();
+    if (fs::exists(artDir, ec)) {
+        for (const auto& entry : fs::recursive_directory_iterator(artDir, fs::directory_options::skip_permission_denied, ec)) {
+            if (entry.is_regular_file(ec)) {
+                SetFileAttributesW(entry.path().c_str(), FILE_ATTRIBUTE_NORMAL);
+                fs::remove(entry.path(), ec);
+            }
+        }
+        fs::remove_all(artDir, ec);
+    }
+    fs::create_directories(artDir, ec);
+    fs::create_directories(artDir / L"thumbs", ec);
+    return true;
+}
+
+std::vector<OnlineArtworkCandidate> StorefrontScanner::SearchOnlineArtwork(
+    const std::wstring& query,
+    const std::wstring& typeFilter,
+    const std::wstring& resFilter,
+    bool includeWebSearch,
+    bool disableSafeSearch
+) {
+    std::vector<OnlineArtworkCandidate> rawList;
+    if (query.empty()) return rawList;
+
+    const std::wstring cleanQuery = SanitizeGameText(query);
+    const std::wstring encQuery = UrlEncodeForCdn(cleanQuery);
+    const auto settings = SettingsManager::Load();
+
+    // 1. PRIMARY METADATA PROVIDER: SteamGridDB
+    if (!settings.steamGridDbApiKey.empty()) {
+        const std::wstring authHeader = L"Authorization: Bearer " + settings.steamGridDbApiKey + L"\r\n";
+        const std::string searchResp = RequestHttpsUtf8(
+            L"www.steamgriddb.com",
+            L"/api/v2/search/autocomplete/" + encQuery,
+            L"GET",
+            authHeader
+        );
+        if (!searchResp.empty()) {
+            const std::wstring searchJson = Utf8ToWide(searchResp.c_str());
+            const size_t dataPos = searchJson.find(L"\"data\":[");
+            if (dataPos != std::wstring::npos) {
+                const size_t idPos = searchJson.find(L"\"id\":", dataPos);
+                if (idPos != std::wstring::npos) {
+                    size_t numStart = idPos + 5;
+                    while (numStart < searchJson.size() && (searchJson[numStart] == L' ' || searchJson[numStart] == L'\t')) ++numStart;
+                    size_t numEnd = numStart;
+                    while (numEnd < searchJson.size() && iswdigit(searchJson[numEnd])) ++numEnd;
+                    if (numEnd > numStart) {
+                        const std::wstring sgdbId = searchJson.substr(numStart, numEnd - numStart);
+
+                        const std::wstring sgdbParams = disableSafeSearch ? L"?nsfw=any&humor=any" : L"?nsfw=false";
+
+                        // Grids / Covers (600x900)
+                        const std::string gridResp = RequestHttpsUtf8(
+                            L"www.steamgriddb.com",
+                            L"/api/v2/grids/game/" + sgdbId + sgdbParams,
+                            L"GET",
+                            authHeader
+                        );
+                        if (!gridResp.empty()) {
+                            const std::wstring gJson = Utf8ToWide(gridResp.c_str());
+                            size_t cur = 0;
+                            while (true) {
+                                size_t uPos = gJson.find(L"\"url\":", cur);
+                                if (uPos == std::wstring::npos) break;
+                                std::wstring u = ExtractJsonStringField(gJson, L"url", uPos - 1);
+                                std::wstring t = ExtractJsonStringField(gJson, L"thumb", uPos - 1);
+                                if (t.empty()) t = u;
+                                if (!u.empty()) {
+                                    OnlineArtworkCandidate c{};
+                                    c.highResUrl = u;
+                                    c.thumbUrl = t;
+                                    c.source = L"SteamGridDB";
+                                    c.type = L"Cover";
+                                    c.width = 600;
+                                    c.height = 900;
+                                    rawList.push_back(std::move(c));
+                                }
+                                cur = uPos + 6;
+                                if (rawList.size() >= 20) break;
+                            }
+                        }
+
+                        // Heroes (1920x620)
+                        const std::string heroResp = RequestHttpsUtf8(
+                            L"www.steamgriddb.com",
+                            L"/api/v2/heroes/game/" + sgdbId + sgdbParams,
+                            L"GET",
+                            authHeader
+                        );
+                        if (!heroResp.empty()) {
+                            const std::wstring hJson = Utf8ToWide(heroResp.c_str());
+                            size_t cur = 0;
+                            while (true) {
+                                size_t uPos = hJson.find(L"\"url\":", cur);
+                                if (uPos == std::wstring::npos) break;
+                                std::wstring u = ExtractJsonStringField(hJson, L"url", uPos - 1);
+                                std::wstring t = ExtractJsonStringField(hJson, L"thumb", uPos - 1);
+                                if (t.empty()) t = u;
+                                if (!u.empty()) {
+                                    OnlineArtworkCandidate c{};
+                                    c.highResUrl = u;
+                                    c.thumbUrl = t;
+                                    c.source = L"SteamGridDB";
+                                    c.type = L"Hero";
+                                    c.width = 1920;
+                                    c.height = 620;
+                                    rawList.push_back(std::move(c));
+                                }
+                                cur = uPos + 6;
+                                if (rawList.size() >= 35) break;
+                            }
+                        }
+
+                        // Icons (256x256)
+                        const std::string iconResp = RequestHttpsUtf8(
+                            L"www.steamgriddb.com",
+                            L"/api/v2/icons/game/" + sgdbId + sgdbParams,
+                            L"GET",
+                            authHeader
+                        );
+                        if (!iconResp.empty()) {
+                            const std::wstring iJson = Utf8ToWide(iconResp.c_str());
+                            size_t cur = 0;
+                            while (true) {
+                                size_t uPos = iJson.find(L"\"url\":", cur);
+                                if (uPos == std::wstring::npos) break;
+                                std::wstring u = ExtractJsonStringField(iJson, L"url", uPos - 1);
+                                std::wstring t = ExtractJsonStringField(iJson, L"thumb", uPos - 1);
+                                if (t.empty()) t = u;
+                                if (!u.empty()) {
+                                    OnlineArtworkCandidate c{};
+                                    c.highResUrl = u;
+                                    c.thumbUrl = t;
+                                    c.source = L"SteamGridDB";
+                                    c.type = L"Icon";
+                                    c.width = 256;
+                                    c.height = 256;
+                                    rawList.push_back(std::move(c));
+                                }
+                                cur = uPos + 6;
+                                if (rawList.size() >= 45) break;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // 2. PRIMARY METADATA PROVIDER: IGDB
+    if (!settings.igdbClientId.empty() && !settings.igdbClientSecret.empty()) {
+        static std::wstring s_cachedToken;
+        static uint64_t s_tokenExpiry = 0;
+        const uint64_t now = GetTickCount64();
+        if (s_cachedToken.empty() || now >= s_tokenExpiry) {
+            const std::wstring tokenPath = L"/oauth2/token?client_id=" + settings.igdbClientId +
+                L"&client_secret=" + settings.igdbClientSecret + L"&grant_type=client_credentials";
+            const std::string tokenResp = RequestHttpsUtf8(L"id.twitch.tv", tokenPath, L"POST");
+            if (!tokenResp.empty()) {
+                const std::wstring tokenJson = Utf8ToWide(tokenResp.c_str());
+                s_cachedToken = ExtractJsonStringField(tokenJson, L"access_token");
+                if (!s_cachedToken.empty()) s_tokenExpiry = now + 3600 * 1000;
+            }
+        }
+        if (!s_cachedToken.empty()) {
+            const std::wstring headers = L"Client-ID: " + settings.igdbClientId + L"\r\nAuthorization: Bearer " + s_cachedToken + L"\r\nContent-Type: text/plain\r\n";
+            std::string safeTitle = WideToUtf8(cleanQuery.c_str());
+            std::string escapedTitle;
+            for (char ch : safeTitle) {
+                if (ch == '"' || ch == '\\') escapedTitle.push_back('\\');
+                escapedTitle.push_back(ch);
+            }
+            const std::string igdbBody = "search \"" + escapedTitle + "\"; fields name,cover.image_id,artworks.image_id,screenshots.image_id; limit 3;";
+            const std::string gameResp = RequestHttpsUtf8(L"api.igdb.com", L"/v4/games", L"POST", headers, igdbBody);
+            if (!gameResp.empty()) {
+                const std::wstring gJson = Utf8ToWide(gameResp.c_str());
+                size_t cur = 0;
+                while (true) {
+                    size_t imgPos = gJson.find(L"\"image_id\":", cur);
+                    if (imgPos == std::wstring::npos) break;
+                    std::wstring imgId = ExtractJsonStringField(gJson, L"image_id", imgPos - 1);
+                    if (!imgId.empty()) {
+                        OnlineArtworkCandidate c{};
+                        c.highResUrl = L"https://images.igdb.com/igdb/image/upload/t_1080p/" + imgId + L".jpg";
+                        c.thumbUrl = L"https://images.igdb.com/igdb/image/upload/t_cover_big/" + imgId + L".jpg";
+                        c.source = L"IGDB";
+                        c.type = (imgPos < gJson.find(L"\"artworks\":", cur)) ? L"Cover" : L"Hero";
+                        c.width = (c.type == L"Cover") ? 1080 : 1920;
+                        c.height = (c.type == L"Cover") ? 1440 : 1080;
+                        rawList.push_back(std::move(c));
+                    }
+                    cur = imgPos + 10;
+                    if (rawList.size() >= 60) break;
+                }
+            }
+        }
+    }
+
+    // 3. KEYLESS FREE PROVIDER: Steam Store Search & Official Steam CDN Assets
+    {
+        const std::wstring steamHeaders = disableSafeSearch ? L"Cookie: birthtime=283993201; mature_content=1; lastagecheckage=1-0-1990\r\n" : L"";
+        const std::string searchJsonUtf8 = RequestHttpsUtf8(
+            L"store.steampowered.com",
+            L"/api/storesearch/?term=" + encQuery + L"&l=english&cc=US",
+            L"GET",
+            steamHeaders
+        );
+        if (!searchJsonUtf8.empty()) {
+            const std::wstring sJson = Utf8ToWide(searchJsonUtf8.c_str());
+            size_t sCur = 0;
+            int foundSteam = 0;
+            while (foundSteam < 3) {
+                size_t idPos = sJson.find(L"\"id\":", sCur);
+                if (idPos == std::wstring::npos) break;
+                size_t nStart = idPos + 5;
+                while (nStart < sJson.size() && (sJson[nStart] == L' ' || sJson[nStart] == L'\t')) ++nStart;
+                size_t nEnd = nStart;
+                while (nEnd < sJson.size() && iswdigit(sJson[nEnd])) ++nEnd;
+                if (nEnd > nStart) {
+                    const std::wstring stAppId = sJson.substr(nStart, nEnd - nStart);
+                    foundSteam++;
+
+                    // 600x900 Vertical Box Art
+                    {
+                        OnlineArtworkCandidate c{};
+                        c.highResUrl = L"https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/" + stAppId + L"/library_600x900.jpg";
+                        c.thumbUrl = c.highResUrl;
+                        c.source = L"Steam Store";
+                        c.type = L"Cover";
+                        c.width = 600;
+                        c.height = 900;
+                        rawList.push_back(std::move(c));
+                    }
+                    // 1920x620 Widescreen Hero Banner
+                    {
+                        OnlineArtworkCandidate c{};
+                        c.highResUrl = L"https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/" + stAppId + L"/library_hero.jpg";
+                        c.thumbUrl = c.highResUrl;
+                        c.source = L"Steam Store";
+                        c.type = L"Hero";
+                        c.width = 1920;
+                        c.height = 620;
+                        rawList.push_back(std::move(c));
+                    }
+                    // Logo / Icon
+                    {
+                        OnlineArtworkCandidate c{};
+                        c.highResUrl = L"https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/" + stAppId + L"/logo.png";
+                        c.thumbUrl = c.highResUrl;
+                        c.source = L"Steam Store";
+                        c.type = L"Icon";
+                        c.width = 512;
+                        c.height = 512;
+                        rawList.push_back(std::move(c));
+                    }
+                    // Details Capsule Header
+                    {
+                        OnlineArtworkCandidate c{};
+                        c.highResUrl = L"https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/" + stAppId + L"/header.jpg";
+                        c.thumbUrl = c.highResUrl;
+                        c.source = L"Steam Store";
+                        c.type = L"Details";
+                        c.width = 460;
+                        c.height = 215;
+                        rawList.push_back(std::move(c));
+                    }
+                    // Query appdetails for official 1080p screenshots
+                    const std::string detailsUtf8 = FetchHttpsUrlUtf8(
+                        L"store.steampowered.com",
+                        L"/api/appdetails?appids=" + stAppId
+                    );
+                    if (!detailsUtf8.empty()) {
+                        const std::wstring dJson = Utf8ToWide(detailsUtf8.c_str());
+                        size_t dCur = 0;
+                        int sCount = 0;
+                        while (sCount < 4) {
+                            size_t ssPos = dJson.find(L"\"path_full\":", dCur);
+                            if (ssPos == std::wstring::npos) break;
+                            std::wstring fullPath = ExtractJsonStringField(dJson, L"path_full", ssPos - 1);
+                            std::wstring thumbPath = ExtractJsonStringField(dJson, L"path_thumbnail", ssPos - 1);
+                            if (thumbPath.empty()) thumbPath = fullPath;
+                            if (!fullPath.empty()) {
+                                OnlineArtworkCandidate sc{};
+                                sc.highResUrl = fullPath;
+                                sc.thumbUrl = thumbPath;
+                                sc.source = L"Steam Store";
+                                sc.type = L"Hero";
+                                sc.width = 1920;
+                                sc.height = 1080;
+                                rawList.push_back(std::move(sc));
+                                sCount++;
+                            }
+                            dCur = ssPos + 11;
+                        }
+                    }
+                }
+                sCur = (nEnd > idPos) ? nEnd : (idPos + 5);
+            }
+        }
+    }
+
+    // 4. SUPPLEMENTAL WEB SEARCH & PATREON MEDIA DISCOVERY (when includeWebSearch is requested or typeFilter is Patreon)
+    if (includeWebSearch || typeFilter == L"Patreon") {
+        // Build keyword query: "{{game.title}}" {{content.type}}
+        std::wstring titleTerm = cleanQuery;
+        if (titleTerm.empty() || titleTerm.front() != L'"') {
+            titleTerm = L"\"" + titleTerm + L"\"";
+        }
+        std::wstring typeTerm = L"game artwork";
+        if (typeFilter == L"Cover") typeTerm = L"box art cover";
+        else if (typeFilter == L"Hero") typeTerm = L"hero banner wallpaper";
+        else if (typeFilter == L"Patreon") typeTerm = L"patreon campaign art";
+        else if (typeFilter == L"Icon") typeTerm = L"icon logo";
+        else if (typeFilter == L"Details") typeTerm = L"screenshot wallpaper";
+
+        const std::wstring rawSearchQuery = titleTerm + L" " + typeTerm;
+        const std::wstring encSearchQuery = UrlEncodeForCdn(rawSearchQuery);
+
+        std::wstring bingPath = L"/images/async?q=" + encSearchQuery + L"&count=40&first=0";
+        std::wstring bingHeaders = L"User-Agent: " + std::wstring(GENERIC_CHROME_USER_AGENT) + L"\r\n";
+        if (disableSafeSearch) {
+            bingPath += L"&adlt=off";
+            bingHeaders += L"Cookie: SRCHHPGUSR=ADLT=OFF; srh_adlt=off\r\n";
+        }
+        const std::string bingHtml = RequestHttpsUtf8(
+            L"www.bing.com",
+            bingPath,
+            L"GET",
+            bingHeaders
+        );
+        if (!bingHtml.empty()) {
+            const std::wstring bWide = Utf8ToWide(bingHtml.c_str());
+            size_t bCur = 0;
+            while (true) {
+                size_t murlPos = bWide.find(L"murl&quot;:&quot;", bCur);
+                if (murlPos == std::wstring::npos) {
+                    murlPos = bWide.find(L"\"murl\":\"", bCur);
+                    if (murlPos == std::wstring::npos) break;
+                    murlPos += 8;
+                } else {
+                    murlPos += 17;
+                }
+                size_t murlEnd = bWide.find(L'&', murlPos);
+                size_t murlQuote = bWide.find(L'"', murlPos);
+                if (murlQuote < murlEnd) murlEnd = murlQuote;
+                if (murlEnd == std::wstring::npos) break;
+                std::wstring murl = bWide.substr(murlPos, murlEnd - murlPos);
+
+                // Thumbnail url
+                std::wstring turl = murl;
+                size_t turlPos = bWide.find(L"turl&quot;:&quot;", bCur);
+                if (turlPos != std::wstring::npos && turlPos < murlEnd + 300) {
+                    turlPos += 17;
+                    size_t turlEnd = bWide.find(L'&', turlPos);
+                    size_t turlQ = bWide.find(L'"', turlPos);
+                    if (turlQ < turlEnd) turlEnd = turlQ;
+                    if (turlEnd != std::wstring::npos) {
+                        turl = bWide.substr(turlPos, turlEnd - turlPos);
+                    }
+                }
+
+                // Width and Height
+                int imgW = 0, imgH = 0;
+                size_t wPos = bWide.find(L"&quot;w&quot;:", bCur);
+                if (wPos != std::wstring::npos && wPos < murlEnd + 300) {
+                    imgW = _wtoi(bWide.c_str() + wPos + 14);
+                }
+                size_t hPos = bWide.find(L"&quot;h&quot;:", bCur);
+                if (hPos != std::wstring::npos && hPos < murlEnd + 300) {
+                    imgH = _wtoi(bWide.c_str() + hPos + 14);
+                }
+
+                if (!murl.empty() && (murl.rfind(L"http://", 0) == 0 || murl.rfind(L"https://", 0) == 0)) {
+                    OnlineArtworkCandidate c{};
+                    c.highResUrl = murl;
+                    c.thumbUrl = turl;
+                    c.width = imgW;
+                    c.height = imgH;
+
+                    // Detect Patreon campaign media
+                    if (murl.find(L"patreonusercontent.com") != std::wstring::npos || murl.find(L"patreon.com") != std::wstring::npos) {
+                        c.source = L"Patreon";
+                    } else {
+                        c.source = L"Web (Bing)";
+                    }
+
+                    // Classify candidate by aspect ratio
+                    if (imgW > 0 && imgH > 0) {
+                        const double r = static_cast<double>(imgW) / imgH;
+                        if (r <= 0.85) c.type = L"Cover";
+                        else if (r >= 1.30) c.type = L"Hero";
+                        else c.type = L"Icon";
+                    } else {
+                        c.type = L"Cover";
+                    }
+
+                    rawList.push_back(std::move(c));
+                }
+                bCur = murlEnd + 1;
+                if (rawList.size() >= 80) break;
+            }
+        }
+    }
+
+    // Deduplicate candidates by highResUrl
+    std::vector<OnlineArtworkCandidate> deduped;
+    std::set<std::wstring> seenUrls;
+    for (auto& item : rawList) {
+        if (seenUrls.insert(item.highResUrl).second) {
+            deduped.push_back(std::move(item));
+        }
+    }
+
+    // Filter by typeFilter and resFilter
+    std::vector<OnlineArtworkCandidate> filtered;
+    for (auto& item : deduped) {
+        if (typeFilter != L"All" && !typeFilter.empty()) {
+            if (typeFilter == L"Cover" && item.type != L"Cover") continue;
+            if (typeFilter == L"Hero" && item.type != L"Hero") continue;
+            if (typeFilter == L"Icon" && item.type != L"Icon") continue;
+            if (typeFilter == L"Details" && item.type != L"Details" && item.type != L"Hero") continue;
+            if (typeFilter == L"Patreon" && item.source != L"Patreon" && item.highResUrl.find(L"patreon") == std::wstring::npos) continue;
+        }
+
+        if (resFilter != L"All" && !resFilter.empty()) {
+            if (resFilter == L"600x900") {
+                if (!(item.width == 600 && item.height == 900) && !(item.type == L"Cover" && item.width >= 500)) continue;
+            } else if (resFilter == L"300x450") {
+                if (!(item.type == L"Cover" && item.width < 500)) continue;
+            } else if (resFilter == L"1920x620") {
+                if (!(item.width == 1920 && item.height == 620) && !(item.type == L"Hero" && (item.height > 0 && static_cast<double>(item.width)/item.height >= 2.5))) continue;
+            } else if (resFilter == L"1920x1080") {
+                if (!(item.width == 1920 && item.height == 1080) && !(item.type == L"Hero" && (item.height > 0 && static_cast<double>(item.width)/item.height < 2.2 && static_cast<double>(item.width)/item.height >= 1.5))) continue;
+            } else if (resFilter == L"256x256+") {
+                if (item.type != L"Icon" && (item.width < 256 || item.height == 0 || static_cast<double>(item.width)/item.height < 0.75 || static_cast<double>(item.width)/item.height > 1.33)) continue;
+            }
+        }
+
+        filtered.push_back(std::move(item));
+    }
+
+    return filtered;
+}
 
 bool StorefrontScanner::IsBlacklistedExecutable(const std::wstring& filename) {
     std::wstring lower = filename;
@@ -623,6 +1641,11 @@ size_t StorefrontScanner::ScanAll(Database& db) {
         }
     }
     db.CommitTransaction();
+
+    const auto settings = SettingsManager::Load();
+    if (settings.enableOneDriveBackup) {
+        Storage::SyncToOneDrive();
+    }
 
     return total;
 }
@@ -721,9 +1744,6 @@ void StorefrontScanner::DiscoverSteamGridArtwork(
         if (outIcon.empty()) {
             const fs::path logoPng = libCacheDir / L"logo.png";
             if (fs::exists(logoPng)) outIcon = logoPng.wstring();
-        }
-        if (outCover.empty() && !outHero.empty()) {
-            outCover = outHero;
         }
     }
 
@@ -969,9 +1989,32 @@ std::vector<GameItem> StorefrontScanner::ScanItch() {
                             item.launchUri = L"";
 
                             std::wstring coverUrl = Utf8ToWide(coverUrlUtf8);
-                            if (coverUrl.empty()) coverUrl = Utf8ToWide(stillCoverUtf8);
-                            if (!coverUrl.empty()) {
+                            std::wstring stillCoverUrl = Utf8ToWide(stillCoverUtf8);
+
+                            // Cache static cover if available (e.g. clean 315x250 PNG without GIF watermark/animation)
+                            std::wstring staticCoverPath;
+                            if (!stillCoverUrl.empty()) {
+                                staticCoverPath = CacheRemoteArtwork(item.appId, L"static_cover", stillCoverUrl);
+                                item.detailsArtPath = staticCoverPath;
+                            }
+
+                            // If coverUrl is an animated gif or empty, prioritize static cover
+                            auto isGif = [](const std::wstring& u) {
+                                std::wstring lower = u;
+                                std::transform(lower.begin(), lower.end(), lower.begin(), ::towlower);
+                                return lower.find(L".gif") != std::wstring::npos;
+                            };
+
+                            if (!staticCoverPath.empty() && (coverUrl.empty() || isGif(coverUrl))) {
+                                item.coverArtPath = staticCoverPath;
+                            } else if (!coverUrl.empty()) {
                                 item.coverArtPath = CacheRemoteArtwork(item.appId, L"cover", coverUrl);
+                            } else if (!staticCoverPath.empty()) {
+                                item.coverArtPath = staticCoverPath;
+                            }
+
+                            if (!staticCoverPath.empty()) {
+                                item.heroArtPath = staticCoverPath;
                             }
 
                             LoadPerGameMetadata(item);
@@ -1519,20 +2562,82 @@ std::vector<GameItem> StorefrontScanner::ScanUbisoft() {
             while (RegEnumKeyExW(hKey, idx, name, &nameLen, nullptr, nullptr, nullptr, nullptr) == ERROR_SUCCESS) {
                 const std::wstring itemSubKey = std::wstring(subKey) + L"\\" + name;
                 std::wstring installDir = ReadRegistryString(root, itemSubKey.c_str(), L"InstallDir");
+                if (!installDir.empty()) {
+                    while (!installDir.empty() && (installDir.back() == L'/' || installDir.back() == L'\\')) {
+                        installDir.pop_back();
+                    }
+                    std::replace(installDir.begin(), installDir.end(), L'/', L'\\');
+                }
+
                 if (!installDir.empty() && fs::exists(installDir)) {
                     std::wstring lower = installDir;
                     std::transform(lower.begin(), lower.end(), lower.begin(), ::towlower);
                     if (seenDirs.insert(lower).second) {
-                        const auto exe = FindPrimaryGameExecutable(installDir);
+                        fs::path exe = FindPrimaryGameExecutable(installDir);
+
+                        // Query official DisplayName from Windows Uninstall registry if present
+                        std::wstring gameTitle;
+                        const std::wstring uninstKey32 = L"SOFTWARE\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\Uplay Install " + std::wstring(name);
+                        gameTitle = ReadRegistryString(HKEY_LOCAL_MACHINE, uninstKey32.c_str(), L"DisplayName");
+                        if (gameTitle.empty()) {
+                            const std::wstring uninstKey64 = L"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\Uplay Install " + std::wstring(name);
+                            gameTitle = ReadRegistryString(HKEY_LOCAL_MACHINE, uninstKey64.c_str(), L"DisplayName");
+                        }
+                        if (gameTitle.empty()) {
+                            gameTitle = fs::path(installDir).filename().wstring();
+                        }
+
+                        // Query Ubisoft Connect native configuration data & CDN assets
+                        const auto ubiCfg = ParseUbisoftConfig(name);
+                        if (!ubiCfg.title.empty()) {
+                            gameTitle = ubiCfg.title;
+                        }
+                        if (exe.empty() && !ubiCfg.relativeExe.empty()) {
+                            const fs::path cand = fs::path(installDir) / ubiCfg.relativeExe;
+                            if (fs::exists(cand)) {
+                                exe = cand;
+                            }
+                        }
+
                         GameItem item{};
                         item.appId = L"uplay_" + std::wstring(name);
-                        item.title = fs::path(installDir).filename().wstring();
+                        item.title = gameTitle;
+                        item.sortTitle = gameTitle;
                         item.platform = PlatformType::Ubisoft;
+                        item.developer = L"Ubisoft";
+                        item.publisher = L"Ubisoft";
                         item.workingDirectory = installDir;
                         if (!exe.empty()) {
                             item.executablePath = exe.wstring();
                         }
                         item.launchUri = L"uplay://launch/" + std::wstring(name) + L"/0";
+
+                        // Official native Ubisoft box art & hero art via Ubisoft Connect CDN
+                        if (!ubiCfg.thumbHash.empty()) {
+                            const std::wstring cdnCover = L"https://static3.cdn.ubi.com/orbit/uplay_launcher_3_0/assets/" + ubiCfg.thumbHash;
+                            item.detailsArtPath = CacheRemoteArtwork(item.appId, L"thumb", cdnCover);
+                        }
+                        if (!ubiCfg.bgHash.empty()) {
+                            const std::wstring cdnHero = L"https://static3.cdn.ubi.com/orbit/uplay_launcher_3_0/assets/" + ubiCfg.bgHash;
+                            item.heroArtPath = CacheRemoteArtwork(item.appId, L"hero", cdnHero);
+                        }
+                        if (!ubiCfg.iconHash.empty()) {
+                            std::wstring ubiLauncherDir = ReadRegistryString(HKEY_LOCAL_MACHINE, L"SOFTWARE\\WOW6432Node\\Ubisoft\\Launcher", L"InstallDir");
+                            if (ubiLauncherDir.empty()) {
+                                ubiLauncherDir = ReadRegistryString(HKEY_LOCAL_MACHINE, L"SOFTWARE\\Ubisoft\\Launcher", L"InstallDir");
+                            }
+                            const fs::path localIco = fs::path(ubiLauncherDir) / L"data" / ubiCfg.iconHash;
+                            if (fs::exists(localIco)) {
+                                item.iconPath = localIco.wstring();
+                            } else {
+                                const std::wstring cdnIco = L"https://static3.cdn.ubi.com/orbit/uplay_launcher_3_0/assets/" + ubiCfg.iconHash;
+                                item.iconPath = CacheRemoteArtwork(item.appId, L"icon", cdnIco);
+                            }
+                        }
+
+                        LoadPerGameMetadata(item);
+                        EnrichNonSteamGameMetadata(item);
+                        SavePerGameMetadata(item);
                         games.push_back(std::move(item));
                     }
                 }
@@ -1550,9 +2655,13 @@ std::vector<GameItem> StorefrontScanner::ScanUbisoft() {
     const auto drives = GetAllMountedDrives();
     for (const auto& drive : drives) {
         const fs::path ubiDirs[] = {
+            fs::path(drive) / L"Games" / L"Ubisoft" / L"Ubisoft Game Launcher" / L"games",
+            fs::path(drive) / L"Games" / L"Ubisoft" / L"games",
             fs::path(drive) / L"Games" / L"Ubisoft",
             fs::path(drive) / L"Ubisoft Games",
-            fs::path(drive) / L"Ubisoft" / L"games"
+            fs::path(drive) / L"Ubisoft" / L"games",
+            fs::path(drive) / L"Program Files (x86)" / L"Ubisoft" / L"Ubisoft Game Launcher" / L"games",
+            fs::path(drive) / L"Program Files" / L"Ubisoft" / L"Ubisoft Game Launcher" / L"games"
         };
         for (const auto& dir : ubiDirs) {
             if (!fs::exists(dir)) continue;
@@ -1563,8 +2672,8 @@ std::vector<GameItem> StorefrontScanner::ScanUbisoft() {
                 std::wstring lowerFolder = folderName;
                 std::transform(lowerFolder.begin(), lowerFolder.end(), lowerFolder.begin(), ::towlower);
                 if (lowerFolder == L"ubisoft game launcher" ||
-                    lowerFolder.rfind(L"ubisoft", 0) == 0 ||
-                    lowerFolder == L"games") {
+                    lowerFolder == L"games" ||
+                    lowerFolder.rfind(L"ubisoft", 0) == 0) {
                     continue;
                 }
                 std::wstring lower = entry.path().wstring();
@@ -1575,9 +2684,16 @@ std::vector<GameItem> StorefrontScanner::ScanUbisoft() {
                         GameItem item{};
                         item.appId = L"uplay_" + entry.path().filename().wstring();
                         item.title = entry.path().filename().wstring();
+                        item.sortTitle = item.title;
                         item.platform = PlatformType::Ubisoft;
+                        item.developer = L"Ubisoft";
+                        item.publisher = L"Ubisoft";
                         item.executablePath = exe.wstring();
                         item.workingDirectory = entry.path().wstring();
+
+                        LoadPerGameMetadata(item);
+                        EnrichNonSteamGameMetadata(item);
+                        SavePerGameMetadata(item);
                         games.push_back(std::move(item));
                     }
                 }
@@ -2071,6 +3187,339 @@ std::vector<GameItem> StorefrontScanner::ScanCustomGames() {
     return games;
 }
 
+std::wstring StorefrontScanner::CleanRomTitle(const std::wstring& rawName) {
+    std::wstring s = rawName;
+
+    static const wchar_t* const knownExts[] = {
+        L".nkit.iso", L".nkit", L".iso", L".rvz", L".gcm", L".gcz", L".ciso", L".wbfs", L".wia",
+        L".chd", L".cso", L".bin", L".cue", L".pbp", L".z64", L".n64", L".v64",
+        L".sfc", L".smc", L".nes", L".gba", L".gbc", L".gb", L".nds", L".3ds", L".cia", L".cxi",
+        L".pkg", L".cdi", L".gdi", L".md", L".gen", L".zip", L".7z"
+    };
+
+    auto stripTrailingExt = [&](std::wstring& str) {
+        for (const auto* ext : knownExts) {
+            const size_t extLen = wcslen(ext);
+            if (str.size() >= extLen) {
+                const size_t pos = str.rfind(ext);
+                if (pos != std::wstring::npos && pos + extLen == str.size()) {
+                    str.erase(pos, extLen);
+                    return true;
+                }
+            }
+        }
+        return false;
+    };
+
+    while (stripTrailingExt(s)) {}
+
+    // Remove double extension if .nkit
+    const std::wstring nkit = L".nkit";
+    const size_t nkitPos = s.find(nkit);
+    if (nkitPos != std::wstring::npos) {
+        s.erase(nkitPos, nkit.size());
+    }
+
+    // Remove parenthesized tags like (USA), (Europe), (Japan), (En,Fr,De), (Rev 1), (v1.0), etc.
+    while (true) {
+        const size_t openParen = s.find(L'(');
+        if (openParen == std::wstring::npos) break;
+        const size_t closeParen = s.find(L')', openParen);
+        if (closeParen == std::wstring::npos) break;
+        s.erase(openParen, closeParen - openParen + 1);
+    }
+
+    // Remove bracketed tags like [!]
+    while (true) {
+        const size_t openBrk = s.find(L'[');
+        if (openBrk == std::wstring::npos) break;
+        const size_t closeBrk = s.find(L']', openBrk);
+        if (closeBrk == std::wstring::npos) break;
+        s.erase(openBrk, closeBrk - openBrk + 1);
+    }
+
+    // Strip any trailing extensions revealed after bracket/paren removal
+    while (stripTrailingExt(s)) {}
+
+    // Invert ", The" -> "The ..."
+    const size_t thePos = s.find(L", The");
+    if (thePos != std::wstring::npos) {
+        s = L"The " + s.substr(0, thePos) + s.substr(thePos + 5);
+    }
+
+    // Replace " - " with ": "
+    const size_t dashPos = s.find(L" - ");
+    if (dashPos != std::wstring::npos) {
+        s.replace(dashPos, 3, L": ");
+    }
+
+    // Trim whitespace and leading/trailing dashes
+    while (!s.empty() && (s.front() == L' ' || s.front() == L'\t' || s.front() == L'-')) s.erase(0, 1);
+    while (!s.empty() && (s.back() == L' ' || s.back() == L'\t' || s.back() == L'-')) s.pop_back();
+
+    // Collapse double spaces
+    size_t dblSp;
+    while ((dblSp = s.find(L"  ")) != std::wstring::npos) {
+        s.erase(dblSp, 1);
+    }
+
+    return s.empty() ? rawName : s;
+}
+
+std::vector<fs::path> StorefrontScanner::GetDiscoveredRomsDirectories() {
+    std::vector<fs::path> result;
+    std::set<std::wstring> seen;
+
+    auto addDir = [&](const fs::path& p) {
+        std::error_code ec;
+        if (fs::exists(p, ec) && fs::is_directory(p, ec)) {
+            const std::wstring norm = NormalizeDirKey(p.wstring());
+            if (seen.insert(norm).second) {
+                result.push_back(p);
+            }
+        }
+    };
+
+    // 1. Settings override from database
+    auto& db = Database::Instance();
+    if (auto val = db.GetSetting(L"roms_path")) {
+        if (!val->empty()) addDir(fs::path(*val));
+    }
+
+    // 2. Scan all mounted drives for ROMs folders
+    const auto drives = GetAllMountedDrives();
+    for (const auto& drive : drives) {
+        addDir(fs::path(drive) / L"Games" / L"ROMs");
+        addDir(fs::path(drive) / L"ROMs");
+        addDir(fs::path(drive) / L"Games" / L"ES-DE" / L"ROMs");
+        addDir(fs::path(drive) / L"ES-DE" / L"ROMs");
+        addDir(fs::path(drive) / L"Emulation" / L"roms");
+        addDir(fs::path(drive) / L"Emulation" / L"ROMs");
+        addDir(fs::path(drive) / L"Games" / L"Emulation" / L"roms");
+    }
+
+    // 3. User profile directories
+    wchar_t userProfile[MAX_PATH] = { 0 };
+    if (GetEnvironmentVariableW(L"USERPROFILE", userProfile, MAX_PATH) > 0) {
+        addDir(fs::path(userProfile) / L"ROMs");
+        addDir(fs::path(userProfile) / L"ES-DE" / L"ROMs");
+        addDir(fs::path(userProfile) / L"Emulation" / L"roms");
+    }
+
+    return result;
+}
+
+std::vector<GameItem> StorefrontScanner::ScanEmulatedGames() {
+    std::vector<GameItem> games;
+
+    struct RetroSystemSpec {
+        const wchar_t* code;
+        const wchar_t* fullName;
+        PlatformType platform;
+        const wchar_t* libretroRepo;
+        const wchar_t* const* extensions;
+        size_t extCount;
+        const wchar_t* defaultPublisher;
+        const wchar_t* defaultGenre;
+    };
+
+    static const wchar_t* const gcExts[] = { L".iso", L".rvz", L".gcm", L".gcz", L".ciso" };
+    static const wchar_t* const wiiExts[] = { L".iso", L".wbfs", L".rvz", L".ciso", L".wia" };
+    static const wchar_t* const ps2Exts[] = { L".iso", L".chd", L".bin", L".cso", L".gz" };
+    static const wchar_t* const psxExts[] = { L".chd", L".cue", L".iso", L".pbp", L".bin" };
+    static const wchar_t* const n64Exts[] = { L".z64", L".n64", L".v64", L".zip", L".7z" };
+    static const wchar_t* const snesExts[] = { L".sfc", L".smc", L".zip", L".7z" };
+    static const wchar_t* const nesExts[] = { L".nes", L".zip", L".7z" };
+    static const wchar_t* const gbaExts[] = { L".gba", L".zip", L".7z" };
+    static const wchar_t* const gbcExts[] = { L".gbc", L".zip", L".7z" };
+    static const wchar_t* const gbExts[] = { L".gb", L".zip", L".7z" };
+    static const wchar_t* const ndsExts[] = { L".nds", L".zip", L".7z" };
+    static const wchar_t* const n3dsExts[] = { L".3ds", L".cia", L".cxi" };
+    static const wchar_t* const pspExts[] = { L".iso", L".cso", L".chd", L".pbp" };
+    static const wchar_t* const ps3Exts[] = { L".iso", L".pkg" };
+    static const wchar_t* const dcExts[] = { L".chd", L".cdi", L".gdi", L".cue" };
+    static const wchar_t* const mdExts[] = { L".md", L".gen", L".bin", L".zip", L".7z" };
+    static const wchar_t* const satExts[] = { L".chd", L".cue", L".iso" };
+
+    const RetroSystemSpec systems[] = {
+        { L"gc", L"Nintendo GameCube", PlatformType::Dolphin, L"Nintendo_-_GameCube", gcExts, ARRAYSIZE(gcExts), L"Nintendo", L"Action, Adventure" },
+        { L"gamecube", L"Nintendo GameCube", PlatformType::Dolphin, L"Nintendo_-_GameCube", gcExts, ARRAYSIZE(gcExts), L"Nintendo", L"Action, Adventure" },
+        { L"wii", L"Nintendo Wii", PlatformType::Dolphin, L"Nintendo_-_Wii", wiiExts, ARRAYSIZE(wiiExts), L"Nintendo", L"Action, Adventure" },
+        { L"ps2", L"PlayStation 2", PlatformType::PCSX2, L"Sony_-_PlayStation_2", ps2Exts, ARRAYSIZE(ps2Exts), L"Sony Interactive Entertainment", L"Action" },
+        { L"psx", L"PlayStation", PlatformType::DuckStation, L"Sony_-_PlayStation", psxExts, ARRAYSIZE(psxExts), L"Sony Interactive Entertainment", L"Action" },
+        { L"ps1", L"PlayStation", PlatformType::DuckStation, L"Sony_-_PlayStation", psxExts, ARRAYSIZE(psxExts), L"Sony Interactive Entertainment", L"Action" },
+        { L"n64", L"Nintendo 64", PlatformType::Project64, L"Nintendo_-_Nintendo_64", n64Exts, ARRAYSIZE(n64Exts), L"Nintendo", L"Adventure" },
+        { L"snes", L"Super Nintendo", PlatformType::Snes9x, L"Nintendo_-_Super_Nintendo_Entertainment_System", snesExts, ARRAYSIZE(snesExts), L"Nintendo", L"Platformer" },
+        { L"snesna", L"Super Nintendo", PlatformType::Snes9x, L"Nintendo_-_Super_Nintendo_Entertainment_System", snesExts, ARRAYSIZE(snesExts), L"Nintendo", L"Platformer" },
+        { L"nes", L"Nintendo Entertainment System", PlatformType::RetroArch, L"Nintendo_-_Nintendo_Entertainment_System", nesExts, ARRAYSIZE(nesExts), L"Nintendo", L"Action" },
+        { L"gba", L"Game Boy Advance", PlatformType::mGBA, L"Nintendo_-_Game_Boy_Advance", gbaExts, ARRAYSIZE(gbaExts), L"Nintendo", L"RPG" },
+        { L"gbc", L"Game Boy Color", PlatformType::mGBA, L"Nintendo_-_Game_Boy_Color", gbcExts, ARRAYSIZE(gbcExts), L"Nintendo", L"Platformer" },
+        { L"gb", L"Game Boy", PlatformType::mGBA, L"Nintendo_-_Game_Boy", gbExts, ARRAYSIZE(gbExts), L"Nintendo", L"Action" },
+        { L"nds", L"Nintendo DS", PlatformType::melonDS, L"Nintendo_-_Nintendo_DS", ndsExts, ARRAYSIZE(ndsExts), L"Nintendo", L"Adventure" },
+        { L"3ds", L"Nintendo 3DS", PlatformType::Citra, L"Nintendo_-_Nintendo_3DS", n3dsExts, ARRAYSIZE(n3dsExts), L"Nintendo", L"RPG" },
+        { L"psp", L"PlayStation Portable", PlatformType::PPSSPP, L"Sony_-_PlayStation_Portable", pspExts, ARRAYSIZE(pspExts), L"Sony Interactive Entertainment", L"Action" },
+        { L"ps3", L"PlayStation 3", PlatformType::RPCS3, L"Sony_-_PlayStation_3", ps3Exts, ARRAYSIZE(ps3Exts), L"Sony Interactive Entertainment", L"Action" },
+        { L"dreamcast", L"Sega Dreamcast", PlatformType::Flycast, L"Sega_-_Dreamcast", dcExts, ARRAYSIZE(dcExts), L"Sega", L"Arcade" },
+        { L"genesis", L"Sega Genesis", PlatformType::RetroArch, L"Sega_-_Mega_Drive_-_Genesis", mdExts, ARRAYSIZE(mdExts), L"Sega", L"Platformer" },
+        { L"megadrive", L"Sega Mega Drive", PlatformType::RetroArch, L"Sega_-_Mega_Drive_-_Genesis", mdExts, ARRAYSIZE(mdExts), L"Sega", L"Platformer" },
+        { L"saturn", L"Sega Saturn", PlatformType::Flycast, L"Sega_-_Saturn", satExts, ARRAYSIZE(satExts), L"Sega", L"Action" }
+    };
+
+    const auto romDirs = GetDiscoveredRomsDirectories();
+    std::set<std::wstring> seenRomPaths;
+
+    for (const auto& romRoot : romDirs) {
+        for (const auto& sys : systems) {
+            const fs::path sysFolder = romRoot / sys.code;
+            std::error_code ec;
+            if (!fs::exists(sysFolder, ec) || !fs::is_directory(sysFolder, ec)) continue;
+
+            for (const auto& entry : fs::directory_iterator(sysFolder, ec)) {
+                fs::path candidateRom;
+                std::wstring rawStem;
+
+                if (entry.is_directory(ec)) {
+                    const std::wstring dirName = entry.path().filename().wstring();
+                    if (_wcsicmp(dirName.c_str(), L"saves") == 0 ||
+                        _wcsicmp(dirName.c_str(), L"states") == 0 ||
+                        dirName.rfind(L".", 0) == 0) {
+                        continue;
+                    }
+
+                    // Look for rom inside this subdirectory
+                    for (const auto& sub : fs::directory_iterator(entry.path(), ec)) {
+                        if (!sub.is_regular_file(ec)) continue;
+                        const std::wstring subExt = sub.path().extension().wstring();
+                        for (size_t i = 0; i < sys.extCount; ++i) {
+                            if (_wcsicmp(subExt.c_str(), sys.extensions[i]) == 0) {
+                                candidateRom = sub.path();
+                                rawStem = sub.path().stem().wstring();
+                                break;
+                            }
+                        }
+                        if (!candidateRom.empty()) break;
+                    }
+                } else if (entry.is_regular_file(ec)) {
+                    const std::wstring fn = entry.path().filename().wstring();
+                    if (_wcsicmp(fn.c_str(), L"systeminfo.txt") == 0 ||
+                        _wcsicmp(fn.c_str(), L"gamelist.xml") == 0) {
+                        continue;
+                    }
+
+                    const std::wstring ext = entry.path().extension().wstring();
+                    for (size_t i = 0; i < sys.extCount; ++i) {
+                        if (_wcsicmp(ext.c_str(), sys.extensions[i]) == 0) {
+                            candidateRom = entry.path();
+                            rawStem = entry.path().stem().wstring();
+                            break;
+                        }
+                    }
+                }
+
+                if (candidateRom.empty() || rawStem.empty()) continue;
+
+                const std::wstring normPath = NormalizeDirKey(candidateRom.wstring());
+                if (!seenRomPaths.insert(normPath).second) continue;
+
+                // Clean title and generate appId
+                const std::wstring cleanTitle = CleanRomTitle(rawStem);
+                std::wstring safeToken;
+                for (wchar_t c : cleanTitle) {
+                    if (iswalnum(c)) safeToken += c;
+                    else if (c == L' ' || c == L'_' || c == L'-') safeToken += L'_';
+                }
+
+                GameItem item{};
+                item.appId = L"rom_" + std::wstring(sys.code) + L"_" + safeToken;
+                item.title = cleanTitle;
+                item.sortTitle = cleanTitle;
+                item.platform = sys.platform;
+                item.developer = sys.defaultPublisher;
+                item.publisher = sys.defaultPublisher;
+                item.genres = sys.defaultGenre;
+                item.rating = L"ESRB: Everyone";
+                item.executablePath = candidateRom.wstring();
+                item.workingDirectory = candidateRom.parent_path().wstring();
+                item.diskSizeBytes = fs::file_size(candidateRom, ec);
+
+                // Specific classic game metadata enrichment
+                if (cleanTitle.find(L"Wind Waker") != std::wstring::npos) {
+                    item.developer = L"Nintendo EAD";
+                    item.publisher = L"Nintendo";
+                    item.releaseDate = L"2002-12-13";
+                    item.rating = L"ESRB: Everyone";
+                    item.genres = L"Action-Adventure, Open World";
+                    item.synopsis = L"Set on a group of islands in a vast sea, Link must embark on a journey across the Great Sea to rescue his sister and uncover the lost kingdom of Hyrule.";
+                } else if (cleanTitle.find(L"Twilight Princess") != std::wstring::npos) {
+                    item.developer = L"Nintendo EAD";
+                    item.publisher = L"Nintendo";
+                    item.releaseDate = L"2006-11-19";
+                    item.rating = L"ESRB: Teen (13+)";
+                    item.genres = L"Action-Adventure, Fantasy";
+                    item.synopsis = L"Link travels to prevent Hyrule from being engulfed by a corrupted parallel dimension known as the Twilight Realm, transforming into a wolf when entering the twilight.";
+                } else if (cleanTitle.find(L"Super Mario Sunshine") != std::wstring::npos) {
+                    item.developer = L"Nintendo EAD";
+                    item.publisher = L"Nintendo";
+                    item.releaseDate = L"2002-07-19";
+                    item.rating = L"ESRB: Everyone";
+                    item.genres = L"Platformer, 3D Platformer";
+                    item.synopsis = L"Mario arrives on the tropical Isle Delfino for vacation, only to be framed for polluting the island with goop. Armed with FLUDD, Mario sets out to clean Isle Delfino and rescue Princess Peach.";
+                } else if (cleanTitle.find(L"Majora's Mask") != std::wstring::npos) {
+                    item.developer = L"Nintendo EAD";
+                    item.publisher = L"Nintendo";
+                    item.releaseDate = L"2000-04-27";
+                    item.rating = L"ESRB: Everyone";
+                    item.genres = L"Action-Adventure, Fantasy";
+                    item.synopsis = L"Link is trapped in the parallel world of Termina, where the moon is falling and will destroy everything in three days unless he uses the power of masks and the Ocarina of Time to reset the three-day cycle and defeat the Skull Kid.";
+                } else if (cleanTitle.find(L"Ocarina of Time") != std::wstring::npos) {
+                    item.developer = L"Nintendo EAD";
+                    item.publisher = L"Nintendo";
+                    item.releaseDate = L"1998-11-21";
+                    item.rating = L"ESRB: Everyone";
+                    item.genres = L"Action-Adventure, Fantasy";
+                    item.synopsis = L"Link sets off on a legendary quest through time to stop Ganondorf, King of the Gerudo Thieves, from obtaining the Triforce and conquering Hyrule.";
+                } else if (cleanTitle.find(L"Super Mario 64") != std::wstring::npos) {
+                    item.developer = L"Nintendo EAD";
+                    item.publisher = L"Nintendo";
+                    item.releaseDate = L"1996-06-23";
+                    item.rating = L"ESRB: Everyone";
+                    item.genres = L"Platformer, 3D Platformer";
+                    item.synopsis = L"Mario arrives at Princess Peach's castle to find that Bowser has stolen the Power Stars and imprisoned Peach inside the castle walls and painting worlds.";
+                }
+
+                // Box art & Hero art retrieval via Libretro Thumbnails CDN
+                // Strip .nkit if present from rawStem for CDN query
+                std::wstring cdnStem = rawStem;
+                const size_t nkPos = cdnStem.find(L".nkit");
+                if (nkPos != std::wstring::npos) cdnStem.erase(nkPos, 5);
+
+                const std::wstring encStem = UrlEncodeForCdn(cdnStem);
+                const std::wstring encTitle = UrlEncodeForCdn(cleanTitle);
+
+                const std::wstring cdnCoverUrl = L"https://raw.githubusercontent.com/libretro-thumbnails/" +
+                    std::wstring(sys.libretroRepo) + L"/master/Named_Boxarts/" + encStem + L".png";
+                const std::wstring cdnHeroUrl = L"https://raw.githubusercontent.com/libretro-thumbnails/" +
+                    std::wstring(sys.libretroRepo) + L"/master/Named_Snaps/" + encStem + L".png";
+
+                item.coverArtPath = CacheRemoteArtwork(item.appId, L"cover", cdnCoverUrl);
+                if (item.coverArtPath.empty()) {
+                    const std::wstring fallbackCover = L"https://raw.githubusercontent.com/libretro-thumbnails/" +
+                        std::wstring(sys.libretroRepo) + L"/master/Named_Boxarts/" + encTitle + L".png";
+                    item.coverArtPath = CacheRemoteArtwork(item.appId, L"cover", fallbackCover);
+                }
+
+                item.heroArtPath = CacheRemoteArtwork(item.appId, L"hero", cdnHeroUrl);
+
+                LoadPerGameMetadata(item);
+                SavePerGameMetadata(item);
+                games.push_back(std::move(item));
+            }
+        }
+    }
+
+    return games;
+}
+
 bool StorefrontScanner::AddCustomLocalGame(const std::wstring& executablePath, const std::wstring& customTitle) {
     if (executablePath.empty() || !fs::exists(executablePath)) return false;
 
@@ -2101,13 +3550,117 @@ bool StorefrontScanner::RemoveCustomLocalGame(const std::wstring& appId) {
     return false;
 }
 
+void EnrichFromSteamStoreSearch(GameItem& item) {
+    if (item.title.empty()) return;
+
+    const std::wstring encTitle = UrlEncodeForCdn(item.title);
+    const std::string searchJsonUtf8 = FetchHttpsUrlUtf8(
+        L"store.steampowered.com",
+        L"/api/storesearch/?term=" + encTitle + L"&l=english&cc=US"
+    );
+    if (searchJsonUtf8.empty()) return;
+
+    const std::wstring searchJson = Utf8ToWide(searchJsonUtf8.c_str());
+    const size_t itemsPos = searchJson.find(L"\"items\":[");
+    if (itemsPos == std::wstring::npos) return;
+    const size_t idPos = searchJson.find(L"\"id\":", itemsPos);
+    if (idPos == std::wstring::npos) return;
+    size_t numStart = idPos + 5;
+    while (numStart < searchJson.size() && (searchJson[numStart] == L' ' || searchJson[numStart] == L'\t')) ++numStart;
+    size_t numEnd = numStart;
+    while (numEnd < searchJson.size() && iswdigit(searchJson[numEnd])) ++numEnd;
+    if (numEnd <= numStart) return;
+    const std::wstring steamAppId = searchJson.substr(numStart, numEnd - numStart);
+
+    EnrichSteamMetadataFromStoreApi(steamAppId, item);
+
+    if (item.coverArtPath.empty() || !ImageValidator::IsValidCover(item.coverArtPath)) {
+        if (item.detailsArtPath.empty() && !item.coverArtPath.empty()) {
+            item.detailsArtPath = item.coverArtPath;
+        }
+        const std::wstring cdnCover = CacheRemoteArtwork(
+            item.appId, L"cover",
+            L"https://shared.steamstatic.com/store_item_assets/steam/apps/" + steamAppId + L"/library_600x900.jpg"
+        );
+        if (!cdnCover.empty() && ImageValidator::IsValidCover(cdnCover)) {
+            item.coverArtPath = cdnCover;
+        }
+    }
+
+    if (item.heroArtPath.empty() || !ImageValidator::IsValidHero(item.heroArtPath)) {
+        if (item.detailsArtPath.empty() && !item.heroArtPath.empty()) {
+            item.detailsArtPath = item.heroArtPath;
+        }
+        const std::wstring cdnHero = CacheRemoteArtwork(
+            item.appId, L"hero",
+            L"https://shared.steamstatic.com/store_item_assets/steam/apps/" + steamAppId + L"/library_hero.jpg"
+        );
+        if (!cdnHero.empty() && ImageValidator::IsValidHero(cdnHero)) {
+            item.heroArtPath = cdnHero;
+        }
+    }
+}
+
+void StorefrontScanner::EnrichGameMetadata(GameItem& item) {
+    if (item.title.empty()) return;
+
+    // 0. Sanitize title and input strings first
+    item.title = SanitizeGameText(item.title);
+    item.synopsis = SanitizeGameText(item.synopsis);
+
+    const auto settings = SettingsManager::Load();
+
+    // 1. PRIMARY METADATA PROVIDERS (When enabled by user configuration)
+    // A. SteamGridDB: Primary default for artwork (600x900 Cover Art, 1920x620 Hero Banners, Icons)
+    if (!settings.steamGridDbApiKey.empty()) {
+        EnrichFromSteamGridDb(item, settings.steamGridDbApiKey);
+    }
+
+    // B. IGDB: Primary default for rich game metadata (Developers, Publishers, Synopsis, Release Date, Genres, Age Rating, 1080p Cover)
+    if (!settings.igdbClientId.empty() && !settings.igdbClientSecret.empty()) {
+        EnrichFromIgdb(item, settings.igdbClientId, settings.igdbClientSecret);
+    }
+
+    // 2. FREE KEYLESS METADATA PROVIDER FALLBACK (Steam Store Search & AppDetails API):
+    // Zero configuration; always available as public metadata provider without requiring any API key.
+    const bool needsCover = item.coverArtPath.empty() || !ImageValidator::IsValidCover(item.coverArtPath);
+    const bool needsHero  = item.heroArtPath.empty() || !ImageValidator::IsValidHero(item.heroArtPath);
+    const bool needsMeta  = item.synopsis.empty() || item.genres.empty() || item.developer.empty() ||
+                            item.publisher.empty() || item.releaseDate.empty() || item.rating.empty();
+
+    if (item.platform != PlatformType::Steam && (needsCover || needsHero || needsMeta)) {
+        EnrichFromSteamStoreSearch(item);
+    }
+
+    // 3. EXECUTABLE PE VERSION INFO FALLBACK (For standalone/custom games):
+    if (item.developer.empty() || item.publisher.empty()) {
+        EnrichFromExecutableVersionInfo(item);
+    }
+
+    // 4. Final sanitization pass across all metadata fields
+    item.title = SanitizeGameText(item.title);
+    item.synopsis = SanitizeGameText(item.synopsis);
+    item.developer = SanitizeGameText(item.developer);
+    item.publisher = SanitizeGameText(item.publisher);
+    item.genres = SanitizeGameText(item.genres);
+}
+
+void StorefrontScanner::EnrichNonSteamGameMetadata(GameItem& item) {
+    EnrichGameMetadata(item);
+}
+
 bool StorefrontScanner::LoadPerGameMetadata(GameItem& item) {
     const fs::path metaDir = Storage::GetMetadataPath();
     const fs::path jsonPath = metaDir / (item.appId + L".json");
     if (!fs::exists(jsonPath)) return false;
 
-    std::wifstream stream(jsonPath);
+    std::ifstream stream(jsonPath, std::ios::binary);
     if (!stream.is_open()) return false;
+
+    const std::string content((std::istreambuf_iterator<char>(stream)), std::istreambuf_iterator<char>());
+    stream.close();
+
+    const std::wstring wideContent = Utf8ToWide(content.c_str());
 
     auto isValidPathOrUrl = [](const std::wstring& val) -> bool {
         if (val.empty()) return false;
@@ -2116,10 +3669,12 @@ bool StorefrontScanner::LoadPerGameMetadata(GameItem& item) {
         return fs::exists(val, ec);
     };
 
+    std::wistringstream ss(wideContent);
     std::wstring line;
-    while (std::getline(stream, line)) {
+    while (std::getline(ss, line)) {
         std::wstring key, val;
         if (ParseKeyValueLine(line, key, val)) {
+            val = SanitizeGameText(val);
             if (key == L"title" && !val.empty()) item.title = val;
             else if (key == L"developer" && !val.empty()) item.developer = val;
             else if (key == L"publisher" && !val.empty()) item.publisher = val;
@@ -2130,6 +3685,7 @@ bool StorefrontScanner::LoadPerGameMetadata(GameItem& item) {
             else if ((key == L"coverArtPath" || key == L"cover") && isValidPathOrUrl(val)) item.coverArtPath = val;
             else if ((key == L"heroArtPath" || key == L"hero") && isValidPathOrUrl(val)) item.heroArtPath = val;
             else if ((key == L"iconPath" || key == L"icon") && isValidPathOrUrl(val)) item.iconPath = val;
+            else if ((key == L"detailsArtPath" || key == L"details") && isValidPathOrUrl(val)) item.detailsArtPath = val;
             else if ((key == L"launchString" || key == L"launchCommand") && !val.empty()) item.launchCommand = val;
             else if (key == L"launchArguments" && !val.empty()) item.launchArguments = val;
             else if (key == L"executablePath" && !val.empty() && fs::exists(val)) item.executablePath = val;
@@ -2144,29 +3700,45 @@ bool StorefrontScanner::SavePerGameMetadata(const GameItem& item) {
     const fs::path metaDir = Storage::GetMetadataPath();
     const fs::path jsonPath = metaDir / (item.appId + L".json");
 
-    std::wofstream out(jsonPath);
-    if (!out.is_open()) return false;
-
     const auto platStr = PlatformToString(item.platform);
 
-    out << L"{\n";
-    out << L"  \"appId\": \"" << EscapeJsonString(item.appId) << L"\",\n";
-    out << L"  \"title\": \"" << EscapeJsonString(item.title) << L"\",\n";
-    out << L"  \"platform\": \"" << EscapeJsonString(std::wstring(platStr)) << L"\",\n";
-    out << L"  \"description\": \"" << EscapeJsonString(item.synopsis) << L"\",\n";
-    out << L"  \"score\": \"" << EscapeJsonString(item.rating) << L"\",\n";
-    out << L"  \"developer\": \"" << EscapeJsonString(item.developer) << L"\",\n";
-    out << L"  \"publisher\": \"" << EscapeJsonString(item.publisher) << L"\",\n";
-    out << L"  \"releaseDate\": \"" << EscapeJsonString(item.releaseDate) << L"\",\n";
-    out << L"  \"genres\": \"" << EscapeJsonString(item.genres) << L"\",\n";
-    out << L"  \"launchString\": \"" << EscapeJsonString(item.launchCommand.empty() ? item.launchUri : item.launchCommand) << L"\",\n";
-    out << L"  \"launchArguments\": \"" << EscapeJsonString(item.launchArguments) << L"\",\n";
-    out << L"  \"executablePath\": \"" << EscapeJsonString(item.executablePath) << L"\",\n";
-    out << L"  \"workingDirectory\": \"" << EscapeJsonString(item.workingDirectory) << L"\",\n";
-    out << L"  \"iconPath\": \"" << EscapeJsonString(item.iconPath) << L"\",\n";
-    out << L"  \"coverArtPath\": \"" << EscapeJsonString(item.coverArtPath) << L"\",\n";
-    out << L"  \"heroArtPath\": \"" << EscapeJsonString(item.heroArtPath) << L"\"\n";
-    out << L"}\n";
+    std::wstring outStr;
+    outStr.reserve(1024);
+    outStr += L"{\n";
+    outStr += L"  \"appId\": \"" + EscapeJsonString(item.appId) + L"\",\n";
+    outStr += L"  \"title\": \"" + EscapeJsonString(SanitizeGameText(item.title)) + L"\",\n";
+    outStr += L"  \"platform\": \"" + EscapeJsonString(std::wstring(platStr)) + L"\",\n";
+    outStr += L"  \"description\": \"" + EscapeJsonString(SanitizeGameText(item.synopsis)) + L"\",\n";
+    outStr += L"  \"score\": \"" + EscapeJsonString(SanitizeGameText(item.rating)) + L"\",\n";
+    outStr += L"  \"developer\": \"" + EscapeJsonString(SanitizeGameText(item.developer)) + L"\",\n";
+    outStr += L"  \"publisher\": \"" + EscapeJsonString(SanitizeGameText(item.publisher)) + L"\",\n";
+    outStr += L"  \"releaseDate\": \"" + EscapeJsonString(SanitizeGameText(item.releaseDate)) + L"\",\n";
+    outStr += L"  \"genres\": \"" + EscapeJsonString(SanitizeGameText(item.genres)) + L"\",\n";
+    outStr += L"  \"launchString\": \"" + EscapeJsonString(item.launchCommand.empty() ? item.launchUri : item.launchCommand) + L"\",\n";
+    outStr += L"  \"launchArguments\": \"" + EscapeJsonString(item.launchArguments) + L"\",\n";
+    outStr += L"  \"executablePath\": \"" + EscapeJsonString(item.executablePath) + L"\",\n";
+    outStr += L"  \"workingDirectory\": \"" + EscapeJsonString(item.workingDirectory) + L"\",\n";
+    outStr += L"  \"iconPath\": \"" + EscapeJsonString(item.iconPath) + L"\",\n";
+    outStr += L"  \"coverArtPath\": \"" + EscapeJsonString(item.coverArtPath) + L"\",\n";
+    outStr += L"  \"heroArtPath\": \"" + EscapeJsonString(item.heroArtPath) + L"\",\n";
+    outStr += L"  \"detailsArtPath\": \"" + EscapeJsonString(item.detailsArtPath) + L"\"\n";
+    outStr += L"}\n";
+
+    std::ofstream out(jsonPath, std::ios::binary);
+    if (!out.is_open()) return false;
+    const std::string utf8 = WideToUtf8(outStr);
+    out.write(utf8.data(), utf8.size());
+    out.close();
+
+    const auto settings = SettingsManager::Load();
+    if (settings.enableOneDriveBackup) {
+        const auto oneDriveMeta = Storage::GetOneDriveMetadataPath();
+        if (!oneDriveMeta.empty()) {
+            std::error_code ec;
+            std::filesystem::create_directories(oneDriveMeta, ec);
+            std::filesystem::copy_file(jsonPath, oneDriveMeta / jsonPath.filename(), std::filesystem::copy_options::overwrite_existing, ec);
+        }
+    }
     return true;
 }
 
@@ -2196,6 +3768,7 @@ std::vector<GameItem> StorefrontScanner::ScanAllInstalledGames() {
     appendAll(ScanHoYoPlay());
     appendAll(ScanCustomGames());
     appendAll(ScanStandaloneAndDrives());
+    appendAll(ScanEmulatedGames());
 
     std::vector<GameItem> deduped;
     std::set<std::wstring> seenAppIds;
@@ -2222,9 +3795,13 @@ std::vector<GameItem> StorefrontScanner::ScanAllInstalledGames() {
 
         game.id = static_cast<int64_t>(deduped.size() + 1);
         LoadPerGameMetadata(game);
-        if (game.developer.empty() || game.publisher.empty()) {
-            EnrichFromExecutableVersionInfo(game);
-        }
+        
+        // Multi-source metadata and artwork enrichment:
+        // Configured providers (SteamGridDB, IGDB) are primary defaults when enabled;
+        // Keyless Steam Store search and storefronts act as fallbacks.
+        EnrichGameMetadata(game);
+
+        ImageValidator::ValidateAndFixGameArtwork(game);
         SavePerGameMetadata(game);
         deduped.push_back(std::move(game));
     }

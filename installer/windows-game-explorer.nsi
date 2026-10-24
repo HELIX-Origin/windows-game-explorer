@@ -4,7 +4,7 @@
 Unicode true
 
 !define APP_NAME "Windows Game Explorer"
-!define APP_VERSION "2.0.1"
+!define APP_VERSION "2.1.1"
 !define APP_PUBLISHER "HELIX Origin"
 !define APP_URL "https://github.com/HELIX-Origin/windows-game-explorer"
 !define APP_EXE_CONFIG "GameExplorerConfig.exe"
@@ -89,6 +89,8 @@ Section "MainSection" SecMain
     File "..\build\Release\GameExplorerManager.exe"
     File "..\LICENSE"
     File "..\assets\game-explorer-icon.ico"
+    File "..\register.bat"
+    File "..\unregister.bat"
 
     ; Register Shell Namespace Extension DLL
     DetailPrint "Registering Windows Shell Extension..."
@@ -138,6 +140,8 @@ Section "Uninstall"
     Delete "$INSTDIR\GameExplorerManager.exe"
     Delete "$INSTDIR\LICENSE"
     Delete "$INSTDIR\game-explorer-icon.ico"
+    Delete "$INSTDIR\register.bat"
+    Delete "$INSTDIR\unregister.bat"
     Delete "$INSTDIR\Uninstall.exe"
     RMDir "$INSTDIR"
 

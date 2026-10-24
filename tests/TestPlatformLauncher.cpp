@@ -30,3 +30,15 @@ TEST_CASE(PlatformLauncherSteamPathQuery) {
         ASSERT_EQ(steamExe.substr(steamExe.size() - suffix.size()), suffix);
     }
 }
+
+TEST_CASE(PlatformLauncherEmulatorDiscovery) {
+    // Tests emulator path discovery for Dolphin and Project64
+    const std::wstring dolphinExe = GameExplorer::PlatformLauncher::GetDolphinExecutablePath();
+    if (!dolphinExe.empty()) {
+        ASSERT_TRUE(dolphinExe.find(L"Dolphin.exe") != std::wstring::npos);
+    }
+    const std::wstring pj64Exe = GameExplorer::PlatformLauncher::GetProject64ExecutablePath();
+    if (!pj64Exe.empty()) {
+        ASSERT_TRUE(pj64Exe.find(L"Project64.exe") != std::wstring::npos);
+    }
+}

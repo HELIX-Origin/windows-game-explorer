@@ -15,6 +15,10 @@
 *.svg       text eol=lf
 *.yml       text eol=lf
 
+# Windows batch scripts must keep CRLF
+*.bat       text eol=crlf
+*.cmd       text eol=crlf
+
 # Binary types (never convert)
 *.png       binary
 *.ico       binary

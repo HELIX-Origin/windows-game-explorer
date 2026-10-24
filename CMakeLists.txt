@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.20)
 
 project(WindowsGameExplorer
-    VERSION 2.0.1
+    VERSION 2.1.1
     DESCRIPTION "Native Windows Game Explorer and Shell Extension"
     LANGUAGES C CXX RC
 )
@@ -44,6 +44,8 @@ add_library(GameExplorerCore STATIC
     src/core/StorefrontScanner.cpp
     src/core/PlatformLauncher.cpp
     src/core/Localization.cpp
+    src/core/AchievementEngine.cpp
+    src/core/ImageValidator.cpp
 )
 target_include_directories(GameExplorerCore PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include
@@ -57,6 +59,7 @@ target_link_libraries(GameExplorerCore PUBLIC
     Advapi32
     Dwmapi
     Uxtheme
+    Gdiplus
     Urlmon
     Winhttp
     Version

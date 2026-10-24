@@ -87,9 +87,20 @@ constexpr int IDC_RAD_LAYOUT_DETAILS     = 2007;
 
 constexpr int IDC_BTN_LAUNCH_MANAGER     = 2011;
 constexpr int IDC_BTN_OPEN_METADATA_DIR  = 2013;
+constexpr int IDC_BTN_OPEN_ONEDRIVE_DIR  = 2014;
+constexpr int IDC_BTN_SYNC_ONEDRIVE      = 2015;
 
 constexpr int IDC_CHK_ONEDRIVE           = 2030;
 constexpr int IDC_BTN_SAVE               = 2031;
+
+constexpr int IDC_EDT_STEAM_KEY          = 2040;
+constexpr int IDC_EDT_STEAM_ID           = 2041;
+constexpr int IDC_EDT_RA_USER            = 2042;
+constexpr int IDC_EDT_RA_KEY             = 2043;
+constexpr int IDC_EDT_SGDB_KEY           = 2044;
+constexpr int IDC_EDT_IGDB_CLIENT_ID     = 2045;
+constexpr int IDC_EDT_IGDB_CLIENT_SECRET = 2046;
+constexpr int IDC_BTN_RESET_CACHE        = 2047;
 
 HWND g_hwndLblIntegrationStatus = nullptr;
 HWND g_hwndBtnScanLibrary       = nullptr;
@@ -103,12 +114,21 @@ HWND g_hwndBtnLaunchManager   = nullptr;
 HWND g_hwndBtnOpenMetadataDir = nullptr;
 HWND g_hwndChkOneDrive        = nullptr;
 
+HWND g_hwndEdtSteamKey          = nullptr;
+HWND g_hwndEdtSteamId           = nullptr;
+HWND g_hwndEdtRaUser            = nullptr;
+HWND g_hwndEdtRaKey             = nullptr;
+HWND g_hwndEdtSgdbKey           = nullptr;
+HWND g_hwndEdtIgdbClientId      = nullptr;
+HWND g_hwndEdtIgdbClientSecret  = nullptr;
+
 HFONT g_hFont = nullptr;
 HFONT g_hFontBold = nullptr;
 bool g_isDarkMode = false;
 ThemePalette g_palette{};
 HBRUSH g_hBgBrush = nullptr;
 HBRUSH g_hCardBrush = nullptr;
+HBRUSH g_hEditBrush = nullptr;
 
 bool IsIntegrationEnabled() {
     HKEY hKey = nullptr;
@@ -169,6 +189,14 @@ void LoadConfigValues() {
 
     SendMessageW(g_hwndChkOneDrive, BM_SETCHECK, s.enableOneDriveBackup ? BST_CHECKED : BST_UNCHECKED, 0);
 
+    if (g_hwndEdtSteamKey != nullptr) SetWindowTextW(g_hwndEdtSteamKey, s.steamWebApiKey.c_str());
+    if (g_hwndEdtSteamId != nullptr)  SetWindowTextW(g_hwndEdtSteamId, s.steamId64.c_str());
+    if (g_hwndEdtRaUser != nullptr)   SetWindowTextW(g_hwndEdtRaUser, s.retroAchievementsUser.c_str());
+    if (g_hwndEdtRaKey != nullptr)    SetWindowTextW(g_hwndEdtRaKey, s.retroAchievementsApiKey.c_str());
+    if (g_hwndEdtSgdbKey != nullptr)  SetWindowTextW(g_hwndEdtSgdbKey, s.steamGridDbApiKey.c_str());
+    if (g_hwndEdtIgdbClientId != nullptr)     SetWindowTextW(g_hwndEdtIgdbClientId, s.igdbClientId.c_str());
+    if (g_hwndEdtIgdbClientSecret != nullptr) SetWindowTextW(g_hwndEdtIgdbClientSecret, s.igdbClientSecret.c_str());
+
     UpdateIntegrationStatusUI();
 }
 
@@ -217,7 +245,40 @@ void SaveConfigValues(HWND hwndParent) {
 
     s.enableOneDriveBackup = (SendMessageW(g_hwndChkOneDrive, BM_GETCHECK, 0, 0) == BST_CHECKED);
 
+    wchar_t buf[512] = { 0 };
+    if (g_hwndEdtSteamKey != nullptr) {
+        GetWindowTextW(g_hwndEdtSteamKey, buf, 512);
+        s.steamWebApiKey = buf;
+    }
+    if (g_hwndEdtSteamId != nullptr) {
+        GetWindowTextW(g_hwndEdtSteamId, buf, 512);
+        s.steamId64 = buf;
+    }
+    if (g_hwndEdtRaUser != nullptr) {
+        GetWindowTextW(g_hwndEdtRaUser, buf, 512);
+        s.retroAchievementsUser = buf;
+    }
+    if (g_hwndEdtRaKey != nullptr) {
+        GetWindowTextW(g_hwndEdtRaKey, buf, 512);
+        s.retroAchievementsApiKey = buf;
+    }
+    if (g_hwndEdtSgdbKey != nullptr) {
+        GetWindowTextW(g_hwndEdtSgdbKey, buf, 512);
+        s.steamGridDbApiKey = buf;
+    }
+    if (g_hwndEdtIgdbClientId != nullptr) {
+        GetWindowTextW(g_hwndEdtIgdbClientId, buf, 512);
+        s.igdbClientId = buf;
+    }
+    if (g_hwndEdtIgdbClientSecret != nullptr) {
+        GetWindowTextW(g_hwndEdtIgdbClientSecret, buf, 512);
+        s.igdbClientSecret = buf;
+    }
+
     if (SettingsManager::Save(s)) {
+        if (s.enableOneDriveBackup) {
+            Storage::SyncToOneDrive();
+        }
         SHChangeNotify(SHCNE_UPDATEDIR, SHCNF_PATHW, Storage::GetUserRootPath().c_str(), nullptr);
         EnumWindows(BroadcastRefreshToShellViews, 0);
         MessageBoxW(hwndParent, L"Integration settings successfully saved to Windows Game Explorer.", L"Windows Game Explorer", MB_OK | MB_ICONINFORMATION);
@@ -299,15 +360,118 @@ LRESULT CALLBACK ConfigWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPara
 
         g_hwndBtnOpenMetadataDir = CreateWindowExW(0, L"BUTTON", L"Open Metadata Folder",
             WS_CHILD | WS_VISIBLE | BS_OWNERDRAW,
-            36, card2Y + 64, 180, 30, hwnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_BTN_OPEN_METADATA_DIR)), nullptr, nullptr);
+            36, card2Y + 64, 170, 30, hwnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_BTN_OPEN_METADATA_DIR)), nullptr, nullptr);
         SendMessageW(g_hwndBtnOpenMetadataDir, WM_SETFONT, reinterpret_cast<WPARAM>(g_hFont), TRUE);
 
-        // Save Button
-        constexpr int saveY = card2Y + 106 + 14;
+        HWND hBtnOpenOneDrive = CreateWindowExW(0, L"BUTTON", L"Open OneDrive Folder",
+            WS_CHILD | WS_VISIBLE | BS_OWNERDRAW,
+            214, card2Y + 64, 175, 30, hwnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_BTN_OPEN_ONEDRIVE_DIR)), nullptr, nullptr);
+        SendMessageW(hBtnOpenOneDrive, WM_SETFONT, reinterpret_cast<WPARAM>(g_hFont), TRUE);
+
+        HWND hBtnSyncOneDrive = CreateWindowExW(0, L"BUTTON", L"Sync to OneDrive Now",
+            WS_CHILD | WS_VISIBLE | BS_OWNERDRAW,
+            397, card2Y + 64, 180, 30, hwnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_BTN_SYNC_ONEDRIVE)), nullptr, nullptr);
+        SendMessageW(hBtnSyncOneDrive, WM_SETFONT, reinterpret_cast<WPARAM>(g_hFontBold), TRUE);
+
+        // Card 3: Universal Achievement Credentials & API Keys
+        constexpr int card3Y = card2Y + 106 + 12;
+
+        HWND hLblSteamKey = CreateWindowExW(0, L"STATIC", L"Steam Web API Key:",
+            WS_CHILD | WS_VISIBLE,
+            36, card3Y + 34, 136, 20, hwnd, nullptr, nullptr, nullptr);
+        SendMessageW(hLblSteamKey, WM_SETFONT, reinterpret_cast<WPARAM>(g_hFont), TRUE);
+
+        g_hwndEdtSteamKey = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", L"",
+            WS_CHILD | WS_VISIBLE | ES_AUTOHSCROLL | ES_PASSWORD,
+            176, card3Y + 32, 216, 22, hwnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_EDT_STEAM_KEY)), nullptr, nullptr);
+        SendMessageW(g_hwndEdtSteamKey, WM_SETFONT, reinterpret_cast<WPARAM>(g_hFont), TRUE);
+
+        HWND hLblSteamId = CreateWindowExW(0, L"STATIC", L"SteamID64:",
+            WS_CHILD | WS_VISIBLE,
+            404, card3Y + 34, 76, 20, hwnd, nullptr, nullptr, nullptr);
+        SendMessageW(hLblSteamId, WM_SETFONT, reinterpret_cast<WPARAM>(g_hFont), TRUE);
+
+        g_hwndEdtSteamId = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", L"",
+            WS_CHILD | WS_VISIBLE | ES_AUTOHSCROLL,
+            484, card3Y + 32, 116, 22, hwnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_EDT_STEAM_ID)), nullptr, nullptr);
+        SendMessageW(g_hwndEdtSteamId, WM_SETFONT, reinterpret_cast<WPARAM>(g_hFont), TRUE);
+
+        HWND hLblRaUser = CreateWindowExW(0, L"STATIC", L"RetroAchievements User:",
+            WS_CHILD | WS_VISIBLE,
+            36, card3Y + 66, 148, 20, hwnd, nullptr, nullptr, nullptr);
+        SendMessageW(hLblRaUser, WM_SETFONT, reinterpret_cast<WPARAM>(g_hFont), TRUE);
+
+        g_hwndEdtRaUser = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", L"",
+            WS_CHILD | WS_VISIBLE | ES_AUTOHSCROLL,
+            188, card3Y + 64, 130, 22, hwnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_EDT_RA_USER)), nullptr, nullptr);
+        SendMessageW(g_hwndEdtRaUser, WM_SETFONT, reinterpret_cast<WPARAM>(g_hFont), TRUE);
+
+        HWND hLblRaKey = CreateWindowExW(0, L"STATIC", L"RetroAchievements API Key:",
+            WS_CHILD | WS_VISIBLE,
+            326, card3Y + 66, 166, 20, hwnd, nullptr, nullptr, nullptr);
+        SendMessageW(hLblRaKey, WM_SETFONT, reinterpret_cast<WPARAM>(g_hFont), TRUE);
+
+        g_hwndEdtRaKey = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", L"",
+            WS_CHILD | WS_VISIBLE | ES_AUTOHSCROLL | ES_PASSWORD,
+            496, card3Y + 64, 104, 22, hwnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_EDT_RA_KEY)), nullptr, nullptr);
+        SendMessageW(g_hwndEdtRaKey, WM_SETFONT, reinterpret_cast<WPARAM>(g_hFont), TRUE);
+
+        HWND hLblAchHelp = CreateWindowExW(0, L"STATIC",
+            L"Free API keys unlock global progress, rarity stats, and high-res badges across stores and emulators.",
+            WS_CHILD | WS_VISIBLE,
+            36, card3Y + 96, 560, 20, hwnd, nullptr, nullptr, nullptr);
+        SendMessageW(hLblAchHelp, WM_SETFONT, reinterpret_cast<WPARAM>(g_hFont), TRUE);
+
+        // Card 4: Fallback Artwork & Metadata Providers (Optional)
+        constexpr int card4Y = card3Y + 126 + 12;
+
+        HWND hLblSgdbKey = CreateWindowExW(0, L"STATIC", L"SteamGridDB API Key:",
+            WS_CHILD | WS_VISIBLE,
+            36, card4Y + 34, 150, 20, hwnd, nullptr, nullptr, nullptr);
+        SendMessageW(hLblSgdbKey, WM_SETFONT, reinterpret_cast<WPARAM>(g_hFont), TRUE);
+
+        g_hwndEdtSgdbKey = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", L"",
+            WS_CHILD | WS_VISIBLE | ES_AUTOHSCROLL | ES_PASSWORD,
+            190, card4Y + 32, 410, 22, hwnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_EDT_SGDB_KEY)), nullptr, nullptr);
+        SendMessageW(g_hwndEdtSgdbKey, WM_SETFONT, reinterpret_cast<WPARAM>(g_hFont), TRUE);
+
+        HWND hLblIgdbId = CreateWindowExW(0, L"STATIC", L"IGDB Client ID:",
+            WS_CHILD | WS_VISIBLE,
+            36, card4Y + 66, 116, 20, hwnd, nullptr, nullptr, nullptr);
+        SendMessageW(hLblIgdbId, WM_SETFONT, reinterpret_cast<WPARAM>(g_hFont), TRUE);
+
+        g_hwndEdtIgdbClientId = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", L"",
+            WS_CHILD | WS_VISIBLE | ES_AUTOHSCROLL,
+            156, card4Y + 64, 160, 22, hwnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_EDT_IGDB_CLIENT_ID)), nullptr, nullptr);
+        SendMessageW(g_hwndEdtIgdbClientId, WM_SETFONT, reinterpret_cast<WPARAM>(g_hFont), TRUE);
+
+        HWND hLblIgdbSecret = CreateWindowExW(0, L"STATIC", L"IGDB Client Secret:",
+            WS_CHILD | WS_VISIBLE,
+            324, card4Y + 66, 130, 20, hwnd, nullptr, nullptr, nullptr);
+        SendMessageW(hLblIgdbSecret, WM_SETFONT, reinterpret_cast<WPARAM>(g_hFont), TRUE);
+
+        g_hwndEdtIgdbClientSecret = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", L"",
+            WS_CHILD | WS_VISIBLE | ES_AUTOHSCROLL | ES_PASSWORD,
+            458, card4Y + 64, 142, 22, hwnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_EDT_IGDB_CLIENT_SECRET)), nullptr, nullptr);
+        SendMessageW(g_hwndEdtIgdbClientSecret, WM_SETFONT, reinterpret_cast<WPARAM>(g_hFont), TRUE);
+
+        HWND hLblFallbackHelp = CreateWindowExW(0, L"STATIC",
+            L"Optional fallbacks when storefronts lack native box art. Keys are stored locally.",
+            WS_CHILD | WS_VISIBLE,
+            36, card4Y + 96, 560, 20, hwnd, nullptr, nullptr, nullptr);
+        SendMessageW(hLblFallbackHelp, WM_SETFONT, reinterpret_cast<WPARAM>(g_hFont), TRUE);
+
+        // Save Button & Reset Cache Button
+        constexpr int saveY = card4Y + 126 + 14;
         HWND hBtnSave = CreateWindowExW(0, L"BUTTON", Localization::GetStrings().configSaveAndRefreshBtn,
             WS_CHILD | WS_VISIBLE | BS_OWNERDRAW,
             20, saveY, 190, 38, hwnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_BTN_SAVE)), nullptr, nullptr);
         SendMessageW(hBtnSave, WM_SETFONT, reinterpret_cast<WPARAM>(g_hFontBold), TRUE);
+
+        HWND hBtnResetCache = CreateWindowExW(0, L"BUTTON", L"\U0001F9F9 Reset Art Cache",
+            WS_CHILD | WS_VISIBLE | BS_OWNERDRAW,
+            220, saveY, 190, 38, hwnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_BTN_RESET_CACHE)), nullptr, nullptr);
+        SendMessageW(hBtnResetCache, WM_SETFONT, reinterpret_cast<WPARAM>(g_hFont), TRUE);
 
         LoadConfigValues();
         return 0;
@@ -568,6 +732,8 @@ LRESULT CALLBACK ConfigWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPara
         constexpr int card0Y = TITLE_BAR_HEIGHT + 12;
         constexpr int card1Y = card0Y + 105 + 12;
         constexpr int card2Y = card1Y + 158 + 12;
+        constexpr int card3Y = card2Y + 106 + 12;
+        constexpr int card4Y = card3Y + 126 + 12;
 
         const struct CardSpec {
             int y, h;
@@ -575,7 +741,9 @@ LRESULT CALLBACK ConfigWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPara
         } cards[] = {
             { card0Y, 105, L"File Explorer Shell Integration" },
             { card1Y, 158, L"Default WinUI XAML Viewport Layout & Game Explorer Manager" },
-            { card2Y, 106, L"Cloud Sync & Per-Game Metadata Storage" }
+            { card2Y, 106, L"Cloud Sync & Per-Game Metadata Storage" },
+            { card3Y, 126, L"Universal Multi-Source Achievement Credentials & API Keys" },
+            { card4Y, 126, L"Fallback Artwork & Metadata Providers (Optional)" }
         };
 
         for (const auto& c : cards) {
@@ -644,7 +812,7 @@ LRESULT CALLBACK ConfigWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPara
             SetBkMode(hdcBtn, TRANSPARENT);
             SetTextColor(hdcBtn, txtColor);
             SelectObject(hdcBtn, boldFont ? g_hFontBold : g_hFont);
-            DrawTextW(hdcBtn, text, -1, &rcBtn, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+            DrawTextW(hdcBtn, text, -1, &rcBtn, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
         };
 
         if (pDis->CtlID == IDC_BTN_OPEN_EXPLORER) {
@@ -664,8 +832,20 @@ LRESULT CALLBACK ConfigWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPara
             drawStyledButton(L"Open Metadata Folder", false, false);
             return TRUE;
         }
+        if (pDis->CtlID == IDC_BTN_OPEN_ONEDRIVE_DIR) {
+            drawStyledButton(L"Open OneDrive Folder", false, false);
+            return TRUE;
+        }
+        if (pDis->CtlID == IDC_BTN_SYNC_ONEDRIVE) {
+            drawStyledButton(L"Sync to OneDrive Now", true, true);
+            return TRUE;
+        }
         if (pDis->CtlID == IDC_BTN_SAVE) {
             drawStyledButton(L"Save Configuration", true, true);
+            return TRUE;
+        }
+        if (pDis->CtlID == IDC_BTN_RESET_CACHE) {
+            drawStyledButton(L"\U0001F9F9 Reset Art Cache", false, false);
             return TRUE;
         }
         break;
@@ -673,6 +853,22 @@ LRESULT CALLBACK ConfigWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPara
 
     case WM_COMMAND: {
         const int id = LOWORD(wParam);
+        if (id == IDC_BTN_RESET_CACHE) {
+            const int ret = MessageBoxW(hwnd,
+                L"Are you sure you want to reset and purge the artwork cache?\n\n"
+                L"This will delete all cached covers, heroes, icons, and thumbnails in:\n"
+                L"%USERPROFILE%\\Game Explorer\\cache\\art\\\n\n"
+                L"Fresh authentic images will be fetched cleanly from providers when games are viewed.",
+                L"Reset Artwork Cache",
+                MB_YESNO | MB_ICONQUESTION
+            );
+            if (ret == IDYES) {
+                StorefrontScanner::ResetArtworkCache();
+                MessageBoxW(hwnd, L"Artwork cache has been successfully reset.", L"Artwork Cache", MB_OK | MB_ICONINFORMATION);
+            }
+            return 0;
+        }
+
         if (id == IDC_BTN_SAVE) {
             SaveConfigValues(hwnd);
             return 0;
@@ -694,6 +890,24 @@ LRESULT CALLBACK ConfigWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPara
             Storage::EnsureDirectoriesCreated();
             const fs::path metaDir = Storage::GetMetadataPath();
             ShellExecuteW(hwnd, L"open", metaDir.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+            return 0;
+        }
+        if (id == IDC_BTN_OPEN_ONEDRIVE_DIR) {
+            Storage::EnsureOneDriveDirectoriesCreated();
+            const fs::path oneDriveDir = Storage::GetOneDrivePath();
+            if (!oneDriveDir.empty() && fs::exists(oneDriveDir)) {
+                ShellExecuteW(hwnd, L"open", oneDriveDir.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+            } else {
+                MessageBoxW(hwnd, L"No local OneDrive installation detected on this system.", L"OneDrive Sync", MB_OK | MB_ICONWARNING);
+            }
+            return 0;
+        }
+        if (id == IDC_BTN_SYNC_ONEDRIVE) {
+            if (Storage::SyncToOneDrive()) {
+                MessageBoxW(hwnd, L"Library metadata, database backups, and artwork successfully synced to OneDrive.", L"OneDrive Sync", MB_OK | MB_ICONINFORMATION);
+            } else {
+                MessageBoxW(hwnd, L"Failed to sync to OneDrive. Please ensure OneDrive is running and accessible.", L"OneDrive Sync", MB_OK | MB_ICONERROR);
+            }
             return 0;
         }
         break;
@@ -718,11 +932,19 @@ LRESULT CALLBACK ConfigWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPara
         return reinterpret_cast<LRESULT>(g_hCardBrush);
     }
 
+    case WM_CTLCOLOREDIT: {
+        auto hdc = reinterpret_cast<HDC>(wParam);
+        SetBkColor(hdc, g_isDarkMode ? RGB(32, 32, 32) : RGB(255, 255, 255));
+        SetTextColor(hdc, g_palette.textPrimary);
+        return reinterpret_cast<LRESULT>(g_hEditBrush);
+    }
+
     case WM_DESTROY:
         if (g_hFont != nullptr) DeleteObject(g_hFont);
         if (g_hFontBold != nullptr) DeleteObject(g_hFontBold);
         if (g_hBgBrush != nullptr) DeleteObject(g_hBgBrush);
         if (g_hCardBrush != nullptr) DeleteObject(g_hCardBrush);
+        if (g_hEditBrush != nullptr) DeleteObject(g_hEditBrush);
         if (g_hAppIcon != nullptr) DestroyIcon(g_hAppIcon);
         PostQuitMessage(0);
         return 0;
@@ -742,6 +964,7 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE /*hPrevInstance*/, PWSTR /*lp
     g_palette = DarkMode::GetPalette(g_isDarkMode);
     g_hBgBrush = CreateSolidBrush(g_palette.canvasBg);
     g_hCardBrush = CreateSolidBrush(g_palette.cardBg);
+    g_hEditBrush = CreateSolidBrush(g_isDarkMode ? RGB(32, 32, 32) : RGB(255, 255, 255));
 
     const wchar_t* CLASS_NAME = L"GameExplorerConfigWnd";
     WNDCLASSEXW wc{};
@@ -757,7 +980,7 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE /*hPrevInstance*/, PWSTR /*lp
     HWND hwnd = CreateWindowExW(
         0, CLASS_NAME, Localization::GetStrings().configWindowTitle,
         WS_POPUP | WS_THICKFRAME | WS_MINIMIZEBOX | WS_MAXIMIZEBOX | WS_CLIPCHILDREN | WS_CLIPSIBLINGS,
-        CW_USEDEFAULT, CW_USEDEFAULT, 640, 526,
+        CW_USEDEFAULT, CW_USEDEFAULT, 640, 820,
         nullptr, nullptr, hInstance, nullptr
     );
 

@@ -7,6 +7,8 @@
 #include "GameExplorerCore/StorefrontScanner.h"
 #include "GameExplorerCore/PlatformLauncher.h"
 #include "GameExplorerCore/Localization.h"
+#include "GameExplorerCore/AchievementEngine.h"
+#include "GameExplorerCore/ImageValidator.h"
 
 #ifdef GetCurrentTime
 #undef GetCurrentTime
@@ -185,6 +187,24 @@ wuxmi::BitmapImage LoadLocalBitmap(const std::wstring& filePath) {
     }
 }
 
+bool GetLocalImageDimensions(const std::wstring& path, UINT& outW, UINT& outH) {
+    outW = 0;
+    outH = 0;
+    if (path.empty()) return false;
+    std::error_code ec;
+    if (!fs::exists(path, ec)) return false;
+    EnsureGdiplusInitialized();
+    try {
+        Gdiplus::Image img(path.c_str());
+        if (img.GetLastStatus() == Gdiplus::Ok) {
+            outW = img.GetWidth();
+            outH = img.GetHeight();
+            return (outW > 0 && outH > 0);
+        }
+    } catch (...) {}
+    return false;
+}
+
 } // namespace
 
 static thread_local wux::Hosting::WindowsXamlManager s_xamlManager{ nullptr };
@@ -193,6 +213,9 @@ struct ShellView::XamlState {
     wux::Hosting::DesktopWindowXamlSource xamlSource{ nullptr };
     wuxc::Grid rootGrid{ nullptr };
     wuxc::Border sidepaneHost{ nullptr };
+    wuxc::ScrollViewer mainScroll{ nullptr };
+    std::vector<wuxc::Border> providerCards;
+    std::vector<wuxc::Border> gameCards;
 };
 
 static std::vector<GameItem> s_cachedGames;
@@ -406,10 +429,27 @@ void ShellView::LoadDataAsync(HWND hwnd) {
         addProviderIfInstalled(PlatformType::HoYoPlay,    L"HoYoPlay",        L"COGNOSPHERE",            PlatformLauncher::GetHoYoPlayExecutablePath());
         addProviderIfInstalled(PlatformType::Paradox,     L"Paradox Launcher",L"Paradox Interactive",    PlatformLauncher::GetParadoxExecutablePath());
         addProviderIfInstalled(PlatformType::ESDE,        L"ES-DE",           L"EmulationStation DE",    PlatformLauncher::GetESDEExecutablePath());
+        addProviderIfInstalled(PlatformType::Dolphin,     L"Dolphin",         L"Dolphin Team",           PlatformLauncher::GetDolphinExecutablePath());
+        addProviderIfInstalled(PlatformType::Project64,   L"Project64",       L"Project64 Team",         PlatformLauncher::GetProject64ExecutablePath());
+        addProviderIfInstalled(PlatformType::PCSX2,       L"PCSX2",           L"PCSX2 Team",             PlatformLauncher::GetPCSX2ExecutablePath());
+        addProviderIfInstalled(PlatformType::DuckStation, L"DuckStation",     L"DuckStation Team",       PlatformLauncher::GetDuckStationExecutablePath());
+        addProviderIfInstalled(PlatformType::PPSSPP,      L"PPSSPP",          L"Henrik Rydgård",         PlatformLauncher::GetPPSSPPExecutablePath());
+        addProviderIfInstalled(PlatformType::mGBA,        L"mGBA",            L"endrift / mGBA Team",    PlatformLauncher::GetmGBAExecutablePath());
+        addProviderIfInstalled(PlatformType::Snes9x,      L"Snes9x",          L"Snes9x Team",            PlatformLauncher::GetSnes9xExecutablePath());
+        addProviderIfInstalled(PlatformType::melonDS,     L"melonDS",         L"melonDS Team",           PlatformLauncher::GetMelonDSExecutablePath());
+        addProviderIfInstalled(PlatformType::Citra,       L"Citra",           L"Citra Team",             PlatformLauncher::GetCitraExecutablePath());
+        addProviderIfInstalled(PlatformType::Flycast,     L"Flycast",         L"flyinghead / Flycast",   PlatformLauncher::GetFlycastExecutablePath());
+        addProviderIfInstalled(PlatformType::RPCS3,       L"RPCS3",           L"RPCS3 Team",             PlatformLauncher::GetRPCS3ExecutablePath());
+        addProviderIfInstalled(PlatformType::RetroArch,   L"RetroArch",       L"Libretro Team",          PlatformLauncher::GetRetroArchExecutablePath());
 
         auto& db = Database::Instance();
         if (!db.IsOpen()) {
             db.Open(Storage::GetDatabasePath());
+        }
+
+        // If cache is invalid or unpopulated, run full background scan to discover all new games & ROMs
+        if (!s_cacheValid) {
+            StorefrontScanner::ScanAll(db);
         }
 
         std::vector<GameItem> games = db.GetAllGames();
@@ -418,6 +458,10 @@ void ShellView::LoadDataAsync(HWND hwnd) {
                 g.iconPath = EnsureExtractedIconPng(g.appId, g.executablePath);
             } else if (!g.iconPath.empty()) {
                 g.iconPath = EnsureExtractedIconPng(g.appId, g.iconPath);
+            }
+            if (ImageValidator::ValidateAndFixGameArtwork(g)) {
+                db.UpsertGame(g);
+                StorefrontScanner::SavePerGameMetadata(g);
             }
         }
 
@@ -449,6 +493,94 @@ void ShellView::SwitchLayoutMode(LayoutMode mode) {
     BuildXamlViewport();
 }
 
+void ShellView::SelectGame(int index) {
+    if (m_selectedGameIndex == index && m_selectedProviderIndex == -1) return;
+
+    const auto bgCard      = m_isDarkMode ? MakeBrush(255, 36, 36, 36)   : MakeBrush(255, 255, 255, 255);
+    const auto bgCardSel   = m_isDarkMode ? MakeBrush(255, 48, 48, 56)   : MakeBrush(255, 235, 243, 254);
+    const auto borderBrush = m_isDarkMode ? MakeBrush(255, 52, 52, 52)   : MakeBrush(255, 220, 220, 220);
+    const auto accentBrush = MakeBrush(255, 124, 58, 237);
+
+    // Unselect previously selected provider
+    if (m_xaml && m_selectedProviderIndex >= 0 && static_cast<size_t>(m_selectedProviderIndex) < m_xaml->providerCards.size()) {
+        auto prevProv = m_xaml->providerCards[static_cast<size_t>(m_selectedProviderIndex)];
+        if (prevProv) {
+            prevProv.Background(bgCard);
+            prevProv.BorderBrush(borderBrush);
+            prevProv.BorderThickness(wux::ThicknessHelper::FromUniformLength(1));
+        }
+    }
+
+    // Unselect previously selected game
+    if (m_xaml && m_selectedGameIndex >= 0 && static_cast<size_t>(m_selectedGameIndex) < m_xaml->gameCards.size()) {
+        auto prevGame = m_xaml->gameCards[static_cast<size_t>(m_selectedGameIndex)];
+        if (prevGame) {
+            prevGame.Background(bgCard);
+            prevGame.BorderBrush(borderBrush);
+            prevGame.BorderThickness(wux::ThicknessHelper::FromUniformLength(1));
+        }
+    }
+
+    m_selectedGameIndex = index;
+    m_selectedProviderIndex = -1;
+
+    // Highlight newly selected game in-place without touching scroll viewer
+    if (m_xaml && m_selectedGameIndex >= 0 && static_cast<size_t>(m_selectedGameIndex) < m_xaml->gameCards.size()) {
+        auto selGame = m_xaml->gameCards[static_cast<size_t>(m_selectedGameIndex)];
+        if (selGame) {
+            selGame.Background(bgCardSel);
+            selGame.BorderBrush(accentBrush);
+            selGame.BorderThickness(wux::ThicknessHelper::FromUniformLength(2));
+        }
+    }
+
+    RebuildSidepane();
+}
+
+void ShellView::SelectProvider(int index) {
+    if (m_selectedProviderIndex == index && m_selectedGameIndex == -1) return;
+
+    const auto bgCard      = m_isDarkMode ? MakeBrush(255, 36, 36, 36)   : MakeBrush(255, 255, 255, 255);
+    const auto bgCardSel   = m_isDarkMode ? MakeBrush(255, 48, 48, 56)   : MakeBrush(255, 235, 243, 254);
+    const auto borderBrush = m_isDarkMode ? MakeBrush(255, 52, 52, 52)   : MakeBrush(255, 220, 220, 220);
+    const auto accentBrush = MakeBrush(255, 124, 58, 237);
+
+    // Unselect previously selected game
+    if (m_xaml && m_selectedGameIndex >= 0 && static_cast<size_t>(m_selectedGameIndex) < m_xaml->gameCards.size()) {
+        auto prevGame = m_xaml->gameCards[static_cast<size_t>(m_selectedGameIndex)];
+        if (prevGame) {
+            prevGame.Background(bgCard);
+            prevGame.BorderBrush(borderBrush);
+            prevGame.BorderThickness(wux::ThicknessHelper::FromUniformLength(1));
+        }
+    }
+
+    // Unselect previously selected provider
+    if (m_xaml && m_selectedProviderIndex >= 0 && static_cast<size_t>(m_selectedProviderIndex) < m_xaml->providerCards.size()) {
+        auto prevProv = m_xaml->providerCards[static_cast<size_t>(m_selectedProviderIndex)];
+        if (prevProv) {
+            prevProv.Background(bgCard);
+            prevProv.BorderBrush(borderBrush);
+            prevProv.BorderThickness(wux::ThicknessHelper::FromUniformLength(1));
+        }
+    }
+
+    m_selectedProviderIndex = index;
+    m_selectedGameIndex = -1;
+
+    // Highlight newly selected provider in-place without touching scroll viewer
+    if (m_xaml && m_selectedProviderIndex >= 0 && static_cast<size_t>(m_selectedProviderIndex) < m_xaml->providerCards.size()) {
+        auto selProv = m_xaml->providerCards[static_cast<size_t>(m_selectedProviderIndex)];
+        if (selProv) {
+            selProv.Background(bgCardSel);
+            selProv.BorderBrush(accentBrush);
+            selProv.BorderThickness(wux::ThicknessHelper::FromUniformLength(2));
+        }
+    }
+
+    RebuildSidepane();
+}
+
 void ShellView::RebuildSidepane() {
     if (!m_xaml || !m_xaml->sidepaneHost) return;
 
@@ -475,27 +607,96 @@ void ShellView::RebuildSidepane() {
     if (m_selectedGameIndex >= 0 && m_selectedGameIndex < static_cast<int>(m_games.size())) {
         const auto& game = m_games[static_cast<size_t>(m_selectedGameIndex)];
 
-        // Artwork Preview Card
+        // Multi-Viewport Sized Artwork Preview Card for Details Pane
         wuxc::Border artCard;
         artCard.CornerRadius(wux::CornerRadiusHelper::FromUniformRadius(8));
         artCard.Background(bgCard);
         artCard.BorderBrush(borderBrush);
         artCard.BorderThickness(wux::ThicknessHelper::FromUniformLength(1));
-        artCard.Height(240);
 
-        std::wstring previewPath = !game.coverArtPath.empty() ? game.coverArtPath : (!game.heroArtPath.empty() ? game.heroArtPath : game.iconPath);
-        if (auto bmp = LoadLocalBitmap(previewPath)) {
+        // Priority for details pane preview:
+        // 1. Dedicated detailsArtPath (CAN be an animated GIF or high-res preview!)
+        // 2. heroArtPath (validated widescreen/static banner)
+        // 3. coverArtPath (validated vertical box art card)
+        // 4. iconPath (square desktop icon)
+        std::wstring previewPath;
+        if (!game.detailsArtPath.empty() && ImageValidator::IsValidDetails(game.detailsArtPath)) {
+            previewPath = game.detailsArtPath;
+        } else if (!game.heroArtPath.empty() && ImageValidator::IsValidHero(game.heroArtPath)) {
+            previewPath = game.heroArtPath;
+        } else if (!game.coverArtPath.empty() && ImageValidator::IsValidCover(game.coverArtPath)) {
+            previewPath = game.coverArtPath;
+        } else if (!game.iconPath.empty() && ImageValidator::IsValidIcon(game.iconPath)) {
+            previewPath = game.iconPath;
+        } else {
+            previewPath = !game.detailsArtPath.empty() ? game.detailsArtPath
+                : (!game.heroArtPath.empty() ? game.heroArtPath
+                : (!game.coverArtPath.empty() ? game.coverArtPath : game.iconPath));
+        }
+
+        UINT imgW = 0, imgH = 0;
+        const bool hasDims = GetLocalImageDimensions(previewPath, imgW, imgH);
+        auto previewBmp = LoadLocalBitmap(previewPath);
+
+        if (previewBmp) {
             wuxc::Image img;
-            img.Source(bmp);
-            if (!game.coverArtPath.empty() || !game.heroArtPath.empty()) {
-                img.Stretch(wuxm::Stretch::Uniform);
+            img.Source(previewBmp);
+
+            if (hasDims && imgH > 0) {
+                const double ratio = static_cast<double>(imgW) / static_cast<double>(imgH);
+                if (ratio >= 2.4) {
+                    // Ultrawide Steam / SteamGridDB 3.1:1 Hero Banner (1920x620)
+                    const double cardH = std::clamp(300.0 / ratio, 85.0, 130.0);
+                    artCard.Width(300.0);
+                    artCard.Height(cardH);
+                    artCard.HorizontalAlignment(wux::HorizontalAlignment::Stretch);
+                    img.Stretch(wuxm::Stretch::UniformToFill);
+                } else if (ratio >= 1.35) {
+                    // Widescreen 16:9 / 21:9 Hero Banner
+                    const double cardH = std::clamp(300.0 / ratio, 140.0, 185.0);
+                    artCard.Width(300.0);
+                    artCard.Height(cardH);
+                    artCard.HorizontalAlignment(wux::HorizontalAlignment::Stretch);
+                    img.Stretch(wuxm::Stretch::UniformToFill);
+                } else if (ratio >= 0.85) {
+                    // Static card (e.g. Itch 315x250 ratio 1.26, or 4:3)
+                    const double cardH = std::clamp(300.0 / ratio, 180.0, 245.0);
+                    artCard.Width(300.0);
+                    artCard.Height(cardH);
+                    artCard.HorizontalAlignment(wux::HorizontalAlignment::Stretch);
+                    img.Stretch(wuxm::Stretch::UniformToFill);
+                } else {
+                    // Vertical Box Art (~2:3 ratio)
+                    const double cardH = 255.0;
+                    const double cardW = std::clamp(cardH * ratio, 145.0, 190.0);
+                    artCard.Width(cardW);
+                    artCard.Height(cardH);
+                    artCard.HorizontalAlignment(wux::HorizontalAlignment::Center);
+                    img.Stretch(wuxm::Stretch::UniformToFill);
+                }
+            } else if (!game.detailsArtPath.empty() || !game.heroArtPath.empty()) {
+                artCard.Width(300.0);
+                artCard.Height(169.0);
+                artCard.HorizontalAlignment(wux::HorizontalAlignment::Stretch);
+                img.Stretch(wuxm::Stretch::UniformToFill);
+            } else if (!game.coverArtPath.empty()) {
+                artCard.Width(170.0);
+                artCard.Height(255.0);
+                artCard.HorizontalAlignment(wux::HorizontalAlignment::Center);
+                img.Stretch(wuxm::Stretch::UniformToFill);
             } else {
-                img.Width(96);
-                img.Height(96);
-                img.HorizontalAlignment(wux::HorizontalAlignment::Center);
-                img.VerticalAlignment(wux::VerticalAlignment::Center);
+                artCard.Width(96.0);
+                artCard.Height(96.0);
+                artCard.HorizontalAlignment(wux::HorizontalAlignment::Center);
+                img.Width(72.0);
+                img.Height(72.0);
+                img.Stretch(wuxm::Stretch::Uniform);
             }
             artCard.Child(img);
+        } else {
+            artCard.Width(96.0);
+            artCard.Height(96.0);
+            artCard.HorizontalAlignment(wux::HorizontalAlignment::Center);
         }
         stack.Children().Append(artCard);
 
@@ -573,6 +774,163 @@ void ShellView::RebuildSidepane() {
             });
             stack.Children().Append(dirBtn);
         }
+
+        // Achievements & Trophy Progress Section
+        auto achievements = AchievementEngine::Instance().GetAchievements(game, false);
+        auto progress = AchievementEngine::Instance().GetProgress(game.appId);
+
+        wuxc::Border achCard;
+        achCard.CornerRadius(wux::CornerRadiusHelper::FromUniformRadius(8));
+        achCard.Background(bgCard);
+        achCard.BorderBrush(borderBrush);
+        achCard.BorderThickness(wux::ThicknessHelper::FromUniformLength(1));
+        achCard.Padding(wux::ThicknessHelper::FromUniformLength(12));
+
+        wuxc::StackPanel achStack;
+        achStack.Spacing(8);
+
+        // Header with trophy and percentage
+        wuxc::Grid achHeaderGrid;
+        wuxc::ColumnDefinition cDefTitle, cDefCount;
+        cDefTitle.Width(wux::GridLengthHelper::FromValueAndType(1, wux::GridUnitType::Star));
+        cDefCount.Width(wux::GridLengthHelper::Auto());
+        achHeaderGrid.ColumnDefinitions().Append(cDefTitle);
+        achHeaderGrid.ColumnDefinitions().Append(cDefCount);
+
+        wuxc::TextBlock achHeaderTb;
+        achHeaderTb.Text(L"\U0001F3C6 Achievements");
+        achHeaderTb.FontSize(13);
+        achHeaderTb.FontWeight(winrt::Windows::UI::Text::FontWeights::SemiBold());
+        achHeaderTb.Foreground(textPrimary);
+        wuxc::Grid::SetColumn(achHeaderTb, 0);
+        achHeaderGrid.Children().Append(achHeaderTb);
+
+        wuxc::TextBlock achCountTb;
+        if (progress.totalCount > 0) {
+            std::wstring progressStr = std::to_wstring(progress.unlockedCount) + L" / " +
+                                       std::to_wstring(progress.totalCount) + L" (" +
+                                       std::to_wstring(static_cast<int>(progress.completionPercentage)) + L"%)";
+            achCountTb.Text(progressStr);
+        } else {
+            achCountTb.Text(L"0 / 0");
+        }
+        achCountTb.FontSize(12);
+        achCountTb.Foreground(textSec);
+        wuxc::Grid::SetColumn(achCountTb, 1);
+        achHeaderGrid.Children().Append(achCountTb);
+
+        achStack.Children().Append(achHeaderGrid);
+
+        if (progress.totalCount > 0) {
+            // Progress Bar
+            wuxc::ProgressBar progBar;
+            progBar.Minimum(0);
+            progBar.Maximum(progress.totalCount);
+            progBar.Value(progress.unlockedCount);
+            progBar.Height(5);
+            progBar.Foreground(accentBrush);
+            achStack.Children().Append(progBar);
+
+            // Recent / Top Achievements list
+            wuxc::StackPanel itemsStack;
+            itemsStack.Spacing(6);
+
+            const size_t maxShow = (achievements.size() < 4) ? achievements.size() : 4;
+            for (size_t i = 0; i < maxShow; ++i) {
+                const auto& item = achievements[i];
+                wuxc::Grid itemGrid;
+                wuxc::ColumnDefinition colIcon, colInfo;
+                colIcon.Width(wux::GridLengthHelper::FromPixels(36));
+                colInfo.Width(wux::GridLengthHelper::FromValueAndType(1, wux::GridUnitType::Star));
+                itemGrid.ColumnDefinitions().Append(colIcon);
+                itemGrid.ColumnDefinitions().Append(colInfo);
+
+                // Badge icon
+                std::wstring iconUri = item.isUnlocked ? item.iconUnlockedUrl : item.iconLockedUrl;
+                if (iconUri.empty()) iconUri = item.iconUnlockedUrl;
+
+                wuxc::Border iconBorder;
+                iconBorder.Width(30);
+                iconBorder.Height(30);
+                iconBorder.CornerRadius(wux::CornerRadiusHelper::FromUniformRadius(4));
+                iconBorder.Background(m_isDarkMode ? MakeBrush(255, 30, 30, 30) : MakeBrush(255, 230, 230, 230));
+                
+                if (auto bmp = LoadLocalBitmap(iconUri)) {
+                    wuxc::Image img;
+                    img.Source(bmp);
+                    img.Stretch(wuxm::Stretch::UniformToFill);
+                    if (!item.isUnlocked) {
+                        img.Opacity(0.5);
+                    }
+                    iconBorder.Child(img);
+                }
+                wuxc::Grid::SetColumn(iconBorder, 0);
+                itemGrid.Children().Append(iconBorder);
+
+                // Info text (Title and rarity/status)
+                wuxc::StackPanel infoPanel;
+                infoPanel.VerticalAlignment(wux::VerticalAlignment::Center);
+
+                wuxc::TextBlock itemTitleTb;
+                itemTitleTb.Text(item.title);
+                itemTitleTb.FontSize(12);
+                itemTitleTb.FontWeight(winrt::Windows::UI::Text::FontWeights::SemiBold());
+                itemTitleTb.Foreground(item.isUnlocked ? textPrimary : textSec);
+                itemTitleTb.TextTrimming(wux::TextTrimming::CharacterEllipsis);
+                infoPanel.Children().Append(itemTitleTb);
+
+                wuxc::TextBlock itemSubTb;
+                std::wstring subText;
+                if (item.isUnlocked) {
+                    subText = L"Unlocked";
+                } else if (!item.description.empty()) {
+                    subText = item.description;
+                } else {
+                    subText = L"Locked";
+                }
+                if (item.rarityPercentage > 0.0f) {
+                    wchar_t rarityBuf[32];
+                    swprintf_s(rarityBuf, L" \u2022 %.1f%%", item.rarityPercentage);
+                    subText += rarityBuf;
+                }
+                itemSubTb.Text(subText);
+                itemSubTb.FontSize(11);
+                itemSubTb.Foreground(textSec);
+                itemSubTb.TextTrimming(wux::TextTrimming::CharacterEllipsis);
+                infoPanel.Children().Append(itemSubTb);
+
+                wuxc::Grid::SetColumn(infoPanel, 1);
+                itemGrid.Children().Append(infoPanel);
+
+                itemsStack.Children().Append(itemGrid);
+            }
+            achStack.Children().Append(itemsStack);
+        } else {
+            // No achievements found yet - provide a Sync / Refresh button
+            wuxc::Button syncBtn;
+            syncBtn.Content(winrt::box_value(L"Sync Achievements"));
+            syncBtn.HorizontalAlignment(wux::HorizontalAlignment::Stretch);
+            syncBtn.Background(bgDrawer);
+            syncBtn.Foreground(textPrimary);
+            syncBtn.BorderBrush(borderBrush);
+            syncBtn.BorderThickness(wux::ThicknessHelper::FromUniformLength(1));
+            syncBtn.CornerRadius(wux::CornerRadiusHelper::FromUniformRadius(4));
+            syncBtn.Padding(wux::ThicknessHelper::FromLengths(8, 4, 8, 4));
+
+            const auto selectedGame = game;
+            syncBtn.Click([this, selectedGame](wf::IInspectable const&, wux::RoutedEventArgs const&) {
+                std::thread([this, selectedGame]() {
+                    (void)AchievementEngine::Instance().GetAchievements(selectedGame, true);
+                    if (m_hwndView) {
+                        PostMessageW(m_hwndView, WM_APP + 42, 0, 0);
+                    }
+                }).detach();
+            });
+            achStack.Children().Append(syncBtn);
+        }
+
+        achCard.Child(achStack);
+        stack.Children().Append(achCard);
 
         // Metadata Specs
         auto addMetaRow = [&](const wchar_t* label, const std::wstring& val) {
@@ -762,6 +1120,12 @@ void ShellView::RebuildSidepane() {
 void ShellView::BuildXamlViewport() {
     if (!m_xaml || !m_xaml->rootGrid) return;
 
+    const double savedScroll = (m_xaml && m_xaml->mainScroll) ? m_xaml->mainScroll.VerticalOffset() : 0.0;
+    if (m_xaml) {
+        m_xaml->providerCards.clear();
+        m_xaml->gameCards.clear();
+    }
+
     m_xaml->rootGrid.Children().Clear();
     m_xaml->rootGrid.RowDefinitions().Clear();
     m_xaml->rootGrid.ColumnDefinitions().Clear();
@@ -829,7 +1193,7 @@ void ShellView::BuildXamlViewport() {
 
     const auto& loc = Localization::GetStrings();
     leftToolbar.Children().Append(makeModeBtn(loc.viewTiles, LayoutMode::CoverArt));
-    leftToolbar.Children().Append(makeModeBtn(L"Hero Banner (~16:9)", LayoutMode::HeroBanner));
+    leftToolbar.Children().Append(makeModeBtn(L"Hero Banner (Widescreen)", LayoutMode::HeroBanner));
     leftToolbar.Children().Append(makeModeBtn(loc.viewDetails, LayoutMode::DetailsView));
     wuxc::Grid::SetColumn(leftToolbar, 0);
     topGrid.Children().Append(leftToolbar);
@@ -981,9 +1345,7 @@ void ShellView::BuildXamlViewport() {
             const std::wstring exePath = prov.executablePath;
             const PlatformType provPlat = prov.platform;
             card.Tapped([this, provIdx](wf::IInspectable const&, wuxi::TappedRoutedEventArgs const&) {
-                m_selectedProviderIndex = provIdx;
-                m_selectedGameIndex = -1;
-                BuildXamlViewport();
+                SelectProvider(provIdx);
             });
             card.DoubleTapped([this, exePath, provPlat](wf::IInspectable const&, wuxi::DoubleTappedRoutedEventArgs const&) {
                 if (provPlat == PlatformType::Xbox) {
@@ -993,6 +1355,7 @@ void ShellView::BuildXamlViewport() {
                 }
             });
 
+            if (m_xaml) m_xaml->providerCards.push_back(card);
             provWrap.Children().Append(card);
         }
         mainStack.Children().Append(provWrap);
@@ -1112,7 +1475,9 @@ void ShellView::BuildXamlViewport() {
                 rowGrid.ColumnDefinitions().Append(c2);
                 rowGrid.ColumnDefinitions().Append(c3);
 
-                std::wstring thumbPath = !g.iconPath.empty() ? g.iconPath : g.coverArtPath;
+                std::wstring thumbPath = !g.iconPath.empty() && ImageValidator::IsValidIcon(g.iconPath)
+                    ? g.iconPath
+                    : (!g.executablePath.empty() ? EnsureExtractedIconPng(g.appId, g.executablePath) : L"");
                 if (auto bmp = LoadLocalBitmap(thumbPath)) {
                     wuxc::Image ico;
                     ico.Source(bmp);
@@ -1152,9 +1517,7 @@ void ShellView::BuildXamlViewport() {
 
                 const int gIdx = static_cast<int>(i);
                 rowCard.Tapped([this, gIdx](wf::IInspectable const&, wuxi::TappedRoutedEventArgs const&) {
-                    m_selectedGameIndex = gIdx;
-                    m_selectedProviderIndex = -1;
-                    BuildXamlViewport();
+                    SelectGame(gIdx);
                 });
                 rowCard.DoubleTapped([this, gIdx](wf::IInspectable const&, wuxi::DoubleTappedRoutedEventArgs const&) {
                     if (gIdx >= 0 && gIdx < static_cast<int>(m_games.size())) {
@@ -1162,15 +1525,16 @@ void ShellView::BuildXamlViewport() {
                     }
                 });
 
+                if (m_xaml) m_xaml->gameCards.push_back(rowCard);
                 listStack.Children().Append(rowCard);
             }
             mainStack.Children().Append(listStack);
         } else {
-            // Grid Mode: CoverArt (~2:3 Vertical Box Art) or HeroBanner (~16:9 Wide Banner)
+            // Grid Mode: CoverArt (~2:3 SteamGridDB Standard Box Art) or HeroBanner (~3.1:1 SteamGridDB Standard Hero)
             const bool isHero = (m_layoutMode == LayoutMode::HeroBanner);
-            const double cardW = isHero ? 276.0 : 172.0;
-            const double cardH = isHero ? 184.0 : 284.0;
-            const double imgH  = isHero ? 132.0 : 228.0;
+            const double cardW = isHero ? 320.0 : 180.0;
+            const double imgH  = isHero ? 104.0 : 270.0;
+            const double cardH = isHero ? (imgH + 42.0) : 312.0;
 
             wuxc::VariableSizedWrapGrid gamesWrap;
             gamesWrap.Orientation(wuxc::Orientation::Horizontal);
@@ -1199,12 +1563,29 @@ void ShellView::BuildXamlViewport() {
                 cardGrid.RowDefinitions().Append(rMeta);
 
                 wuxc::Border artHost;
-                artHost.Background(m_isDarkMode ? MakeBrush(255, 25, 25, 30) : MakeBrush(255, 236, 236, 240));
+                artHost.Background(m_isDarkMode ? MakeBrush(255, 20, 20, 24) : MakeBrush(255, 240, 240, 244));
                 artHost.CornerRadius(wux::CornerRadiusHelper::FromRadii(6, 6, 0, 0));
 
-                std::wstring primaryArt = isHero
-                    ? (!g.heroArtPath.empty() ? g.heroArtPath : g.coverArtPath)
-                    : (!g.coverArtPath.empty() ? g.coverArtPath : g.heroArtPath);
+                std::wstring primaryArt;
+                if (isHero) {
+                    if (ImageValidator::IsValidHero(g.heroArtPath)) {
+                        primaryArt = g.heroArtPath;
+                    } else if (!g.heroArtPath.empty()) {
+                        primaryArt = g.heroArtPath;
+                    } else if (ImageValidator::IsValidHero(g.detailsArtPath)) {
+                        primaryArt = g.detailsArtPath;
+                    } else if (!g.coverArtPath.empty()) {
+                        primaryArt = g.coverArtPath;
+                    }
+                } else {
+                    if (ImageValidator::IsValidCover(g.coverArtPath)) {
+                        primaryArt = g.coverArtPath;
+                    } else if (!g.coverArtPath.empty()) {
+                        primaryArt = g.coverArtPath;
+                    } else if (!g.detailsArtPath.empty()) {
+                        primaryArt = g.detailsArtPath;
+                    }
+                }
 
                 if (auto bmp = LoadLocalBitmap(primaryArt)) {
                     wuxc::Image artImg;
@@ -1251,9 +1632,7 @@ void ShellView::BuildXamlViewport() {
 
                 const int gIdx = static_cast<int>(i);
                 card.Tapped([this, gIdx](wf::IInspectable const&, wuxi::TappedRoutedEventArgs const&) {
-                    m_selectedGameIndex = gIdx;
-                    m_selectedProviderIndex = -1;
-                    BuildXamlViewport();
+                    SelectGame(gIdx);
                 });
                 card.DoubleTapped([this, gIdx](wf::IInspectable const&, wuxi::DoubleTappedRoutedEventArgs const&) {
                     if (gIdx >= 0 && gIdx < static_cast<int>(m_games.size())) {
@@ -1261,6 +1640,7 @@ void ShellView::BuildXamlViewport() {
                     }
                 });
 
+                if (m_xaml) m_xaml->gameCards.push_back(card);
                 gamesWrap.Children().Append(card);
             }
 
@@ -1271,6 +1651,13 @@ void ShellView::BuildXamlViewport() {
     mainScroll.Content(mainStack);
     wuxc::Grid::SetColumn(mainScroll, 0);
     bodyGrid.Children().Append(mainScroll);
+
+    if (m_xaml) {
+        m_xaml->mainScroll = mainScroll;
+        if (savedScroll > 0.0) {
+            mainScroll.ChangeView(nullptr, winrt::box_value(savedScroll).as<wf::IReference<double>>(), nullptr, true);
+        }
+    }
 
     // Column 1: Persistent Right Details Sidepane
     m_xaml->sidepaneHost = wuxc::Border{};
@@ -1428,9 +1815,7 @@ IFACEMETHODIMP ShellView::SelectItem(PCUITEMID_CHILD pidlItem, SVSIF /*uFlags*/)
         if (data != nullptr) {
             for (size_t i = 0; i < m_games.size(); ++i) {
                 if (m_games[i].id == data->gameId) {
-                    m_selectedGameIndex = static_cast<int>(i);
-                    m_selectedProviderIndex = -1;
-                    BuildXamlViewport();
+                    SelectGame(static_cast<int>(i));
                     break;
                 }
             }

@@ -35,8 +35,9 @@
 | # | Milestone | Scope | Status | Version / Target | Focus |
 |---|---|---|---|---|---|
 | **M15** | Windows Game Explorer Shell Extension & Native Re-Architecture | Shell extension & Win32 apps | ✅ Released | `v2.0.0` | Native C++20 Win32 COM virtual namespace extension (`GameExplorerShell.dll`), two-section categorization (`Installed Providers` & `Games Library`), 17-platform scanner, `GameExplorerConfig.exe`, and `GameExplorerManager.exe` |
-| **M16** | Cloud Gaming Hooks & Handheld Overlay | Handheld/Cloud | ⏳ Planned | `v2.1.0` | Cloud streaming hooks (GeForce NOW, Xbox Cloud), Gamepad Big Picture mode |
-| **M17** | Emulator Auto-Configuration Presets | Emulation | ⏳ Planned | `v2.2.0` | Standalone emulator presets (RetroArch, Dolphin, PCSX2, RPCS3) |
+| **M16** | Universal Multi-Source Achievement Tracking & Multi-Viewport Artwork Engine | Core, Shell & Config | ✅ Delivered | `v2.1.1` | Hybrid native storefront + external tracker integration (RetroAchievements, Steam Web API, GOG Galaxy), multi-viewport aspect ratio fitting, in-place scroll preservation, OneDrive cloud sync, config UI, and Inspector trophy rendering |
+| **M17** | Cloud Gaming Hooks & Handheld Overlay | Handheld/Cloud | ⏳ Planned | `v2.2.0` | Cloud streaming hooks (GeForce NOW, Xbox Cloud), Gamepad Big Picture mode |
+| **M18** | Emulator Auto-Configuration Presets | Emulation | ⏳ Planned | `v2.3.0` | Standalone emulator presets (RetroArch, Dolphin, PCSX2, RPCS3) |
 
 ---
 

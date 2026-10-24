@@ -13,6 +13,17 @@ struct AppSettings {
 
     // Cloud sync
     bool enableOneDriveBackup{ false };
+
+    // Universal Achievement Credentials & Settings
+    std::wstring steamWebApiKey;
+    std::wstring steamId64;
+    std::wstring retroAchievementsUser;
+    std::wstring retroAchievementsApiKey;
+
+    // Fallback Metadata & Artwork Providers
+    std::wstring steamGridDbApiKey;
+    std::wstring igdbClientId;
+    std::wstring igdbClientSecret;
 };
 
 class SettingsManager {

@@ -4,6 +4,8 @@ add_executable(GameExplorerTests
     TestStorefrontScanner.cpp
     TestPlatformLauncher.cpp
     TestSettings.cpp
+    TestAchievementEngine.cpp
+    TestImageValidator.cpp
 )
 
 target_include_directories(GameExplorerTests PRIVATE

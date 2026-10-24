@@ -36,6 +36,12 @@ public:
     bool SetInstalled(int64_t id, bool installed);
     bool SetFavorite(int64_t id, bool favorite);
 
+    // Achievement operations
+    bool UpsertAchievements(const std::wstring& appId, const std::vector<AchievementItem>& achievements);
+    [[nodiscard]] std::vector<AchievementItem> GetAchievementsForGame(const std::wstring& appId);
+    [[nodiscard]] GameAchievementProgress GetAchievementProgress(const std::wstring& appId);
+    bool DeleteAchievementsForGame(const std::wstring& appId);
+
     // KV settings in DB
     bool SetSetting(const std::wstring& key, const std::wstring& value);
     [[nodiscard]] std::optional<std::wstring> GetSetting(const std::wstring& key);

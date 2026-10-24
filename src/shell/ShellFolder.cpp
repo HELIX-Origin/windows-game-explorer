@@ -43,6 +43,17 @@ std::wstring GetPlatformCompany(PlatformType platform) {
     case PlatformType::HoYoPlay: return L"COGNOSPHERE";
     case PlatformType::Paradox: return L"Paradox Interactive";
     case PlatformType::ESDE: return L"EmulationStation DE";
+    case PlatformType::Dolphin: return L"Dolphin Team";
+    case PlatformType::Project64: return L"Project64 Team";
+    case PlatformType::PCSX2: return L"PCSX2 Team";
+    case PlatformType::DuckStation: return L"DuckStation Team";
+    case PlatformType::PPSSPP: return L"Henrik Rydgård";
+    case PlatformType::mGBA: return L"endrift / mGBA Team";
+    case PlatformType::Snes9x: return L"Snes9x Team";
+    case PlatformType::melonDS: return L"melonDS Team";
+    case PlatformType::Citra: return L"Citra Team";
+    case PlatformType::Flycast: return L"flyinghead / Flycast Team";
+    case PlatformType::RPCS3: return L"RPCS3 Team";
     default: return L"Game Provider";
     }
 }
@@ -67,6 +78,17 @@ std::wstring GetPlatformExecutablePath(PlatformType platform) {
     case PlatformType::HoYoPlay: return PlatformLauncher::GetHoYoPlayExecutablePath();
     case PlatformType::Paradox: return PlatformLauncher::GetParadoxExecutablePath();
     case PlatformType::ESDE: return PlatformLauncher::GetESDEExecutablePath();
+    case PlatformType::Dolphin: return PlatformLauncher::GetDolphinExecutablePath();
+    case PlatformType::Project64: return PlatformLauncher::GetProject64ExecutablePath();
+    case PlatformType::PCSX2: return PlatformLauncher::GetPCSX2ExecutablePath();
+    case PlatformType::DuckStation: return PlatformLauncher::GetDuckStationExecutablePath();
+    case PlatformType::PPSSPP: return PlatformLauncher::GetPPSSPPExecutablePath();
+    case PlatformType::mGBA: return PlatformLauncher::GetmGBAExecutablePath();
+    case PlatformType::Snes9x: return PlatformLauncher::GetSnes9xExecutablePath();
+    case PlatformType::melonDS: return PlatformLauncher::GetMelonDSExecutablePath();
+    case PlatformType::Citra: return PlatformLauncher::GetCitraExecutablePath();
+    case PlatformType::Flycast: return PlatformLauncher::GetFlycastExecutablePath();
+    case PlatformType::RPCS3: return PlatformLauncher::GetRPCS3ExecutablePath();
     default: return L"";
     }
 }
@@ -325,40 +347,42 @@ IFACEMETHODIMP ShellFolder::EnumObjects(HWND /*hwnd*/, SHCONTF grfFlags, IEnumID
 
     std::vector<ProviderEntry> detectedProviders;
 
-    const std::wstring steamExe = PlatformLauncher::GetSteamExecutablePath();
-    if (!steamExe.empty() && fs::exists(steamExe)) {
-        detectedProviders.push_back({ PlatformType::Steam, L"Steam" });
-    }
+    auto addProvIfFound = [&](PlatformType pt, const wchar_t* name, const std::wstring& exePath) {
+        if (!exePath.empty() && fs::exists(exePath)) {
+            detectedProviders.push_back({ pt, name });
+        }
+    };
 
-    const std::wstring epicExe = PlatformLauncher::GetEpicExecutablePath();
-    if (!epicExe.empty() && fs::exists(epicExe)) {
-        detectedProviders.push_back({ PlatformType::Epic, L"Epic Games" });
-    }
-
-    const std::wstring gogExe = PlatformLauncher::GetGOGGalaxyExecutablePath();
-    if (!gogExe.empty() && fs::exists(gogExe)) {
-        detectedProviders.push_back({ PlatformType::GOG, L"GOG GALAXY" });
-    }
-
-    const std::wstring bnetExe = PlatformLauncher::GetBattleNetExecutablePath();
-    if (!bnetExe.empty() && fs::exists(bnetExe)) {
-        detectedProviders.push_back({ PlatformType::BattleNet, L"Battle.net" });
-    }
-
-    const std::wstring ubiExe = PlatformLauncher::GetUbisoftExecutablePath();
-    if (!ubiExe.empty() && fs::exists(ubiExe)) {
-        detectedProviders.push_back({ PlatformType::Ubisoft, L"Ubisoft Connect" });
-    }
-
-    const std::wstring eaExe = PlatformLauncher::GetEAAppExecutablePath();
-    if (!eaExe.empty() && fs::exists(eaExe)) {
-        detectedProviders.push_back({ PlatformType::EAApp, L"EA App" });
-    }
-
-    const std::wstring itchExe = PlatformLauncher::GetItchExecutablePath();
-    if (!itchExe.empty() && fs::exists(itchExe)) {
-        detectedProviders.push_back({ PlatformType::Itch, L"itch.io" });
-    }
+    addProvIfFound(PlatformType::Steam, L"Steam", PlatformLauncher::GetSteamExecutablePath());
+    addProvIfFound(PlatformType::Epic, L"Epic Games", PlatformLauncher::GetEpicExecutablePath());
+    addProvIfFound(PlatformType::GOG, L"GOG GALAXY", PlatformLauncher::GetGOGGalaxyExecutablePath());
+    addProvIfFound(PlatformType::Xbox, L"Xbox", PlatformLauncher::GetXboxExecutablePath());
+    addProvIfFound(PlatformType::BattleNet, L"Battle.net", PlatformLauncher::GetBattleNetExecutablePath());
+    addProvIfFound(PlatformType::Ubisoft, L"Ubisoft Connect", PlatformLauncher::GetUbisoftExecutablePath());
+    addProvIfFound(PlatformType::EAApp, L"EA App", PlatformLauncher::GetEAAppExecutablePath());
+    addProvIfFound(PlatformType::Itch, L"itch.io", PlatformLauncher::GetItchExecutablePath());
+    addProvIfFound(PlatformType::Amazon, L"Amazon Games", PlatformLauncher::GetAmazonExecutablePath());
+    addProvIfFound(PlatformType::LegacyGames, L"Legacy Games", PlatformLauncher::GetLegacyGamesExecutablePath());
+    addProvIfFound(PlatformType::Jagex, L"Jagex Launcher", PlatformLauncher::GetJagexExecutablePath());
+    addProvIfFound(PlatformType::XIVLauncher, L"XIVLauncher", PlatformLauncher::GetXIVLauncherExecutablePath());
+    addProvIfFound(PlatformType::GuildWars2, L"Guild Wars 2", PlatformLauncher::GetGuildWars2ExecutablePath());
+    addProvIfFound(PlatformType::Rockstar, L"Rockstar Games", PlatformLauncher::GetRockstarExecutablePath());
+    addProvIfFound(PlatformType::Riot, L"Riot Client", PlatformLauncher::GetRiotExecutablePath());
+    addProvIfFound(PlatformType::HoYoPlay, L"HoYoPlay", PlatformLauncher::GetHoYoPlayExecutablePath());
+    addProvIfFound(PlatformType::Paradox, L"Paradox Launcher", PlatformLauncher::GetParadoxExecutablePath());
+    addProvIfFound(PlatformType::ESDE, L"ES-DE", PlatformLauncher::GetESDEExecutablePath());
+    addProvIfFound(PlatformType::Dolphin, L"Dolphin", PlatformLauncher::GetDolphinExecutablePath());
+    addProvIfFound(PlatformType::Project64, L"Project64", PlatformLauncher::GetProject64ExecutablePath());
+    addProvIfFound(PlatformType::PCSX2, L"PCSX2", PlatformLauncher::GetPCSX2ExecutablePath());
+    addProvIfFound(PlatformType::DuckStation, L"DuckStation", PlatformLauncher::GetDuckStationExecutablePath());
+    addProvIfFound(PlatformType::PPSSPP, L"PPSSPP", PlatformLauncher::GetPPSSPPExecutablePath());
+    addProvIfFound(PlatformType::mGBA, L"mGBA", PlatformLauncher::GetmGBAExecutablePath());
+    addProvIfFound(PlatformType::Snes9x, L"Snes9x", PlatformLauncher::GetSnes9xExecutablePath());
+    addProvIfFound(PlatformType::melonDS, L"melonDS", PlatformLauncher::GetMelonDSExecutablePath());
+    addProvIfFound(PlatformType::Citra, L"Citra", PlatformLauncher::GetCitraExecutablePath());
+    addProvIfFound(PlatformType::Flycast, L"Flycast", PlatformLauncher::GetFlycastExecutablePath());
+    addProvIfFound(PlatformType::RPCS3, L"RPCS3", PlatformLauncher::GetRPCS3ExecutablePath());
+    addProvIfFound(PlatformType::RetroArch, L"RetroArch", PlatformLauncher::GetRetroArchExecutablePath());
 
     for (const auto& prov : detectedProviders) {
         if (auto* pidl = CreateProviderPidl(prov.platform, prov.name)) {

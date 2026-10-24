@@ -6,6 +6,142 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [2.1.1] - 2026-10-24
+
+### Added
+- **Generic Chrome User-Agent Integration (CDN & Cloudflare Anti-Block)**:
+  - Implemented a modern desktop Chrome User-Agent (`Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36`) across all HTTP operations in `StorefrontScanner` and `AchievementEngine`.
+  - Configured global Urlmon session options (`UrlMkSetSessionOption(URLMON_OPTION_USERAGENT, ...)`) and `WinHttp` streaming headers (`Accept`, `Accept-Language`, redirect policies) to completely prevent 403 Forbidden and CDN/Cloudflare bot-protection blocks when retrieving assets from Fastly, Akamai, SteamGridDB CDN, and Patreon media servers.
+- **Dedicated Internal Web Image Search with Keyword Templating**:
+  - Implemented an internal web image search control bar at the bottom of the artwork viewport in `GameExplorerManager.exe` with query text box, content filter dropdown, and search button.
+  - Generates targeted exact-match search queries following the pattern `"{{game.title}}" {{content.type}}` (e.g. `"Final Fantasy VII Remake" box art cover`, `"Halo Infinite" hero banner wallpaper`, `"Game Title" patreon campaign art`).
+  - Web search is 100% internal and native—never pops open external browser windows.
+- **Artwork Cache Reset & Purge**:
+  - Added dedicated `[ 🧹 Reset Cache ]` buttons in `GameExplorerManager.exe` and `GameExplorerConfig.exe` allowing users to cleanly purge and re-initialize the artwork cache folder (`%USERPROFILE%\Game Explorer\cache\art\` and thumbnails).
+  - Automatically resets thumbnail downloading state sets and triggers fresh artwork discovery.
+- **NSFW / SafeSearch Unblock Toggle**:
+  - Added a `Disable SafeSearch (Unblock NSFW)` checkbox directly under the web search bar.
+  - When checked, disables Bing SafeSearch (`&adlt=off` and adult preference cookies) for web images and unblocks adult content in primary metadata providers (requesting `?nsfw=any&humor=any` from SteamGridDB and setting mature content age gate cookies for Steam Store).
+- **Primary Metadata Provider Precedence Architecture**:
+  - Established **SteamGridDB** and **IGDB** as the **primary default metadata providers** whenever enabled/configured via user API credentials.
+  - SteamGridDB queries provide authentic 600x900 vertical box art grids (`/api/v2/grids`), 1920x620 hero banners (`/api/v2/heroes`), and square icons/logos (`/api/v2/icons`).
+  - IGDB queries provide comprehensive game metadata including developers, publishers, release dates, synopsis/storyline, genres, age ratings, and 1080p high-resolution cover art (`t_1080p`).
+  - Implemented multi-tier fallback architecture: installed storefronts, free keyless Steam Store Search (`store.steampowered.com/api/storesearch/` + `appdetails`), Libretro Thumbnails CDN (for retro ROMs), and executable PE version info seamlessly provide data for any missing fields or when API keys are not supplied.
+- **Game Explorer Manager Integrated Visual Artwork Gallery & Discovery Viewport**:
+  - Resized and redesigned `GameExplorerManager.exe` with a 3-column layout:
+    - **Column 1 (Library)**: Installed and custom games list with prominent `[ 📁 Browse... ]` button allowing users to browse directly for any local game executable, shortcut (`.lnk`), batch script, or ROM if not displayed in the list view.
+    - **Column 2 (Properties & Preview)**: Metadata editor and 2:3 vertical Box Art live preview box.
+    - **Column 3 (Online Artwork Gallery & Search)**: Integrated visual image search inspired by Steam's art manager.
+  - **Multi-Provider Search with Supplemental Web & Patreon Discovery**:
+    - By default, searches and displays image candidates from primary metadata providers (SteamGridDB, Steam Store, IGDB).
+    - Added `[ 🌐 Web Search ]` button querying Bing image search and discovering Patreon campaign media (`patreonusercontent.com`) when the user wants more images.
+  - **Type & Resolution Filters**:
+    - Filter dropdown for Artwork Type (`All Types`, `Box Art (~2:3 Cover)`, `Hero Banner (~3.1:1)`, `Icon / Logo (1:1)`, `Details / Screenshots`).
+    - Filter dropdown for Resolution (`All Resolutions`, `600x900 (High-Res Cover)`, `300x450 (Standard Cover)`, `1920x620 (High-Res Hero)`, `1920x1080 (Full HD)`, `256x256+ (Square Icon)`).
+  - **Viewport Selection & Dropdown Apply**:
+    - Scrollable viewport rendering live thumbnail cards with resolution badges, source tags (`SteamGridDB`, `Steam Store`, `IGDB`, `Patreon`, `Web`), and bold selection highlights.
+    - `[ Apply Selected Artwork ▾ ]` button with dropdown menu to select target view slot (`Apply as Box Art (~2:3 Cover)`, `Apply as Hero Banner (~3.1:1 Widescreen)`, `Apply as Details Art`, `Apply as Icon / Logo`).
+    - Automatically downloads high-res image to local cache (`%USERPROFILE%\Game Explorer\cache\art\`), updates the corresponding editor slot, and refreshes the preview.
+- **Non-Destructive Image Validation (No Artificial Cropping)**:
+  - Eliminated artificial cross-slot cropping (`GenerateFittingCover` / `GenerateFittingHero`) to prevent blurry, low-resolution renders and chopped-off compositions.
+  - Prioritizes authentic, native-resolution assets from providers, and non-destructively preserves original storefront assets in `detailsArtPath` without pixel degradation.
+- **Universal Text Sanitization & Mojibake Cleaner (`SanitizeGameText`)**:
+  - Implemented universal text sanitizer resolving HTML entities (`&amp;` -> `&`, `&quot;` -> `"`, `&#39;` / `&apos;` -> `'`, `&lt;` -> `<`, `&gt;` -> `>`, etc.).
+  - Resolved CP1252 / UTF-8 multi-byte double-encoding mojibake patterns (`â€™` -> `'`, `â€¦` -> `...`, `â€“` -> `–`, `SaradaÃ¯Â¿Â½s Rise` / `Saradaï¿½s Rise` -> `Sarada's Rise`).
+  - Stripped corrupted UTF-8 trailing emoji artifact sequences (`Loverse ðŸ”ž` -> `Loverse`).
+  - Enforced sanitization across all storefront scanners, per-game metadata loading (`LoadPerGameMetadata`), and saving (`SavePerGameMetadata`).
+  - Added dedicated unit test `TextSanitizationAndEntityDecoding` (20/20 unit tests PASS).
+
+### Fixed
+- **Artwork Gallery Content Type Aspect Ratio Matching & Proportional Centering**:
+  - Sized Details / Screenshots gallery cards to authentic 16:9 widescreen (`imgH = cardW * 9 / 16`) instead of squishing into 2:3 cover boxes.
+  - Sized Hero Banners to 3.1:1 widescreen (`cardW = 200, imgH = 65`), Icons to 1:1 square (`100x100`), and Box Art to 2:3 vertical (`148x222`).
+  - Implemented aspect-fit proportional centering inside card containers (`min(boxW/srcW, boxH/srcH)`) preventing image stretching or distortion.
+- **Game Explorer Manager Responsive Window Resizing (`WM_SIZE`)**:
+  - Implemented `RelayoutManagerWindow(hwnd, w, h)` dynamically adjusting column widths, control positions, and margins when resizing or maximizing.
+  - Dynamic gallery column recomputation (`cols = (w - padX) / (targetCardW + padX)`), scaling from 2 columns up to 6 columns on wide monitors.
+- **Artwork Application & Immediate Persistence**:
+  - Added `forceOverwrite = true` support to `StorefrontScanner::CacheArtworkFromUrl` and `CacheRemoteArtwork`, ensuring chosen gallery images overwrite target slot files.
+  - Immediately updates `g_games[g_selectedIndex]`, persists to `Database::Instance().UpsertGame(game)` and per-game JSON metadata, notifies shell views via `SHChangeNotify` and `WM_APP + 42`, and invalidates the preview box.
+- **Artwork Cache Reset Unlocked Disk File Handles**:
+  - Implemented `LoadImageFromFileUnlocked` loading file bytes into in-memory `IStream` (`CreateStreamOnHGlobal`), eliminating Windows file locks (`ERROR_SHARING_VIOLATION`) from GDI+.
+  - Enabled clean file deletion in `ResetArtworkCache`, clearing in-memory caches, editor slot paths, and re-triggering fresh artwork discovery.
+- **API Key Security Masking in Settings**:
+  - Applied `ES_PASSWORD` style to `g_hwndEdtSteamKey` in `GameExplorerConfig.exe` to mask sensitive API credentials.
+- **Hero Banner Widescreen Alignment (~3.1:1 SteamGridDB Standard)**:
+  - Aligned Hero Banner layout mode in `ShellView.cpp` to the official Steam / SteamGridDB standard 1920x620 / 960x310 aspect ratio (`cardW = 320.0`, `imgH = 104.0`, `cardH = 146.0`).
+  - Resolved 43% horizontal cropping of 1920x620 banners caused by legacy 16:9 container constraints.
+  - Updated `ImageValidator::GenerateFittingHero` to target `960x310` full bleed, properly scaling wide banners and cropping portrait/widescreen images without side black bars.
+  - Updated Details Pane sidepane preview to scale ultrawide heroes (`ratio >= 2.4`) cleanly with dynamic height calculation (`cardH = std::clamp(300.0 / ratio, 85.0, 130.0)`).
+- **Viewport Scroll Position Reset Prevention**:
+  - Resolved issue where selecting a game or provider card reset the viewport's vertical scroll position back to top.
+  - Implemented in-place card selection highlight (`SelectGame` / `SelectProvider`) and dynamic sidepane re-rendering without tearing down `mainScroll` or re-instantiating XAML trees.
+  - Added vertical scroll offset tracking and restoration in `BuildXamlViewport` so layout mode and filter changes preserve scroll continuity.
+- **Multi-Viewport Image Fitting & Aspect Ratio Sizing**:
+  - Added dedicated `detailsArtPath` in `GameItem` and SQLite database (`details_art_path` with automated column migration) for tailored Details Pane presentation.
+  - Implemented `GetLocalImageDimensions` with GDI+ to calculate exact aspect ratios and dynamically size artwork containers:
+    - **Widescreen Hero Banners (>=1.35)**: Full-width 300px with calculated height (e.g. 16:9 at 300x169).
+    - **Static Cards (0.85–1.35)**: Form-fitting 300px card (e.g. Itch 315x250 at 300x238 with zero letterbox padding).
+    - **Vertical Box Art (<0.85)**: Centered 2:3 card (e.g. 170x255) avoiding awkward sidebars.
+    - **Square Icons**: Centered 96x96 icon card.
+  - Enforced 16:9 (`280x158`) in `LayoutMode::HeroBanner` and 2:3 (`164x246`) in `LayoutMode::CoverArt`.
+  - Prioritized clean static images (`still_cover_url`) over animated GIF watermarks for itch.io games (*A House in the Rift*).
+- **UTF-8 JSON Serialization Truncation**:
+  - Replaced `std::wofstream` with binary UTF-8 stream writing in `SavePerGameMetadata` and `LoadPerGameMetadata`, eliminating truncation on Unicode characters (such as curly apostrophes in game descriptions).
+- **OneDrive Cloud Synchronization**:
+  - Ensured `Windows Game Explorer` root folder and subdirectories (`metadata/`, `backups/`, `art/`) are automatically created in local OneDrive.
+  - Verified bidirectional sync of metadata overrides, database backup snapshots (`library.db`), and cached art assets.
+  - Added unit test `StorageOneDriveDirectoryCreationAndSync` passing in dedicated test harness (17/17 PASS).
+- **Game Explorer Manager Multi-Artwork Fields**:
+  - Added edit fields and file browse pickers for **Hero Banner (~16:9)** and **Details Art** alongside Box Art and Icon in `GameExplorerManager.exe`.
+- **Portable Registration & Unregistration Scripts**:
+  - Added `register.bat` and `unregister.bat` with automated UAC elevation prompts and directory awareness (`%~dp0` and build outputs) for users deploying via the portable `.zip` download.
+  - Included `register.bat` and `unregister.bat` in the portable `windows-game-explorer-v2.1.1-win64.zip` distribution package and NSIS installer payload.
+- **Strict Artwork Dimension Validation & SteamGridDB 2:3 Standard Smart-Fitting (`ImageValidator`)**:
+  - Aligned Cover Art mode to the official SteamGridDB standard 2:3 vertical grid (`180x270` card image slot, `600x900` box art target) with full-bleed `UniformToFill` rendering.
+  - Implemented strict per-slot validation for Cover Art (2:3 vertical grid ratio `0.58 <= ratio <= 0.82`), Hero Banner (~16:9 widescreen), Icon (~1:1 square), and Details Pane (showcase layout).
+  - Enforced that animated `.gif` files are strictly excluded from Cover, Hero, and Icon slots, while remaining fully supported in the Details sidepane with smooth looping playback.
+  - Implemented automatic multi-source Steam Store Search enrichment to retrieve official `600x900` box art for non-Steam titles (Ubisoft, EA App, Loverse, etc.).
+  - Implemented smart-fitting generator (`GenerateFittingCover`) applying subtle ~12% vertical stretching and title/focal-centered framing to full-bleed fill the 600x900 frame without black void bars or blurred ghost duplicates.
+  - Added dedicated unit tests `ImageValidatorSlotDimensionsAndAspectRatios` and `ImageValidatorSmartCroppingAndArtworkFixing` (19/19 PASS).
+- **Repository Root Automation Batch Suite & Visual Polish**:
+  - Added non-redundant batch scripts exclusively at the repository root (`build.bat`, `release.bat`, `register.bat`, `unregister.bat`) with CRLF line endings.
+  - Enhanced all batch scripts with stylized 4-line ASCII art banners (`GAME EXPLORER`), fixed console dimensions (`mode con: cols=78 lines=32..36`), UTF-8 encoding (`chcp 65001`), vibrant ANSI colorization, and strict 76-column wrapped box layout.
+
+## [2.1.0] - 2026-10-24
+
+### Added
+- **Native Ubisoft Metadata & Artwork Engine**:
+  - Implemented native parser for Ubisoft Connect `configurations` cache (`%LOCALAPPDATA%\Ubisoft Game Launcher\cache\configuration\configurations`).
+  - Directly extracts official titles, relative executables, official desktop icons (`.ico`), vertical cover art (`thumb_image`), and 16:9 hero background banners (`background_image`).
+  - Downloads and caches authentic Ubisoft assets directly from the official Ubisoft asset CDN (`https://static3.cdn.ubi.com/orbit/uplay_launcher_3_0/assets/<hash>`).
+- **Multi-Source Metadata Enrichment & Fallback Engine (`EnrichNonSteamGameMetadata`)**:
+  - Automatic zero-configuration Steam Store Search & AppDetails metadata enrichment (`/api/storesearch/` and `/api/appdetails`) populating developer, publisher, release date, ESRB rating, genres, and synopsis for non-Steam titles.
+  - Secondary fallback integration for **SteamGridDB API** (`/api/v2/search/autocomplete`, `/api/v2/grids`, `/api/v2/heroes`) using user-provided API key.
+  - Secondary fallback integration for **IGDB / Twitch API** (`https://id.twitch.tv/oauth2/token` and `https://api.igdb.com/v4/games`) with cached token lifecycle.
+- **Config UI Card 4 for Fallback Providers**:
+  - Added dedicated Card 4 in `GameExplorerConfig.exe` with edit fields for `SteamGridDB API Key:`, `IGDB Client ID:`, and password-masked `IGDB Client Secret:`.
+  - Clarified all key sections with explicit service labels (e.g. `Steam Web API Key:`, `RetroAchievements API Key:`, `SteamGridDB API Key:`).
+- **Universal Multi-Source Achievement Engine (`AchievementEngine`)**:
+  - Implemented modular `IAchievementProvider` architecture with dedicated `SteamAchievementProvider` (Steam Web API + SteamID64), `RetroAchievementsProvider` (RetroAchievements Web API v2.1.0), and `GOGGalaxyAchievementProvider`.
+  - Added `achievements` SQLite table schema in `Database` with composite primary key `(app_id, achievement_id)`, foreign key index `idx_achievements_app_id`, and atomic batch upserting/querying.
+  - Implemented automated achievement badge thumbnail downloading and caching in `%USERPROFILE%\Game Explorer\cache\badges\`.
+- **Shell Inspector Trophy Presentation**:
+  - Added trophy completion card with progress bar (`🏆 N / Total (XX%)`), badge icon preview, unlock states, and interactive live sync button directly in `ShellView.cpp`.
+- **Config & Settings Credentials Management**:
+  - Added **Universal Multi-Source Achievement Credentials & API Keys** card in `GameExplorerConfig.exe` supporting Steam Web API Key/SteamID64 and RetroAchievements Username/API Key with dark mode and persistence in `SettingsManager`.
+- **Universal Retro ROMs & Multi-Emulator Scanning (`ScanEmulatedGames`)**:
+  - Added automated multi-drive ROMs scanning across all mounted drives (`<Drive>:\ROMs`, `<Drive>:\Games\ROMs`, `%USERPROFILE%\ROMs`, etc.).
+  - Supported emulators with standalone and portable path discovery: **Dolphin** (GameCube & Wii), **Project64** (Nintendo 64), **PCSX2** (PlayStation 2), **DuckStation** (PlayStation 1), **PPSSPP** (PSP), **RPCS3** (PlayStation 3), **mGBA** (Game Boy / Color / Advance), **Snes9x** (Super Nintendo), **melonDS** (Nintendo DS), **Citra** (Nintendo 3DS), **Flycast** (Dreamcast & Saturn), and **RetroArch** (Universal multi-system libretro).
+- **Online Libretro Thumbnails CDN Integration**:
+  - Direct retrieval of high-resolution vertical box art (`Named_Boxarts`) and hero banners (`Named_Snaps`) from the Libretro Thumbnails CDN, cached in `%USERPROFILE%\Game Explorer\cache\art\`.
+- **ROM Title Cleaning Engine (`CleanRomTitle`)**:
+  - Intelligent title parser and normalizer stripping compound extensions (`.nkit.iso`, `.iso`, `.z64`, `.rvz`, `.chd`, etc.), parenthesized/bracketed region/version tags (`(USA)`, `[!]`, etc.), and properly inverting leading articles (`Legend of Zelda, The` -> `The Legend of Zelda`).
+- **Structured ROMs Template Release Asset**:
+  - Added automated packaging in `scripts/package.ps1` generating `windows-game-explorer-v2.1.0-ROMs-template.zip` with clean directory hierarchies for all supported retro consoles.
+- **Dedicated C++ Unit Test Suite (15/15 PASS)**:
+  - Added `DatabaseAchievementUpsertAndProgress`, `AchievementEngineProviderDispatchAndCaching`, `ScannerCleanRomTitleAndEmulatedScan`, and `PlatformLauncherEmulatorDiscovery` test cases.
+
 ## [2.0.1] - 2026-10-24
 
 ### Added
@@ -66,6 +202,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 ### Removed
 - Removed all legacy Tauri v2, Rust, Node.js, and external scraper (IGDB, SteamGridDB, VNDB) dependencies and configuration inputs.
 
-[Unreleased]: https://github.com/HELIX-Origin/windows-game-explorer/compare/v2.0.1...HEAD
+[Unreleased]: https://github.com/HELIX-Origin/windows-game-explorer/compare/v2.1.0...HEAD
+[2.1.0]: https://github.com/HELIX-Origin/windows-game-explorer/compare/v2.0.1...v2.1.0
 [2.0.1]: https://github.com/HELIX-Origin/windows-game-explorer/compare/v2.0.0...v2.0.1
 [2.0.0]: https://github.com/HELIX-Origin/windows-game-explorer/compare/v1.4.1...v2.0.0

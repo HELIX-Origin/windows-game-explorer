@@ -69,6 +69,8 @@ private:
     void ShowLoadingState();
     void BuildXamlViewport();
     void RebuildSidepane();
+    void SelectGame(int index);
+    void SelectProvider(int index);
     void SwitchLayoutMode(LayoutMode mode);
     void LaunchCompanionExe(const wchar_t* exeName, const std::wstring& args = L"");
 

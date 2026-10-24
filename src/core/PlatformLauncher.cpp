@@ -1,5 +1,6 @@
 #include "GameExplorerCore/PlatformLauncher.h"
 #include "GameExplorerCore/StorefrontScanner.h"
+#include "GameExplorerCore/Database.h"
 #include <filesystem>
 #include <fstream>
 #include <algorithm>
@@ -560,6 +561,346 @@ std::wstring PlatformLauncher::GetESDEExecutablePath() {
     return L"";
 }
 
+std::wstring PlatformLauncher::GetDolphinExecutablePath() {
+    const std::wstring uninst = FindUninstallExecutable(L"Dolphin", L"Dolphin.exe");
+    if (!uninst.empty()) return uninst;
+
+    auto& db = Database::Instance();
+    if (auto val = db.GetSetting(L"dolphin_path")) {
+        if (!val->empty() && fs::exists(*val)) return *val;
+    }
+
+    const auto drives = StorefrontScanner::GetAllMountedDrives();
+    for (const auto& drive : drives) {
+        const fs::path cands[] = {
+            fs::path(drive) / L"Games" / L"Emulators" / L"Dolphin" / L"Dolphin.exe",
+            fs::path(drive) / L"Games" / L"Emulators" / L"Dolphin-x64" / L"Dolphin.exe",
+            fs::path(drive) / L"Emulators" / L"Dolphin" / L"Dolphin.exe",
+            fs::path(drive) / L"Games" / L"Dolphin" / L"Dolphin.exe",
+            fs::path(drive) / L"Program Files" / L"Dolphin" / L"Dolphin.exe",
+            fs::path(drive) / L"Program Files (x86)" / L"Dolphin" / L"Dolphin.exe",
+            fs::path(drive) / L"Games" / L"ES-DE" / L"Emulators" / L"Dolphin-x64" / L"Dolphin.exe"
+        };
+        for (const auto& c : cands) {
+            std::error_code ec;
+            if (fs::exists(c, ec)) return c.wstring();
+        }
+    }
+
+    wchar_t localApp[MAX_PATH] = { 0 };
+    if (GetEnvironmentVariableW(L"LOCALAPPDATA", localApp, MAX_PATH) > 0) {
+        const fs::path p = fs::path(localApp) / L"Programs" / L"Dolphin" / L"Dolphin.exe";
+        std::error_code ec;
+        if (fs::exists(p, ec)) return p.wstring();
+    }
+
+    return L"";
+}
+
+std::wstring PlatformLauncher::GetProject64ExecutablePath() {
+    const std::wstring uninst = FindUninstallExecutable(L"Project64", L"Project64.exe");
+    if (!uninst.empty()) return uninst;
+
+    auto& db = Database::Instance();
+    if (auto val = db.GetSetting(L"project64_path")) {
+        if (!val->empty() && fs::exists(*val)) return *val;
+    }
+
+    const auto drives = StorefrontScanner::GetAllMountedDrives();
+    for (const auto& drive : drives) {
+        const fs::path cands[] = {
+            fs::path(drive) / L"Games" / L"Emulators" / L"Project64" / L"Project64.exe",
+            fs::path(drive) / L"Emulators" / L"Project64" / L"Project64.exe",
+            fs::path(drive) / L"Games" / L"Project64" / L"Project64.exe",
+            fs::path(drive) / L"Program Files" / L"Project64" / L"Project64.exe",
+            fs::path(drive) / L"Program Files (x86)" / L"Project64 3.0" / L"Project64.exe",
+            fs::path(drive) / L"Program Files (x86)" / L"Project64" / L"Project64.exe"
+        };
+        for (const auto& c : cands) {
+            std::error_code ec;
+            if (fs::exists(c, ec)) return c.wstring();
+        }
+    }
+
+    wchar_t localApp[MAX_PATH] = { 0 };
+    if (GetEnvironmentVariableW(L"LOCALAPPDATA", localApp, MAX_PATH) > 0) {
+        const fs::path p = fs::path(localApp) / L"Programs" / L"Project64" / L"Project64.exe";
+        std::error_code ec;
+        if (fs::exists(p, ec)) return p.wstring();
+    }
+
+    return L"";
+}
+
+std::wstring PlatformLauncher::GetRetroArchExecutablePath() {
+    const std::wstring uninst = FindUninstallExecutable(L"RetroArch", L"retroarch.exe");
+    if (!uninst.empty()) return uninst;
+
+    auto& db = Database::Instance();
+    if (auto val = db.GetSetting(L"retroarch_path")) {
+        if (!val->empty() && fs::exists(*val)) return *val;
+    }
+
+    const auto drives = StorefrontScanner::GetAllMountedDrives();
+    for (const auto& drive : drives) {
+        const fs::path cands[] = {
+            fs::path(drive) / L"Games" / L"RetroArch" / L"retroarch.exe",
+            fs::path(drive) / L"Games" / L"Emulators" / L"RetroArch" / L"retroarch.exe",
+            fs::path(drive) / L"RetroArch" / L"retroarch.exe",
+            fs::path(drive) / L"Program Files" / L"RetroArch" / L"retroarch.exe",
+            fs::path(drive) / L"Program Files (x86)" / L"RetroArch" / L"retroarch.exe"
+        };
+        for (const auto& c : cands) {
+            std::error_code ec;
+            if (fs::exists(c, ec)) return c.wstring();
+        }
+    }
+    return L"";
+}
+
+std::wstring PlatformLauncher::GetPCSX2ExecutablePath() {
+    std::wstring uninst = FindUninstallExecutable(L"PCSX2", L"pcsx2-qtx64.exe");
+    if (uninst.empty()) uninst = FindUninstallExecutable(L"PCSX2", L"pcsx2.exe");
+    if (!uninst.empty()) return uninst;
+
+    auto& db = Database::Instance();
+    if (auto val = db.GetSetting(L"pcsx2_path")) {
+        if (!val->empty() && fs::exists(*val)) return *val;
+    }
+
+    const auto drives = StorefrontScanner::GetAllMountedDrives();
+    for (const auto& drive : drives) {
+        const fs::path cands[] = {
+            fs::path(drive) / L"Games" / L"Emulators" / L"PCSX2" / L"pcsx2-qtx64.exe",
+            fs::path(drive) / L"Games" / L"Emulators" / L"PCSX2" / L"pcsx2.exe",
+            fs::path(drive) / L"Emulators" / L"PCSX2" / L"pcsx2-qtx64.exe",
+            fs::path(drive) / L"Emulators" / L"PCSX2" / L"pcsx2.exe",
+            fs::path(drive) / L"Games" / L"PCSX2" / L"pcsx2-qtx64.exe",
+            fs::path(drive) / L"Games" / L"PCSX2" / L"pcsx2.exe",
+            fs::path(drive) / L"Program Files" / L"PCSX2" / L"pcsx2-qtx64.exe",
+            fs::path(drive) / L"Program Files" / L"PCSX2" / L"pcsx2.exe"
+        };
+        for (const auto& c : cands) {
+            std::error_code ec;
+            if (fs::exists(c, ec)) return c.wstring();
+        }
+    }
+    return L"";
+}
+
+std::wstring PlatformLauncher::GetDuckStationExecutablePath() {
+    std::wstring uninst = FindUninstallExecutable(L"DuckStation", L"duckstation-qt-x64-ReleaseLTCG.exe");
+    if (uninst.empty()) uninst = FindUninstallExecutable(L"DuckStation", L"duckstation-nogui-x64-ReleaseLTCG.exe");
+    if (!uninst.empty()) return uninst;
+
+    auto& db = Database::Instance();
+    if (auto val = db.GetSetting(L"duckstation_path")) {
+        if (!val->empty() && fs::exists(*val)) return *val;
+    }
+
+    const auto drives = StorefrontScanner::GetAllMountedDrives();
+    for (const auto& drive : drives) {
+        const fs::path cands[] = {
+            fs::path(drive) / L"Games" / L"Emulators" / L"DuckStation" / L"duckstation-qt-x64-ReleaseLTCG.exe",
+            fs::path(drive) / L"Games" / L"Emulators" / L"DuckStation" / L"duckstation-nogui-x64-ReleaseLTCG.exe",
+            fs::path(drive) / L"Games" / L"Emulators" / L"DuckStation" / L"duckstation.exe",
+            fs::path(drive) / L"Emulators" / L"DuckStation" / L"duckstation-qt-x64-ReleaseLTCG.exe",
+            fs::path(drive) / L"Emulators" / L"DuckStation" / L"duckstation.exe",
+            fs::path(drive) / L"Program Files" / L"DuckStation" / L"duckstation-qt-x64-ReleaseLTCG.exe"
+        };
+        for (const auto& c : cands) {
+            std::error_code ec;
+            if (fs::exists(c, ec)) return c.wstring();
+        }
+    }
+    return L"";
+}
+
+std::wstring PlatformLauncher::GetPPSSPPExecutablePath() {
+    const std::wstring uninst = FindUninstallExecutable(L"PPSSPP", L"PPSSPPWindows64.exe");
+    if (!uninst.empty()) return uninst;
+
+    auto& db = Database::Instance();
+    if (auto val = db.GetSetting(L"ppsspp_path")) {
+        if (!val->empty() && fs::exists(*val)) return *val;
+    }
+
+    const auto drives = StorefrontScanner::GetAllMountedDrives();
+    for (const auto& drive : drives) {
+        const fs::path cands[] = {
+            fs::path(drive) / L"Games" / L"Emulators" / L"PPSSPP" / L"PPSSPPWindows64.exe",
+            fs::path(drive) / L"Games" / L"Emulators" / L"PPSSPP" / L"PPSSPPWindows.exe",
+            fs::path(drive) / L"Emulators" / L"PPSSPP" / L"PPSSPPWindows64.exe",
+            fs::path(drive) / L"Program Files" / L"PPSSPP" / L"PPSSPPWindows64.exe"
+        };
+        for (const auto& c : cands) {
+            std::error_code ec;
+            if (fs::exists(c, ec)) return c.wstring();
+        }
+    }
+    return L"";
+}
+
+std::wstring PlatformLauncher::GetmGBAExecutablePath() {
+    const std::wstring uninst = FindUninstallExecutable(L"mGBA", L"mGBA.exe");
+    if (!uninst.empty()) return uninst;
+
+    auto& db = Database::Instance();
+    if (auto val = db.GetSetting(L"mgba_path")) {
+        if (!val->empty() && fs::exists(*val)) return *val;
+    }
+
+    const auto drives = StorefrontScanner::GetAllMountedDrives();
+    for (const auto& drive : drives) {
+        const fs::path cands[] = {
+            fs::path(drive) / L"Games" / L"Emulators" / L"mGBA" / L"mGBA.exe",
+            fs::path(drive) / L"Emulators" / L"mGBA" / L"mGBA.exe",
+            fs::path(drive) / L"Games" / L"mGBA" / L"mGBA.exe",
+            fs::path(drive) / L"Program Files" / L"mGBA" / L"mGBA.exe",
+            fs::path(drive) / L"Program Files (x86)" / L"mGBA" / L"mGBA.exe"
+        };
+        for (const auto& c : cands) {
+            std::error_code ec;
+            if (fs::exists(c, ec)) return c.wstring();
+        }
+    }
+    return L"";
+}
+
+std::wstring PlatformLauncher::GetSnes9xExecutablePath() {
+    const std::wstring uninst = FindUninstallExecutable(L"Snes9x", L"snes9x-x64.exe");
+    if (!uninst.empty()) return uninst;
+
+    auto& db = Database::Instance();
+    if (auto val = db.GetSetting(L"snes9x_path")) {
+        if (!val->empty() && fs::exists(*val)) return *val;
+    }
+
+    const auto drives = StorefrontScanner::GetAllMountedDrives();
+    for (const auto& drive : drives) {
+        const fs::path cands[] = {
+            fs::path(drive) / L"Games" / L"Emulators" / L"Snes9x" / L"snes9x-x64.exe",
+            fs::path(drive) / L"Games" / L"Emulators" / L"Snes9x" / L"snes9x.exe",
+            fs::path(drive) / L"Emulators" / L"Snes9x" / L"snes9x-x64.exe",
+            fs::path(drive) / L"Program Files" / L"Snes9x" / L"snes9x-x64.exe"
+        };
+        for (const auto& c : cands) {
+            std::error_code ec;
+            if (fs::exists(c, ec)) return c.wstring();
+        }
+    }
+    return L"";
+}
+
+std::wstring PlatformLauncher::GetMelonDSExecutablePath() {
+    const std::wstring uninst = FindUninstallExecutable(L"melonDS", L"melonDS.exe");
+    if (!uninst.empty()) return uninst;
+
+    auto& db = Database::Instance();
+    if (auto val = db.GetSetting(L"melonds_path")) {
+        if (!val->empty() && fs::exists(*val)) return *val;
+    }
+
+    const auto drives = StorefrontScanner::GetAllMountedDrives();
+    for (const auto& drive : drives) {
+        const fs::path cands[] = {
+            fs::path(drive) / L"Games" / L"Emulators" / L"melonDS" / L"melonDS.exe",
+            fs::path(drive) / L"Emulators" / L"melonDS" / L"melonDS.exe",
+            fs::path(drive) / L"Program Files" / L"melonDS" / L"melonDS.exe"
+        };
+        for (const auto& c : cands) {
+            std::error_code ec;
+            if (fs::exists(c, ec)) return c.wstring();
+        }
+    }
+    return L"";
+}
+
+std::wstring PlatformLauncher::GetCitraExecutablePath() {
+    const std::wstring uninst = FindUninstallExecutable(L"Citra", L"citra-qt.exe");
+    if (!uninst.empty()) return uninst;
+
+    auto& db = Database::Instance();
+    if (auto val = db.GetSetting(L"citra_path")) {
+        if (!val->empty() && fs::exists(*val)) return *val;
+    }
+
+    const auto drives = StorefrontScanner::GetAllMountedDrives();
+    for (const auto& drive : drives) {
+        const fs::path cands[] = {
+            fs::path(drive) / L"Games" / L"Emulators" / L"Citra" / L"citra-qt.exe",
+            fs::path(drive) / L"Emulators" / L"Citra" / L"citra-qt.exe",
+            fs::path(drive) / L"Program Files" / L"Citra" / L"citra-qt.exe"
+        };
+        for (const auto& c : cands) {
+            std::error_code ec;
+            if (fs::exists(c, ec)) return c.wstring();
+        }
+    }
+
+    wchar_t localApp[MAX_PATH] = { 0 };
+    if (GetEnvironmentVariableW(L"LOCALAPPDATA", localApp, MAX_PATH) > 0) {
+        const fs::path cands[] = {
+            fs::path(localApp) / L"Citra" / L"nightly-mingw" / L"citra-qt.exe",
+            fs::path(localApp) / L"Citra" / L"canary-mingw" / L"citra-qt.exe"
+        };
+        for (const auto& c : cands) {
+            std::error_code ec;
+            if (fs::exists(c, ec)) return c.wstring();
+        }
+    }
+    return L"";
+}
+
+std::wstring PlatformLauncher::GetFlycastExecutablePath() {
+    const std::wstring uninst = FindUninstallExecutable(L"Flycast", L"flycast.exe");
+    if (!uninst.empty()) return uninst;
+
+    auto& db = Database::Instance();
+    if (auto val = db.GetSetting(L"flycast_path")) {
+        if (!val->empty() && fs::exists(*val)) return *val;
+    }
+
+    const auto drives = StorefrontScanner::GetAllMountedDrives();
+    for (const auto& drive : drives) {
+        const fs::path cands[] = {
+            fs::path(drive) / L"Games" / L"Emulators" / L"Flycast" / L"flycast.exe",
+            fs::path(drive) / L"Emulators" / L"Flycast" / L"flycast.exe",
+            fs::path(drive) / L"Program Files" / L"Flycast" / L"flycast.exe"
+        };
+        for (const auto& c : cands) {
+            std::error_code ec;
+            if (fs::exists(c, ec)) return c.wstring();
+        }
+    }
+    return L"";
+}
+
+std::wstring PlatformLauncher::GetRPCS3ExecutablePath() {
+    const std::wstring uninst = FindUninstallExecutable(L"RPCS3", L"rpcs3.exe");
+    if (!uninst.empty()) return uninst;
+
+    auto& db = Database::Instance();
+    if (auto val = db.GetSetting(L"rpcs3_path")) {
+        if (!val->empty() && fs::exists(*val)) return *val;
+    }
+
+    const auto drives = StorefrontScanner::GetAllMountedDrives();
+    for (const auto& drive : drives) {
+        const fs::path cands[] = {
+            fs::path(drive) / L"Games" / L"Emulators" / L"RPCS3" / L"rpcs3.exe",
+            fs::path(drive) / L"Emulators" / L"RPCS3" / L"rpcs3.exe",
+            fs::path(drive) / L"Games" / L"RPCS3" / L"rpcs3.exe",
+            fs::path(drive) / L"Program Files" / L"RPCS3" / L"rpcs3.exe"
+        };
+        for (const auto& c : cands) {
+            std::error_code ec;
+            if (fs::exists(c, ec)) return c.wstring();
+        }
+    }
+    return L"";
+}
+
 bool PlatformLauncher::Launch(HWND hwndOwner, const GameItem& game) {
     // 1. STEAM: DRM validation and Steam profile overlay strictly require passing steam.exe in launch path
     if (game.platform == PlatformType::Steam) {
@@ -655,7 +996,151 @@ bool PlatformLauncher::Launch(HWND hwndOwner, const GameItem& game) {
         if (res > 32) return true;
     }
 
-    // 6. ITCH.IO & STANDALONE & SQUARE ENIX (FFXIV):
+    // 6. DOLPHIN (Nintendo GameCube & Wii):
+    if (game.platform == PlatformType::Dolphin) {
+        const std::wstring dolphinExe = GetDolphinExecutablePath();
+        if (!dolphinExe.empty() && !game.executablePath.empty()) {
+            const std::wstring args = L"-b -e \"" + game.executablePath + L"\"";
+            const auto res = reinterpret_cast<INT_PTR>(
+                ShellExecuteW(hwndOwner, L"open", dolphinExe.c_str(), args.c_str(), nullptr, SW_SHOWNORMAL)
+            );
+            if (res > 32) return true;
+        }
+    }
+
+    // 7. RETROARCH:
+    if (game.platform == PlatformType::RetroArch) {
+        const std::wstring raExe = GetRetroArchExecutablePath();
+        if (!raExe.empty() && !game.executablePath.empty()) {
+            const std::wstring args = L"-L " + (game.launchArguments.empty() ? L"" : game.launchArguments + L" ") + L"\"" + game.executablePath + L"\"";
+            const auto res = reinterpret_cast<INT_PTR>(
+                ShellExecuteW(hwndOwner, L"open", raExe.c_str(), args.c_str(), nullptr, SW_SHOWNORMAL)
+            );
+            if (res > 32) return true;
+        }
+    }
+
+    // 8. PROJECT64 (Nintendo 64):
+    if (game.platform == PlatformType::Project64) {
+        const std::wstring pj64Exe = GetProject64ExecutablePath();
+        if (!pj64Exe.empty() && !game.executablePath.empty()) {
+            const std::wstring args = L"\"" + game.executablePath + L"\"";
+            const auto res = reinterpret_cast<INT_PTR>(
+                ShellExecuteW(hwndOwner, L"open", pj64Exe.c_str(), args.c_str(), nullptr, SW_SHOWNORMAL)
+            );
+            if (res > 32) return true;
+        }
+    }
+
+    // 9. PCSX2 (PlayStation 2):
+    if (game.platform == PlatformType::PCSX2) {
+        const std::wstring pcsx2Exe = GetPCSX2ExecutablePath();
+        if (!pcsx2Exe.empty() && !game.executablePath.empty()) {
+            const std::wstring args = L"-batch -nogui \"" + game.executablePath + L"\"";
+            const auto res = reinterpret_cast<INT_PTR>(
+                ShellExecuteW(hwndOwner, L"open", pcsx2Exe.c_str(), args.c_str(), nullptr, SW_SHOWNORMAL)
+            );
+            if (res > 32) return true;
+        }
+    }
+
+    // 10. DUCKSTATION (PlayStation 1):
+    if (game.platform == PlatformType::DuckStation) {
+        const std::wstring duckExe = GetDuckStationExecutablePath();
+        if (!duckExe.empty() && !game.executablePath.empty()) {
+            const std::wstring args = L"-batch \"" + game.executablePath + L"\"";
+            const auto res = reinterpret_cast<INT_PTR>(
+                ShellExecuteW(hwndOwner, L"open", duckExe.c_str(), args.c_str(), nullptr, SW_SHOWNORMAL)
+            );
+            if (res > 32) return true;
+        }
+    }
+
+    // 11. PPSSPP (PlayStation Portable):
+    if (game.platform == PlatformType::PPSSPP) {
+        const std::wstring ppssppExe = GetPPSSPPExecutablePath();
+        if (!ppssppExe.empty() && !game.executablePath.empty()) {
+            const std::wstring args = L"\"" + game.executablePath + L"\"";
+            const auto res = reinterpret_cast<INT_PTR>(
+                ShellExecuteW(hwndOwner, L"open", ppssppExe.c_str(), args.c_str(), nullptr, SW_SHOWNORMAL)
+            );
+            if (res > 32) return true;
+        }
+    }
+
+    // 12. mGBA (Game Boy Advance / Color / Classic):
+    if (game.platform == PlatformType::mGBA) {
+        const std::wstring mgbaExe = GetmGBAExecutablePath();
+        if (!mgbaExe.empty() && !game.executablePath.empty()) {
+            const std::wstring args = L"\"" + game.executablePath + L"\"";
+            const auto res = reinterpret_cast<INT_PTR>(
+                ShellExecuteW(hwndOwner, L"open", mgbaExe.c_str(), args.c_str(), nullptr, SW_SHOWNORMAL)
+            );
+            if (res > 32) return true;
+        }
+    }
+
+    // 13. SNES9X (Super Nintendo):
+    if (game.platform == PlatformType::Snes9x) {
+        const std::wstring snesExe = GetSnes9xExecutablePath();
+        if (!snesExe.empty() && !game.executablePath.empty()) {
+            const std::wstring args = L"\"" + game.executablePath + L"\"";
+            const auto res = reinterpret_cast<INT_PTR>(
+                ShellExecuteW(hwndOwner, L"open", snesExe.c_str(), args.c_str(), nullptr, SW_SHOWNORMAL)
+            );
+            if (res > 32) return true;
+        }
+    }
+
+    // 14. melonDS (Nintendo DS):
+    if (game.platform == PlatformType::melonDS) {
+        const std::wstring melonExe = GetMelonDSExecutablePath();
+        if (!melonExe.empty() && !game.executablePath.empty()) {
+            const std::wstring args = L"\"" + game.executablePath + L"\"";
+            const auto res = reinterpret_cast<INT_PTR>(
+                ShellExecuteW(hwndOwner, L"open", melonExe.c_str(), args.c_str(), nullptr, SW_SHOWNORMAL)
+            );
+            if (res > 32) return true;
+        }
+    }
+
+    // 15. CITRA (Nintendo 3DS):
+    if (game.platform == PlatformType::Citra) {
+        const std::wstring citraExe = GetCitraExecutablePath();
+        if (!citraExe.empty() && !game.executablePath.empty()) {
+            const std::wstring args = L"\"" + game.executablePath + L"\"";
+            const auto res = reinterpret_cast<INT_PTR>(
+                ShellExecuteW(hwndOwner, L"open", citraExe.c_str(), args.c_str(), nullptr, SW_SHOWNORMAL)
+            );
+            if (res > 32) return true;
+        }
+    }
+
+    // 16. FLYCAST (Sega Dreamcast & Saturn):
+    if (game.platform == PlatformType::Flycast) {
+        const std::wstring flyExe = GetFlycastExecutablePath();
+        if (!flyExe.empty() && !game.executablePath.empty()) {
+            const std::wstring args = L"\"" + game.executablePath + L"\"";
+            const auto res = reinterpret_cast<INT_PTR>(
+                ShellExecuteW(hwndOwner, L"open", flyExe.c_str(), args.c_str(), nullptr, SW_SHOWNORMAL)
+            );
+            if (res > 32) return true;
+        }
+    }
+
+    // 17. RPCS3 (PlayStation 3):
+    if (game.platform == PlatformType::RPCS3) {
+        const std::wstring rpcs3Exe = GetRPCS3ExecutablePath();
+        if (!rpcs3Exe.empty() && !game.executablePath.empty()) {
+            const std::wstring args = L"--no-gui \"" + game.executablePath + L"\"";
+            const auto res = reinterpret_cast<INT_PTR>(
+                ShellExecuteW(hwndOwner, L"open", rpcs3Exe.c_str(), args.c_str(), nullptr, SW_SHOWNORMAL)
+            );
+            if (res > 32) return true;
+        }
+    }
+
+    // 8. ITCH.IO & STANDALONE & SQUARE ENIX (FFXIV):
     // DRM-free stores: Direct executable invocation is the most reliable, optimal method (zero client required)
     if (!game.executablePath.empty()) {
         const wchar_t* pArgs = game.launchArguments.empty() ? nullptr : game.launchArguments.c_str();

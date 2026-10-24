@@ -56,7 +56,7 @@ function Find-MakeNSIS {
 $MakeNSIS = Find-MakeNSIS
 Write-Host "[Windows Game Explorer] Found NSIS compiler: $MakeNSIS" -ForegroundColor Cyan
 
-$AppVer = "2.0.1"
+$AppVer = "2.1.1"
 $nsiContent = Get-Content -LiteralPath $InstallerScript -Raw -ErrorAction SilentlyContinue
 if ($nsiContent -match '!define\s+APP_VERSION\s+"([^"]+)"') {
     $AppVer = $Matches[1]
@@ -73,13 +73,29 @@ $FilesToZip = @(
     (Join-Path $BinDir "GameExplorerConfig.exe"),
     (Join-Path $BinDir "GameExplorerManager.exe"),
     (Join-Path $RepoRoot "LICENSE"),
-    (Join-Path $RepoRoot "assets\game-explorer-icon.ico")
+    (Join-Path $RepoRoot "assets\game-explorer-icon.ico"),
+    (Join-Path $RepoRoot "register.bat"),
+    (Join-Path $RepoRoot "unregister.bat")
 )
 Compress-Archive -Path $FilesToZip -DestinationPath $ZipPath -CompressionLevel Optimal
 
 $ZipHash = (Get-FileHash -Path $ZipPath -Algorithm SHA256).Hash
 Write-Host "  -> ZIP: $ZipPath" -ForegroundColor Green
 Write-Host "  -> SHA256: $ZipHash" -ForegroundColor DarkGray
+
+# Package structured ROMs directory template ZIP
+$RomsTemplateDir = Join-Path $RepoRoot "assets\roms-template\ROMs"
+if (Test-Path -LiteralPath $RomsTemplateDir) {
+    $RomsZipPath = Join-Path $DistDir "windows-game-explorer-v$AppVer-ROMs-template.zip"
+    if (Test-Path -LiteralPath $RomsZipPath) {
+        Remove-Item -LiteralPath $RomsZipPath -Force
+    }
+    Write-Host "[Windows Game Explorer] Creating structured ROMs directory template ZIP..." -ForegroundColor Cyan
+    Compress-Archive -Path $RomsTemplateDir -DestinationPath $RomsZipPath -CompressionLevel Optimal
+    $RomsZipHash = (Get-FileHash -Path $RomsZipPath -Algorithm SHA256).Hash
+    Write-Host "  -> ROMs Template ZIP: $RomsZipPath" -ForegroundColor Green
+    Write-Host "  -> SHA256: $RomsZipHash" -ForegroundColor DarkGray
+}
 
 # Compile NSIS Setup Installer
 Write-Host "[Windows Game Explorer] Compiling NSIS installer..." -ForegroundColor Cyan

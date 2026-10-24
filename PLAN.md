@@ -16,20 +16,22 @@
 
 ## 🎯 Active Sprints
 
-*No active sprint — `v2.0.0` released. Next up: Sprint 33 (`v2.1.0`).*
-
----
-
-## ⏳ Queued Sprints
-
-### 🚀 Sprint 33: [windows-game-explorer] — Cloud Gaming Streaming Hooks & Gamepad Handheld Mode (deferred to v2.1.0)
+### 🚀 Sprint 34: [windows-game-explorer] — Cloud Gaming Streaming Hooks & Gamepad Handheld Mode (`v2.2.0`)
 - **Project Identifier:** `[windows-game-explorer]`
 - **Repository Path:** `projects/windows-game-explorer`
 - **Target Objective:** Expand platform launcher hooks to cloud gaming providers (GeForce NOW, Xbox Cloud Gaming) and deliver a controller-friendly Big Picture overlay mode for handheld PCs.
 
 ---
 
+## ⏳ Queued Sprints
+
+*(All planned sprints active or delivered)*
+
+---
+
 ## ✅ Completed Sprints
 
+- ✅ **Sprint 34: [windows-game-explorer] — Viewport Scroll Position Reset Prevention, Multi-Viewport Aspect Ratio Fitting & OneDrive Cloud Sync (`v2.1.1`, W.57)**: Resolved scroll position reset on game/provider selection via in-place styling updates (`SelectGame` / `SelectProvider`) and vertical scroll offset preservation in `BuildXamlViewport`; added `detailsArtPath` in `GameItem` and SQLite migration; implemented GDI+ `GetLocalImageDimensions` for responsive aspect-ratio fitting in the Details pane (300x169 for 16:9 heroes, 300x238 for 315x250 static covers with 0 letterboxing, 170x255 centered for 2:3 vertical covers, 96x96 for icons); prioritized static itch covers over animated watermarked GIFs (*A House in the Rift*); fixed JSON UTF-8 serialization truncation; implemented automatic OneDrive sync folder creation (`%OneDrive%\Windows Game Explorer` with `metadata/`, `backups/`, `art/`) and verified bidirectional sync with dedicated unit test (0 warnings `/W4 /WX`, 17/17 unit tests passing).
+- ✅ **Sprint 33: [windows-game-explorer] — Universal Multi-Source Achievement Tracking & Universal Emulation/ROMs Engine (`v2.1.0`, W.55)**: Delivered modular multi-source achievement engine supporting Steam (Steamworks Web API & global percentages), RetroAchievements (Web API v2.1.0), and GOG Galaxy; added SQLite `achievements` table with batch upsert, local badge caching in `%USERPROFILE%\Game Explorer\cache\badges\`, credential settings card in `GameExplorerConfig.exe`, and rich trophy progress bar + badge previews in `GameExplorerShell.dll` Inspector; implemented universal multi-drive retro ROMs scanning with title cleaning (`CleanRomTitle`), high-resolution online artwork from Libretro Thumbnails CDN, and automated launch discovery across Dolphin, Project64, PCSX2, DuckStation, PPSSPP, RPCS3, mGBA, Snes9x, melonDS, Citra, Flycast, and RetroArch; packaged `windows-game-explorer-v2.1.0-ROMs-template.zip` distribution asset (0 warnings `/W4 /WX`, 15/15 unit tests passing).
 - ✅ **Sprint 32: [windows-game-explorer] — Windows Game Explorer Shell Extension & Lifecycle Management (`v2.0.0`, W.54)**: Delivered `GameExplorerShell.dll` (WinUI XAML Island `IShellView` with two-section `▾ Installed Providers` and `▾ Games Library` categorization, animated `.gif`/`.png`/`.jpg`/`.webp` artwork, and persistent right-hand Inspector & Library Overview sidepane), 17-platform non-hardcoded storefront discovery (including Xbox `AppModel\Repository\Packages` & `.GamingRoot`), live install/uninstall detection, system locale support, authentic Windows `imageres.dll` #14 Games icon, `GameExplorerConfig.exe`, and `GameExplorerManager.exe` (0 warnings `/W4 /WX`, 10/10 unit tests passing).
 - *Completed sprints prior to the v2.0.0 Native C++ Windows Game Explorer re-architecture are archived in [`CHANGELOG.md`](./CHANGELOG.md).*

@@ -31,6 +31,18 @@ public:
     static std::wstring GetHoYoPlayExecutablePath();
     static std::wstring GetParadoxExecutablePath();
     static std::wstring GetESDEExecutablePath();
+    static std::wstring GetDolphinExecutablePath();
+    static std::wstring GetProject64ExecutablePath();
+    static std::wstring GetPCSX2ExecutablePath();
+    static std::wstring GetDuckStationExecutablePath();
+    static std::wstring GetPPSSPPExecutablePath();
+    static std::wstring GetmGBAExecutablePath();
+    static std::wstring GetSnes9xExecutablePath();
+    static std::wstring GetMelonDSExecutablePath();
+    static std::wstring GetCitraExecutablePath();
+    static std::wstring GetFlycastExecutablePath();
+    static std::wstring GetRPCS3ExecutablePath();
+    static std::wstring GetRetroArchExecutablePath();
 };
 
 } // namespace GameExplorer
