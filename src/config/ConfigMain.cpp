@@ -468,7 +468,7 @@ LRESULT CALLBACK ConfigWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPara
             20, saveY, 190, 38, hwnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_BTN_SAVE)), nullptr, nullptr);
         SendMessageW(hBtnSave, WM_SETFONT, reinterpret_cast<WPARAM>(g_hFontBold), TRUE);
 
-        HWND hBtnResetCache = CreateWindowExW(0, L"BUTTON", L"\U0001F9F9 Reset Art Cache",
+        HWND hBtnResetCache = CreateWindowExW(0, L"BUTTON", L"\U0001F9F9 Reset Cache",
             WS_CHILD | WS_VISIBLE | BS_OWNERDRAW,
             220, saveY, 190, 38, hwnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_BTN_RESET_CACHE)), nullptr, nullptr);
         SendMessageW(hBtnResetCache, WM_SETFONT, reinterpret_cast<WPARAM>(g_hFont), TRUE);
@@ -845,7 +845,7 @@ LRESULT CALLBACK ConfigWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPara
             return TRUE;
         }
         if (pDis->CtlID == IDC_BTN_RESET_CACHE) {
-            drawStyledButton(L"\U0001F9F9 Reset Art Cache", false, false);
+            drawStyledButton(L"\U0001F9F9 Reset Cache", false, false);
             return TRUE;
         }
         break;
@@ -855,16 +855,16 @@ LRESULT CALLBACK ConfigWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPara
         const int id = LOWORD(wParam);
         if (id == IDC_BTN_RESET_CACHE) {
             const int ret = MessageBoxW(hwnd,
-                L"Are you sure you want to reset and purge the artwork cache?\n\n"
-                L"This will delete all cached covers, heroes, icons, and thumbnails in:\n"
-                L"%USERPROFILE%\\Game Explorer\\cache\\art\\\n\n"
-                L"Fresh authentic images will be fetched cleanly from providers when games are viewed.",
-                L"Reset Artwork Cache",
+                L"Are you sure you want to completely reset and repopulate the library?\n\n"
+                L"This will purge cached artwork, refresh all storefront metadata, and repopulate authentic covers and details from installed stores.",
+                L"Reset & Repopulate Library",
                 MB_YESNO | MB_ICONQUESTION
             );
             if (ret == IDYES) {
+                HCURSOR hOldCursor = SetCursor(LoadCursor(nullptr, IDC_WAIT));
                 StorefrontScanner::ResetArtworkCache();
-                MessageBoxW(hwnd, L"Artwork cache has been successfully reset.", L"Artwork Cache", MB_OK | MB_ICONINFORMATION);
+                SetCursor(hOldCursor);
+                MessageBoxW(hwnd, L"Library cache and metadata have been successfully reset and repopulated.", L"Reset & Repopulate Library", MB_OK | MB_ICONINFORMATION);
             }
             return 0;
         }
@@ -1037,6 +1037,8 @@ int HandleShellRegistrationCLI(bool doRegister) {
 }
 
 int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE /*hPrevInstance*/, PWSTR /*lpCmdLine*/, int nCmdShow) {
+    CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+
     int argc = 0;
     PWSTR* argv = CommandLineToArgvW(GetCommandLineW(), &argc);
     if (argv != nullptr) {
@@ -1044,11 +1046,21 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE /*hPrevInstance*/, PWSTR /*lp
             const std::wstring_view arg = argv[i];
             if (arg == L"--register" || arg == L"/register" || arg == L"-register") {
                 LocalFree(argv);
-                return HandleShellRegistrationCLI(true);
+                const int ret = HandleShellRegistrationCLI(true);
+                CoUninitialize();
+                return ret;
             }
             if (arg == L"--unregister" || arg == L"/unregister" || arg == L"-unregister") {
                 LocalFree(argv);
-                return HandleShellRegistrationCLI(false);
+                const int ret = HandleShellRegistrationCLI(false);
+                CoUninitialize();
+                return ret;
+            }
+            if (arg == L"--reset-cache" || arg == L"/reset-cache" || arg == L"-reset-cache") {
+                LocalFree(argv);
+                const int ret = StorefrontScanner::ResetArtworkCache() ? 0 : 1;
+                CoUninitialize();
+                return ret;
             }
         }
         LocalFree(argv);

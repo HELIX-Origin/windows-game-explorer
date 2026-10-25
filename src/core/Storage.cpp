@@ -6,17 +6,16 @@
 namespace GameExplorer {
 
 std::filesystem::path Storage::GetUserRootPath() {
+    wchar_t userProfile[MAX_PATH] = { 0 };
+    if (GetEnvironmentVariableW(L"USERPROFILE", userProfile, MAX_PATH) > 0) {
+        return std::filesystem::path(userProfile) / L"Game Explorer";
+    }
+
     PWSTR pPath = nullptr;
     if (SUCCEEDED(SHGetKnownFolderPath(FOLDERID_Profile, 0, nullptr, &pPath))) {
         std::filesystem::path root(pPath);
         CoTaskMemFree(pPath);
         return root / L"Game Explorer";
-    }
-
-    // Fallback to APPDATA or USERPROFILE environment variable
-    const wchar_t* userProfile = _wgetenv(L"USERPROFILE");
-    if (userProfile != nullptr) {
-        return std::filesystem::path(userProfile) / L"Game Explorer";
     }
 
     return std::filesystem::current_path() / L"Game Explorer";
@@ -59,21 +58,22 @@ std::filesystem::path Storage::GetOneDrivePath() {
     };
 
     // Check specific OneDrive environment variables
-    const wchar_t* oneDrive = _wgetenv(L"OneDriveConsumer");
-    if (oneDrive == nullptr) {
-        oneDrive = _wgetenv(L"OneDriveCommercial");
-    }
-    if (oneDrive == nullptr) {
-        oneDrive = _wgetenv(L"OneDrive");
-    }
-
-    if (oneDrive != nullptr) {
-        std::filesystem::path p(oneDrive);
+    wchar_t oneDriveBuf[MAX_PATH] = { 0 };
+    if (GetEnvironmentVariableW(L"OneDriveConsumer", oneDriveBuf, MAX_PATH) > 0 ||
+        GetEnvironmentVariableW(L"OneDriveCommercial", oneDriveBuf, MAX_PATH) > 0 ||
+        GetEnvironmentVariableW(L"OneDrive", oneDriveBuf, MAX_PATH) > 0) {
+        std::filesystem::path p(oneDriveBuf);
         auto resolved = resolveFolder(p);
         if (!resolved.empty()) return resolved;
     }
 
     // Fallback check: %USERPROFILE%\OneDrive
+    wchar_t userProfile[MAX_PATH] = { 0 };
+    if (GetEnvironmentVariableW(L"USERPROFILE", userProfile, MAX_PATH) > 0) {
+        auto resolved = resolveFolder(std::filesystem::path(userProfile) / L"OneDrive");
+        if (!resolved.empty()) return resolved;
+    }
+
     PWSTR pPath = nullptr;
     if (SUCCEEDED(SHGetKnownFolderPath(FOLDERID_Profile, 0, nullptr, &pPath))) {
         std::filesystem::path profile(pPath);

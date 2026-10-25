@@ -228,3 +228,19 @@ TEST_CASE(TextSanitizationAndEntityDecoding) {
     // 3. Emoji corruption stripping
     ASSERT_EQ(GameExplorer::StorefrontScanner::SanitizeGameText(L"Loverse ðŸ”ž"), L"Loverse");
 }
+
+TEST_CASE(ItchArtworkProtectionAndStrictTitleMatching) {
+    // 1. Itch games with authentic covers must never have their covers clobbered
+    GameExplorer::GameItem item{};
+    item.appId = L"itch_test_123";
+    item.platform = GameExplorer::PlatformType::Itch;
+    item.title = L"That New Teacher";
+    item.coverArtPath = L"C:\\Users\\Mock\\cache\\art\\itch_test_123_static_cover.png";
+    item.heroArtPath = L"C:\\Users\\Mock\\cache\\art\\itch_test_123_static_cover.png";
+
+    GameExplorer::StorefrontScanner::EnrichGameMetadata(item);
+
+    // Verify authentic storefront art was strictly preserved
+    ASSERT_EQ(item.coverArtPath, L"C:\\Users\\Mock\\cache\\art\\itch_test_123_static_cover.png");
+    ASSERT_EQ(item.heroArtPath, L"C:\\Users\\Mock\\cache\\art\\itch_test_123_static_cover.png");
+}

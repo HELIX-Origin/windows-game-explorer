@@ -6,6 +6,35 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [2.2.0] - 2026-10-24
+
+### Added
+- **Dedicated VNDB Kana API Metadata Provider (`api.vndb.org/kana/vn`)**:
+  - Integrated dedicated visual novel and adult metadata provider using the public VNDB Kana API via HTTPS POST with JSON payload.
+  - Automatically enriches developer, publisher, release date, BBCode-cleaned synopsis, rating (`Adults Only (18+)`), and genres (`Visual Novel`) without requiring an API key.
+- **Itch.io Storefront Page Scraping & Asset Extraction**:
+  - Implemented `EnrichFromItchStorePage()` extracting authentic desktop favicon (`rel="icon"`), animated/static covers (`og:image`), and description (`og:description`) directly from itch game web pages.
+  - Sourced static images to `coverArtPath` and animated GIFs to `detailsArtPath`, preserving animated presentation in the Details Inspector while keeping grid/list views static.
+- **Loose Aspect Ratio Enforcement for Diverse Storefront Art**:
+  - Relaxed aspect ratio validation in `ImageValidator` (`IsValidCover` 0.25f–2.50f, `IsValidHero` 0.80f–4.50f) to natively accommodate itch.io 315×250 cards and diverse non-standard storefront box art without artificial rejection.
+- **Cache Purge & Fresh Library Rebuild Engine**:
+  - Renamed button to `🧹 Reset Cache` across `GameExplorerConfig.exe` and `GameExplorerManager.exe`.
+  - Added CLI switch `--reset-cache` to `GameExplorerConfig.exe`.
+  - Upgraded `ResetArtworkCache()` to atomically clear existing cached artwork and metadata, followed by an immediate full storefront scan (`ScanAll`) to generate a fresh, authentic library cache.
+- **Direct Module-Address Anchored Companion Launching**:
+  - Resolved portable distribution launch of companion apps (`GameExplorerConfig.exe` / `GameExplorerManager.exe`) inside `GameExplorerShell.dll` via `GetModuleHandleExW` with `GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS` anchored to `&GetApplicationDirectory`.
+
+### Fixed
+- **Fuzzy Substring Title Mismatch in SteamGridDB and IGDB**:
+  - Implemented `AreTitlesMatching()`, `NormalizeTitleForMatch()`, and `CleanTitleFromBracketTags()` across SteamGridDB and IGDB queries.
+  - Strictly rejects unrelated titles matching loose substrings (e.g. *That New Teacher* &ne; *That Old Time Religion*, *The Proteus Effect* &ne; *'the*, *Loverse* &ne; *Dot Kareshi*).
+  - Protected itch.io storefront artwork and metadata from being overwritten by external scrapers.
+- **Write-Only OneDrive Backup Alignment**:
+  - Ensured all active runtime metadata and art loading operations read exclusively from local `%USERPROFILE%\Game Explorer\`. The OneDrive directory is strictly maintained as a write-only backup and recovery mirror.
+- **Scope Alignment & Fabricated Plan Removal**:
+  - Formally dropped all "all owned games" milestone planning per user directive; library focus remains strictly on installed games.
+  - Removed all unsupported cloud gaming and handheld big picture overlay concepts.
+
 ## [2.1.2] - 2026-10-24
 
 ### Added

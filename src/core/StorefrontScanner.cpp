@@ -16,6 +16,7 @@
 #include <sstream>
 #include <algorithm>
 #include <set>
+#include <map>
 
 namespace fs = std::filesystem;
 
@@ -590,11 +591,82 @@ void EnrichSteamMetadataFromStoreApi(const std::wstring& rawAppId, GameItem& ite
     }
 }
 
+static std::wstring CleanTitleFromBracketTags(const std::wstring& raw) {
+    std::wstring s = raw;
+    size_t start = 0;
+    while (start < s.size() && (s[start] == L' ' || s[start] == L'\t')) ++start;
+    if (start < s.size() && (s[start] == L'[' || s[start] == L'(')) {
+        wchar_t closeCh = (s[start] == L'[') ? L']' : L')';
+        size_t closePos = s.find(closeCh, start);
+        if (closePos != std::wstring::npos) {
+            s = s.substr(closePos + 1);
+        }
+    }
+    size_t firstNonSpace = s.find_first_not_of(L" \t-:");
+    if (firstNonSpace != std::wstring::npos) {
+        s = s.substr(firstNonSpace);
+    }
+    size_t nsfwPos = s.find(L"(NSFW");
+    if (nsfwPos == std::wstring::npos) nsfwPos = s.find(L"(18+");
+    if (nsfwPos != std::wstring::npos) {
+        s = s.substr(0, nsfwPos);
+    }
+    size_t vPos = s.find(L" v0.");
+    if (vPos == std::wstring::npos) vPos = s.find(L" v1.");
+    if (vPos != std::wstring::npos) {
+        s = s.substr(0, vPos);
+    }
+    while (!s.empty() && (s.back() == L' ' || s.back() == L'\t' || s.back() == L',' || s.back() == L'.')) {
+        s.pop_back();
+    }
+    return s.empty() ? raw : s;
+}
+
+static std::wstring NormalizeTitleForMatch(const std::wstring& raw) {
+    std::wstring s;
+    s.reserve(raw.size());
+    for (wchar_t ch : raw) {
+        if (iswalnum(ch)) {
+            s.push_back(towlower(ch));
+        } else if (ch == L' ' || ch == L'\t' || ch == L'-' || ch == L'_' || ch == L':' || ch == L'/' || ch == L'\'') {
+            if (!s.empty() && s.back() != L' ') {
+                s.push_back(L' ');
+            }
+        }
+    }
+    while (!s.empty() && s.back() == L' ') s.pop_back();
+    return s;
+}
+
+static bool AreTitlesMatching(const std::wstring& requested, const std::wstring& candidate) {
+    const std::wstring reqClean = CleanTitleFromBracketTags(requested);
+    const std::wstring candClean = CleanTitleFromBracketTags(candidate);
+
+    const std::wstring reqNorm = NormalizeTitleForMatch(reqClean);
+    const std::wstring candNorm = NormalizeTitleForMatch(candClean);
+
+    if (reqNorm.empty() || candNorm.empty()) return false;
+    if (reqNorm == candNorm) return true;
+
+    const std::wstring& longer = (reqNorm.size() > candNorm.size()) ? reqNorm : candNorm;
+    const std::wstring& shorter = (reqNorm.size() > candNorm.size()) ? candNorm : reqNorm;
+
+    if (shorter.size() >= 4 && longer.rfind(shorter, 0) == 0) {
+        if (longer.size() == shorter.size() || longer[shorter.size()] == L' ') {
+            return true;
+        }
+    }
+    return false;
+}
+
 void EnrichFromSteamGridDb(GameItem& item, const std::wstring& apiKey) {
     if (apiKey.empty() || item.title.empty()) return;
 
+    const bool isItch = (item.platform == PlatformType::Itch);
+
+    const std::wstring cleanTitle = CleanTitleFromBracketTags(item.title);
     const std::wstring authHeader = L"Authorization: Bearer " + apiKey + L"\r\n";
-    const std::wstring encTitle = UrlEncodeForCdn(item.title);
+    const std::wstring encTitle = UrlEncodeForCdn(cleanTitle.empty() ? item.title : cleanTitle);
     const std::string searchResp = RequestHttpsUtf8(
         L"www.steamgriddb.com",
         L"/api/v2/search/autocomplete/" + encTitle,
@@ -606,20 +678,36 @@ void EnrichFromSteamGridDb(GameItem& item, const std::wstring& apiKey) {
     const std::wstring searchJson = Utf8ToWide(searchResp.c_str());
     const size_t dataPos = searchJson.find(L"\"data\":[");
     if (dataPos == std::wstring::npos) return;
-    const size_t idPos = searchJson.find(L"\"id\":", dataPos);
-    if (idPos == std::wstring::npos) return;
-    size_t numStart = idPos + 5;
-    while (numStart < searchJson.size() && (searchJson[numStart] == L' ' || searchJson[numStart] == L'\t')) ++numStart;
-    size_t numEnd = numStart;
-    while (numEnd < searchJson.size() && iswdigit(searchJson[numEnd])) ++numEnd;
-    if (numEnd <= numStart) return;
-    const std::wstring sgdbId = searchJson.substr(numStart, numEnd - numStart);
+    const size_t endDataPos = searchJson.find(L']', dataPos);
+    if (endDataPos == std::wstring::npos) return;
+
+    // Strict candidate title matching: do not take arbitrary autocomplete results
+    std::wstring sgdbId;
+    size_t curPos = dataPos;
+    while (curPos < endDataPos) {
+        size_t idPos = searchJson.find(L"\"id\":", curPos);
+        if (idPos == std::wstring::npos || idPos >= endDataPos) break;
+        size_t numStart = idPos + 5;
+        while (numStart < endDataPos && (searchJson[numStart] == L' ' || searchJson[numStart] == L'\t')) ++numStart;
+        size_t numEnd = numStart;
+        while (numEnd < endDataPos && iswdigit(searchJson[numEnd])) ++numEnd;
+        if (numEnd <= numStart) { curPos = idPos + 5; continue; }
+        std::wstring candidateId = searchJson.substr(numStart, numEnd - numStart);
+
+        std::wstring candidateName = ExtractJsonStringField(searchJson, L"name", idPos);
+        if (!candidateName.empty() && AreTitlesMatching(item.title, candidateName)) {
+            sgdbId = candidateId;
+            break;
+        }
+        curPos = numEnd;
+    }
+    if (sgdbId.empty()) return; // No verified title match!
 
     const bool isNsfw = StorefrontScanner::IsNsfwGame(item);
     const std::wstring nsfwParam = isNsfw ? L"?dimensions=600x900&nsfw=any&humor=any" : L"?dimensions=600x900";
 
-    // 1. Vertical Cover Art (SteamGridDB 600x900 standard)
-    const bool needsCover = item.coverArtPath.empty() || !ImageValidator::IsValidCover(item.coverArtPath);
+    // 1. Vertical Cover Art (SteamGridDB 600x900 standard) - Protect authentic storefront covers
+    const bool needsCover = (!isItch || item.coverArtPath.empty()) && (item.coverArtPath.empty() || !ImageValidator::IsValidCover(item.coverArtPath));
     if (needsCover) {
         std::string gridResp = RequestHttpsUtf8(
             L"www.steamgriddb.com",
@@ -659,8 +747,8 @@ void EnrichFromSteamGridDb(GameItem& item, const std::wstring& apiKey) {
         }
     }
 
-    // 2. Widescreen Hero Banner (SteamGridDB 1920x620 / 3.1:1 standard)
-    const bool needsHero = item.heroArtPath.empty() || !ImageValidator::IsValidHero(item.heroArtPath);
+    // 2. Widescreen Hero Banner (SteamGridDB 1920x620 / 3.1:1 standard) - Protect authentic storefront hero
+    const bool needsHero = (!isItch || item.heroArtPath.empty()) && (item.heroArtPath.empty() || !ImageValidator::IsValidHero(item.heroArtPath));
     if (needsHero) {
         std::string heroResp = RequestHttpsUtf8(
             L"www.steamgriddb.com",
@@ -723,6 +811,8 @@ void EnrichFromSteamGridDb(GameItem& item, const std::wstring& apiKey) {
 void EnrichFromIgdb(GameItem& item, const std::wstring& clientId, const std::wstring& clientSecret) {
     if (clientId.empty() || clientSecret.empty() || item.title.empty()) return;
 
+    const bool isItch = (item.platform == PlatformType::Itch);
+
     static std::wstring s_cachedToken;
     static uint64_t s_tokenExpiry = 0;
 
@@ -742,14 +832,15 @@ void EnrichFromIgdb(GameItem& item, const std::wstring& clientId, const std::wst
         s_tokenExpiry = now + 3600 * 1000;
     }
 
+    const std::wstring cleanTitle = CleanTitleFromBracketTags(item.title);
     const std::wstring headers = L"Client-ID: " + clientId + L"\r\nAuthorization: Bearer " + s_cachedToken + L"\r\nContent-Type: text/plain\r\n";
-    std::string safeTitle = WideToUtf8(item.title.c_str());
+    std::string safeTitle = WideToUtf8(cleanTitle.empty() ? item.title.c_str() : cleanTitle.c_str());
     std::string escapedTitle;
     for (char ch : safeTitle) {
         if (ch == '"' || ch == '\\') escapedTitle.push_back('\\');
         escapedTitle.push_back(ch);
     }
-    const std::string igdbBody = "search \"" + escapedTitle + "\"; fields name,summary,storyline,first_release_date,involved_companies.company.name,involved_companies.developer,involved_companies.publisher,genres.name,cover.image_id; limit 1;";
+    const std::string igdbBody = "search \"" + escapedTitle + "\"; fields name,summary,storyline,first_release_date,involved_companies.company.name,involved_companies.developer,involved_companies.publisher,genres.name,cover.image_id; limit 5;";
 
     const std::string gameResp = RequestHttpsUtf8(
         L"api.igdb.com",
@@ -761,23 +852,55 @@ void EnrichFromIgdb(GameItem& item, const std::wstring& clientId, const std::wst
     if (gameResp.empty()) return;
     const std::wstring gameJson = Utf8ToWide(gameResp.c_str());
 
+    const size_t arrayStart = gameJson.find(L'[');
+    if (arrayStart == std::wstring::npos) return;
+    const size_t arrayEnd = gameJson.rfind(L']');
+    if (arrayEnd == std::wstring::npos || arrayEnd <= arrayStart) return;
+
+    size_t curObj = arrayStart;
+    std::wstring matchedBlock;
+    while (curObj < arrayEnd) {
+        size_t objStart = gameJson.find(L'{', curObj);
+        if (objStart == std::wstring::npos || objStart >= arrayEnd) break;
+        int braceDepth = 0;
+        size_t objEnd = objStart;
+        while (objEnd < arrayEnd) {
+            if (gameJson[objEnd] == L'{') ++braceDepth;
+            else if (gameJson[objEnd] == L'}') {
+                --braceDepth;
+                if (braceDepth == 0) break;
+            }
+            ++objEnd;
+        }
+        if (braceDepth != 0) break;
+
+        std::wstring block = gameJson.substr(objStart, objEnd - objStart + 1);
+        std::wstring name = ExtractJsonStringField(block, L"name");
+        if (!name.empty() && AreTitlesMatching(item.title, name)) {
+            matchedBlock = block;
+            break;
+        }
+        curObj = objEnd + 1;
+    }
+    if (matchedBlock.empty()) return; // No verified title match!
+
     // Synopsis
     if (item.synopsis.empty()) {
-        std::wstring summary = ExtractJsonStringField(gameJson, L"summary");
-        if (summary.empty()) summary = ExtractJsonStringField(gameJson, L"storyline");
+        std::wstring summary = ExtractJsonStringField(matchedBlock, L"summary");
+        if (summary.empty()) summary = ExtractJsonStringField(matchedBlock, L"storyline");
         if (!summary.empty()) item.synopsis = summary;
     }
 
     // Release Date
     if (item.releaseDate.empty()) {
-        const size_t relPos = gameJson.find(L"\"first_release_date\":");
+        const size_t relPos = matchedBlock.find(L"\"first_release_date\":");
         if (relPos != std::wstring::npos) {
             size_t numStart = relPos + 21;
-            while (numStart < gameJson.size() && (gameJson[numStart] == L' ' || gameJson[numStart] == L'\t')) ++numStart;
+            while (numStart < matchedBlock.size() && (matchedBlock[numStart] == L' ' || matchedBlock[numStart] == L'\t')) ++numStart;
             size_t numEnd = numStart;
-            while (numEnd < gameJson.size() && iswdigit(gameJson[numEnd])) ++numEnd;
+            while (numEnd < matchedBlock.size() && iswdigit(matchedBlock[numEnd])) ++numEnd;
             if (numEnd > numStart) {
-                const __time64_t epoch = _wtoi64(gameJson.substr(numStart, numEnd - numStart).c_str());
+                const __time64_t epoch = _wtoi64(matchedBlock.substr(numStart, numEnd - numStart).c_str());
                 if (epoch > 0) {
                     struct tm tmTime{};
                     if (_gmtime64_s(&tmTime, &epoch) == 0) {
@@ -792,16 +915,16 @@ void EnrichFromIgdb(GameItem& item, const std::wstring& clientId, const std::wst
 
     // Genres
     if (item.genres.empty()) {
-        const size_t genresPos = gameJson.find(L"\"genres\":");
+        const size_t genresPos = matchedBlock.find(L"\"genres\":");
         if (genresPos != std::wstring::npos) {
-            const size_t endGenres = gameJson.find(L']', genresPos);
+            const size_t endGenres = matchedBlock.find(L']', genresPos);
             if (endGenres != std::wstring::npos) {
                 std::wstring gList;
                 size_t searchCur = genresPos;
                 while (searchCur < endGenres) {
-                    const size_t namePos = gameJson.find(L"\"name\":", searchCur);
+                    const size_t namePos = matchedBlock.find(L"\"name\":", searchCur);
                     if (namePos == std::wstring::npos || namePos >= endGenres) break;
-                    const std::wstring gName = ExtractJsonStringField(gameJson, L"name", namePos - 1);
+                    const std::wstring gName = ExtractJsonStringField(matchedBlock, L"name", namePos - 1);
                     if (!gName.empty()) {
                         if (!gList.empty()) gList += L", ";
                         gList += gName;
@@ -815,15 +938,15 @@ void EnrichFromIgdb(GameItem& item, const std::wstring& clientId, const std::wst
 
     // Companies (Developer & Publisher)
     if (item.developer.empty() || item.publisher.empty()) {
-        const size_t compPos = gameJson.find(L"\"involved_companies\":");
+        const size_t compPos = matchedBlock.find(L"\"involved_companies\":");
         if (compPos != std::wstring::npos) {
-            const size_t endComp = gameJson.find(L']', compPos);
+            const size_t endComp = matchedBlock.find(L']', compPos);
             if (endComp != std::wstring::npos) {
                 size_t cur = compPos;
                 while (cur < endComp) {
-                    const size_t objEnd = gameJson.find(L'}', cur);
+                    const size_t objEnd = matchedBlock.find(L'}', cur);
                     if (objEnd == std::wstring::npos || objEnd >= endComp) break;
-                    const std::wstring block = gameJson.substr(cur, objEnd - cur + 1);
+                    const std::wstring block = matchedBlock.substr(cur, objEnd - cur + 1);
                     const std::wstring compName = ExtractJsonStringField(block, L"name");
                     const bool isDev = (block.find(L"\"developer\":true") != std::wstring::npos);
                     const bool isPub = (block.find(L"\"publisher\":true") != std::wstring::npos);
@@ -835,9 +958,9 @@ void EnrichFromIgdb(GameItem& item, const std::wstring& clientId, const std::wst
         }
     }
 
-    // Cover Art (t_1080p high resolution)
-    if (item.coverArtPath.empty() || !ImageValidator::IsValidCover(item.coverArtPath)) {
-        const std::wstring imageId = ExtractJsonStringField(gameJson, L"image_id");
+    // Cover Art (t_1080p high resolution) - Protect authentic storefront covers
+    if ((!isItch || item.coverArtPath.empty()) && (item.coverArtPath.empty() || !ImageValidator::IsValidCover(item.coverArtPath))) {
+        const std::wstring imageId = ExtractJsonStringField(matchedBlock, L"image_id");
         if (!imageId.empty()) {
             if (item.detailsArtPath.empty() && !item.coverArtPath.empty()) {
                 item.detailsArtPath = item.coverArtPath;
@@ -846,6 +969,227 @@ void EnrichFromIgdb(GameItem& item, const std::wstring& clientId, const std::wst
             const std::wstring cachedCover = CacheRemoteArtwork(item.appId, L"cover", igdbCoverUrl);
             if (!cachedCover.empty() && ImageValidator::IsValidCover(cachedCover)) {
                 item.coverArtPath = cachedCover;
+            }
+        }
+    }
+}
+
+void EnrichFromVndb(GameItem& item) {
+    if (item.title.empty()) return;
+
+    const bool isItch = (item.platform == PlatformType::Itch);
+    const std::wstring cleanTitle = CleanTitleFromBracketTags(item.title);
+    const std::string cleanUtf8 = WideToUtf8(cleanTitle.empty() ? item.title.c_str() : cleanTitle.c_str());
+    std::string escapedTitle;
+    for (char ch : cleanUtf8) {
+        if (ch == '"' || ch == '\\') escapedTitle.push_back('\\');
+        escapedTitle.push_back(ch);
+    }
+
+    const std::string postBody = "{\"filters\":[\"search\",\"=\",\"" + escapedTitle +
+        "\"],\"fields\":\"id,title,alttitle,released,description,image.url,image.sexual,developers.name\",\"results\":5}";
+
+    const std::wstring headers = L"Content-Type: application/json\r\n";
+    const std::string vndbResp = RequestHttpsUtf8(
+        L"api.vndb.org",
+        L"/kana/vn",
+        L"POST",
+        headers,
+        postBody
+    );
+    if (vndbResp.empty()) return;
+
+    const std::wstring vndbJson = Utf8ToWide(vndbResp.c_str());
+    const size_t resPos = vndbJson.find(L"\"results\":[");
+    if (resPos == std::wstring::npos) return;
+    const size_t endResPos = vndbJson.rfind(L']');
+    if (endResPos == std::wstring::npos || endResPos <= resPos) return;
+
+    size_t curObj = resPos;
+    std::wstring matchedObj;
+    while (curObj < endResPos) {
+        size_t objStart = vndbJson.find(L'{', curObj);
+        if (objStart == std::wstring::npos || objStart >= endResPos) break;
+        int braceDepth = 0;
+        size_t objEnd = objStart;
+        while (objEnd < endResPos) {
+            if (vndbJson[objEnd] == L'{') ++braceDepth;
+            else if (vndbJson[objEnd] == L'}') {
+                --braceDepth;
+                if (braceDepth == 0) break;
+            }
+            ++objEnd;
+        }
+        if (braceDepth != 0) break;
+
+        std::wstring block = vndbJson.substr(objStart, objEnd - objStart + 1);
+        std::wstring title = ExtractJsonStringField(block, L"title");
+        std::wstring alttitle = ExtractJsonStringField(block, L"alttitle");
+
+        if ((!title.empty() && AreTitlesMatching(item.title, title)) ||
+            (!alttitle.empty() && AreTitlesMatching(item.title, alttitle))) {
+            matchedObj = block;
+            break;
+        }
+        curObj = objEnd + 1;
+    }
+
+    if (matchedObj.empty()) return; // No verified title match
+
+    // 1. Developer & Publisher
+    if (item.developer.empty()) {
+        size_t devPos = matchedObj.find(L"\"developers\":[");
+        if (devPos != std::wstring::npos) {
+            std::wstring devName = ExtractJsonStringField(matchedObj, L"name", devPos);
+            if (!devName.empty()) {
+                item.developer = devName;
+                if (item.publisher.empty()) item.publisher = devName;
+            }
+        }
+    }
+
+    // 2. Release Date
+    if (item.releaseDate.empty()) {
+        std::wstring rel = ExtractJsonStringField(matchedObj, L"released");
+        if (!rel.empty()) item.releaseDate = rel;
+    }
+
+    // 3. Synopsis / Description
+    if (item.synopsis.empty()) {
+        std::wstring desc = ExtractJsonStringField(matchedObj, L"description");
+        if (!desc.empty()) {
+            std::wstring cleanDesc;
+            cleanDesc.reserve(desc.size());
+            bool insideTag = false;
+            for (size_t i = 0; i < desc.size(); ++i) {
+                if (desc[i] == L'[') insideTag = true;
+                else if (desc[i] == L']') insideTag = false;
+                else if (!insideTag) cleanDesc.push_back(desc[i]);
+            }
+            item.synopsis = cleanDesc;
+        }
+    }
+
+    // 4. Genres & Age Rating
+    if (item.genres.find(L"Visual Novel") == std::wstring::npos) {
+        if (item.genres.empty()) item.genres = L"Visual Novel";
+        else item.genres += L", Visual Novel";
+    }
+
+    size_t sexPos = matchedObj.find(L"\"sexual\":");
+    if (sexPos != std::wstring::npos) {
+        size_t sVal = sexPos + 9;
+        while (sVal < matchedObj.size() && (matchedObj[sVal] == L' ' || matchedObj[sVal] == L'\t')) ++sVal;
+        if (sVal < matchedObj.size() && matchedObj[sVal] > L'0') {
+            item.rating = L"Adults Only (18+)";
+        }
+    }
+
+    // 5. Cover Artwork (if item has no cover art yet) - Protect authentic storefront covers
+    if ((!isItch || item.coverArtPath.empty()) && (item.coverArtPath.empty() || !ImageValidator::IsValidCover(item.coverArtPath))) {
+        size_t imgPos = matchedObj.find(L"\"image\":{");
+        if (imgPos != std::wstring::npos) {
+            std::wstring imgUrl = ExtractJsonStringField(matchedObj, L"url", imgPos);
+            if (!imgUrl.empty()) {
+                const std::wstring cached = CacheRemoteArtwork(item.appId, L"cover", imgUrl);
+                if (!cached.empty() && ImageValidator::IsValidCover(cached)) {
+                    item.coverArtPath = cached;
+                    if (item.heroArtPath.empty()) item.heroArtPath = cached;
+                    if (item.detailsArtPath.empty()) item.detailsArtPath = cached;
+                }
+            }
+        }
+    }
+}
+
+void EnrichFromItchStorePage(GameItem& item) {
+    if (item.storePageUrl.empty()) return;
+
+    std::wstring url = item.storePageUrl;
+    size_t proto = url.find(L"://");
+    if (proto == std::wstring::npos) return;
+    size_t hostStart = proto + 3;
+    size_t slash = url.find(L'/', hostStart);
+    std::wstring host = (slash == std::wstring::npos) ? url.substr(hostStart) : url.substr(hostStart, slash - hostStart);
+    std::wstring path = (slash == std::wstring::npos) ? L"/" : url.substr(slash);
+
+    const std::string html = RequestHttpsUtf8(host.c_str(), path, L"GET");
+    if (html.empty()) return;
+
+    const std::wstring wideHtml = Utf8ToWide(html.c_str());
+
+    // 1. Icon from rel="icon"
+    if (item.iconPath.empty()) {
+        size_t iconPos = wideHtml.find(L"rel=\"icon\"");
+        if (iconPos == std::wstring::npos) iconPos = wideHtml.find(L"rel=\'icon\'");
+        if (iconPos != std::wstring::npos) {
+            size_t tagStart = wideHtml.rfind(L'<', iconPos);
+            size_t tagEnd = wideHtml.find(L'>', iconPos);
+            if (tagStart != std::wstring::npos && tagEnd != std::wstring::npos) {
+                std::wstring tag = wideHtml.substr(tagStart, tagEnd - tagStart + 1);
+                size_t hrefPos = tag.find(L"href=\"");
+                if (hrefPos != std::wstring::npos) {
+                    size_t valStart = hrefPos + 6;
+                    size_t valEnd = tag.find(L'\"', valStart);
+                    if (valEnd != std::wstring::npos) {
+                        std::wstring iconUrl = tag.substr(valStart, valEnd - valStart);
+                        if (!iconUrl.empty()) {
+                            item.iconPath = CacheRemoteArtwork(item.appId, L"icon", iconUrl);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // 2. Animated Details from og:image
+    auto isGif = [](const std::wstring& u) {
+        std::wstring lower = u;
+        std::transform(lower.begin(), lower.end(), lower.begin(), ::towlower);
+        return lower.find(L".gif") != std::wstring::npos;
+    };
+
+    size_t ogPos = wideHtml.find(L"property=\"og:image\"");
+    if (ogPos == std::wstring::npos) ogPos = wideHtml.find(L"property=\'og:image\'");
+    if (ogPos == std::wstring::npos) ogPos = wideHtml.find(L"name=\"twitter:image\"");
+    if (ogPos != std::wstring::npos) {
+        size_t tagStart = wideHtml.rfind(L'<', ogPos);
+        size_t tagEnd = wideHtml.find(L'>', ogPos);
+        if (tagStart != std::wstring::npos && tagEnd != std::wstring::npos) {
+            std::wstring tag = wideHtml.substr(tagStart, tagEnd - tagStart + 1);
+            size_t contentPos = tag.find(L"content=\"");
+            if (contentPos != std::wstring::npos) {
+                size_t valStart = contentPos + 9;
+                size_t valEnd = tag.find(L'\"', valStart);
+                if (valEnd != std::wstring::npos) {
+                    std::wstring ogUrl = tag.substr(valStart, valEnd - valStart);
+                    if (isGif(ogUrl) && (item.detailsArtPath.empty() || !isGif(item.detailsArtPath))) {
+                        item.detailsArtPath = CacheRemoteArtwork(item.appId, L"animated_details", ogUrl);
+                    } else if (item.coverArtPath.empty()) {
+                        item.coverArtPath = CacheRemoteArtwork(item.appId, L"cover", ogUrl);
+                    }
+                }
+            }
+        }
+    }
+
+    // 3. Synopsis from og:description
+    if (item.synopsis.empty()) {
+        size_t descPos = wideHtml.find(L"property=\"og:description\"");
+        if (descPos == std::wstring::npos) descPos = wideHtml.find(L"property=\'og:description\'");
+        if (descPos != std::wstring::npos) {
+            size_t tagStart = wideHtml.rfind(L'<', descPos);
+            size_t tagEnd = wideHtml.find(L'>', descPos);
+            if (tagStart != std::wstring::npos && tagEnd != std::wstring::npos) {
+                std::wstring tag = wideHtml.substr(tagStart, tagEnd - tagStart + 1);
+                size_t contentPos = tag.find(L"content=\"");
+                if (contentPos != std::wstring::npos) {
+                    size_t valStart = contentPos + 9;
+                    size_t valEnd = tag.find(L'\"', valStart);
+                    if (valEnd != std::wstring::npos) {
+                        item.synopsis = tag.substr(valStart, valEnd - valStart);
+                    }
+                }
             }
         }
     }
@@ -1151,18 +1495,71 @@ bool StorefrontScanner::DownloadRemoteFile(const std::wstring& url, const std::w
 
 bool StorefrontScanner::ResetArtworkCache() {
     std::error_code ec;
+
+    // 1. Purge all cached artwork images & thumbnails
     const fs::path artDir = Storage::GetArtPath();
     if (fs::exists(artDir, ec)) {
+        std::vector<fs::path> artFiles;
         for (const auto& entry : fs::recursive_directory_iterator(artDir, fs::directory_options::skip_permission_denied, ec)) {
             if (entry.is_regular_file(ec)) {
-                SetFileAttributesW(entry.path().c_str(), FILE_ATTRIBUTE_NORMAL);
-                fs::remove(entry.path(), ec);
+                artFiles.push_back(entry.path());
             }
+        }
+        for (const auto& p : artFiles) {
+            SetFileAttributesW(p.c_str(), FILE_ATTRIBUTE_NORMAL);
+            fs::remove(p, ec);
         }
         fs::remove_all(artDir, ec);
     }
     fs::create_directories(artDir, ec);
     fs::create_directories(artDir / L"thumbs", ec);
+
+    // 2. Completely wipe all metadata JSON files to eliminate any corrupted metadata
+    const fs::path metaDir = Storage::GetMetadataPath();
+    if (fs::exists(metaDir, ec)) {
+        std::vector<fs::path> jsonFiles;
+        for (const auto& entry : fs::directory_iterator(metaDir, ec)) {
+            if (entry.is_regular_file(ec) && entry.path().extension() == L".json") {
+                jsonFiles.push_back(entry.path());
+            }
+        }
+        for (const auto& p : jsonFiles) {
+            SetFileAttributesW(p.c_str(), FILE_ATTRIBUTE_NORMAL);
+            fs::remove(p, ec);
+        }
+    }
+
+    // 3. Clean OneDrive mirror metadata directory if present
+    const fs::path oneDriveMeta = Storage::GetOneDriveMetadataPath();
+    if (!oneDriveMeta.empty() && fs::exists(oneDriveMeta, ec)) {
+        std::vector<fs::path> odFiles;
+        for (const auto& entry : fs::directory_iterator(oneDriveMeta, ec)) {
+            if (entry.is_regular_file(ec) && entry.path().extension() == L".json") {
+                odFiles.push_back(entry.path());
+            }
+        }
+        for (const auto& p : odFiles) {
+            SetFileAttributesW(p.c_str(), FILE_ATTRIBUTE_NORMAL);
+            fs::remove(p, ec);
+        }
+    }
+
+    // 4. Complete Repopulation: Scan all storefronts to regenerate fresh authentic metadata & artwork
+    ScanAll(Database::Instance());
+
+    // 5. Broadcast notification to open Windows File Explorer and companion views
+    SHChangeNotify(SHCNE_UPDATEDIR, SHCNF_PATHW, nullptr, nullptr);
+    EnumWindows([](HWND hwnd, LPARAM) -> BOOL {
+        wchar_t cls[128] = { 0 };
+        if (GetClassNameW(hwnd, cls, 128) > 0 &&
+            (wcscmp(cls, L"GameExplorerXamlHostViewClass") == 0 ||
+             wcscmp(cls, L"GameExplorerNativeView") == 0 ||
+             wcscmp(cls, L"CabinetWClass") == 0)) {
+            PostMessageW(hwnd, WM_APP + 42, 0, 0);
+        }
+        return TRUE;
+    }, 0);
+
     return true;
 }
 
@@ -2005,6 +2402,17 @@ std::vector<GameItem> StorefrontScanner::ScanItch() {
         return CleanTitleFromFolderName(storeUrl.substr(schemePos + 3, dotPos - (schemePos + 3)));
     };
 
+    auto extractSlug = [](const std::wstring& url) -> std::wstring {
+        if (url.empty()) return L"";
+        const size_t lastSlash = url.find_last_of(L"/\\");
+        if (lastSlash != std::wstring::npos && lastSlash + 1 < url.size()) {
+            std::wstring slug = url.substr(lastSlash + 1);
+            std::transform(slug.begin(), slug.end(), slug.begin(), ::towlower);
+            return slug;
+        }
+        return L"";
+    };
+
     auto classifyItchRating = [](const std::wstring& title, const std::wstring& desc) -> std::wstring {
         std::wstring combined = title + L" " + desc;
         std::transform(combined.begin(), combined.end(), combined.begin(), ::towlower);
@@ -2017,6 +2425,19 @@ std::vector<GameItem> StorefrontScanner::ScanItch() {
         return L"Teen (13+)";
     };
 
+    struct ItchGameInfo {
+        int64_t id = 0;
+        std::wstring title;
+        std::wstring coverUrl;
+        std::wstring stillCoverUrl;
+        std::wstring url;
+        std::wstring developer;
+        std::wstring synopsis;
+        std::wstring releaseDate;
+    };
+    std::map<std::wstring, ItchGameInfo> butlerGamesBySlug;
+    std::map<std::wstring, ItchGameInfo> butlerGamesByTitle;
+
     // 1. Check butler.db in %APPDATA%\itch\db\butler.db
     wchar_t appData[MAX_PATH] = { 0 };
     if (GetEnvironmentVariableW(L"APPDATA", appData, MAX_PATH) > 0) {
@@ -2025,6 +2446,54 @@ std::vector<GameItem> StorefrontScanner::ScanItch() {
             sqlite3* pItchDb = nullptr;
             const std::string utf8Path = WideToUtf8(dbPath.wstring());
             if (sqlite3_open_v2(utf8Path.c_str(), &pItchDb, SQLITE_OPEN_READONLY, nullptr) == SQLITE_OK) {
+                // Pre-index full master catalog from games table
+                const char* sqlGames =
+                    "SELECT g.id, g.title, g.cover_url, g.still_cover_url, g.url, "
+                    "u.display_name, u.username, g.short_text, g.published_at "
+                    "FROM games g "
+                    "LEFT JOIN users u ON g.user_id = u.id;";
+                sqlite3_stmt* stmtGames = nullptr;
+                if (sqlite3_prepare_v2(pItchDb, sqlGames, -1, &stmtGames, nullptr) == SQLITE_OK) {
+                    while (sqlite3_step(stmtGames) == SQLITE_ROW) {
+                        ItchGameInfo info{};
+                        info.id = sqlite3_column_int64(stmtGames, 0);
+                        const auto* tUtf8 = reinterpret_cast<const char*>(sqlite3_column_text(stmtGames, 1));
+                        const auto* cUtf8 = reinterpret_cast<const char*>(sqlite3_column_text(stmtGames, 2));
+                        const auto* scUtf8 = reinterpret_cast<const char*>(sqlite3_column_text(stmtGames, 3));
+                        const auto* uUtf8 = reinterpret_cast<const char*>(sqlite3_column_text(stmtGames, 4));
+                        const auto* dnUtf8 = reinterpret_cast<const char*>(sqlite3_column_text(stmtGames, 5));
+                        const auto* unUtf8 = reinterpret_cast<const char*>(sqlite3_column_text(stmtGames, 6));
+                        const auto* stUtf8 = reinterpret_cast<const char*>(sqlite3_column_text(stmtGames, 7));
+                        const auto* paUtf8 = reinterpret_cast<const char*>(sqlite3_column_text(stmtGames, 8));
+
+                        if (tUtf8) info.title = Utf8ToWide(tUtf8);
+                        if (cUtf8) info.coverUrl = Utf8ToWide(cUtf8);
+                        if (scUtf8) info.stillCoverUrl = Utf8ToWide(scUtf8);
+                        if (uUtf8) info.url = Utf8ToWide(uUtf8);
+                        std::wstring dev = dnUtf8 ? Utf8ToWide(dnUtf8) : L"";
+                        if (dev.empty() && unUtf8) dev = Utf8ToWide(unUtf8);
+                        if (dev.empty()) dev = extractItchSubdomainAuthor(info.url);
+                        info.developer = dev;
+                        if (stUtf8) info.synopsis = Utf8ToWide(stUtf8);
+                        if (paUtf8) {
+                            std::wstring pub = Utf8ToWide(paUtf8);
+                            if (pub.size() >= 10) info.releaseDate = pub.substr(0, 10);
+                        }
+
+                        std::wstring slug = extractSlug(info.url);
+                        if (!slug.empty()) {
+                            butlerGamesBySlug[slug] = info;
+                        }
+                        if (!info.title.empty()) {
+                            std::wstring lowerT = info.title;
+                            std::transform(lowerT.begin(), lowerT.end(), lowerT.begin(), ::towlower);
+                            butlerGamesByTitle[lowerT] = info;
+                        }
+                    }
+                    sqlite3_finalize(stmtGames);
+                }
+
+                // Ingest installed games via caves
                 const char* sql =
                     "SELECT c.id, g.id, g.title, g.cover_url, g.still_cover_url, g.url, l.path, c.install_folder_name, "
                     "u.display_name, u.username, g.short_text, g.published_at, c.installed_size, c.seconds_run "
@@ -2059,12 +2528,17 @@ std::vector<GameItem> StorefrontScanner::ScanItch() {
                             std::wstring lowerFolder = folderName;
                             std::transform(lowerFolder.begin(), lowerFolder.end(), lowerFolder.begin(), ::towlower);
                             discoveredFolderNames.insert(lowerFolder);
+                            std::wstring storeUrl = Utf8ToWide(urlUtf8);
+                            std::wstring slug = extractSlug(storeUrl);
+                            if (!slug.empty()) {
+                                discoveredFolderNames.insert(slug);
+                            }
 
                             GameItem item{};
                             item.appId = L"itch_" + std::to_wstring(gameId);
                             item.title = title.empty() ? CleanTitleFromFolderName(folderName) : title;
                             item.platform = PlatformType::Itch;
-                            item.storePageUrl = Utf8ToWide(urlUtf8);
+                            item.storePageUrl = storeUrl;
 
                             std::wstring dev = Utf8ToWide(dispNameUtf8);
                             if (dev.empty()) dev = Utf8ToWide(userNameUtf8);
@@ -2101,29 +2575,30 @@ std::vector<GameItem> StorefrontScanner::ScanItch() {
                             std::wstring coverUrl = Utf8ToWide(coverUrlUtf8);
                             std::wstring stillCoverUrl = Utf8ToWide(stillCoverUtf8);
 
-                            // Cache static cover if available (e.g. clean 315x250 PNG without GIF watermark/animation)
-                            std::wstring staticCoverPath;
-                            if (!stillCoverUrl.empty()) {
-                                staticCoverPath = CacheRemoteArtwork(item.appId, L"static_cover", stillCoverUrl);
-                                item.detailsArtPath = staticCoverPath;
-                            }
-
-                            // If coverUrl is an animated gif or empty, prioritize static cover
                             auto isGif = [](const std::wstring& u) {
                                 std::wstring lower = u;
                                 std::transform(lower.begin(), lower.end(), lower.begin(), ::towlower);
                                 return lower.find(L".gif") != std::wstring::npos;
                             };
 
-                            if (!staticCoverPath.empty() && (coverUrl.empty() || isGif(coverUrl))) {
-                                item.coverArtPath = staticCoverPath;
-                            } else if (!coverUrl.empty()) {
-                                item.coverArtPath = CacheRemoteArtwork(item.appId, L"cover", coverUrl);
-                            } else if (!staticCoverPath.empty()) {
-                                item.coverArtPath = staticCoverPath;
+                            // Static cover for grid/list view (animated gifs strictly not used in grid/list)
+                            std::wstring staticCoverPath;
+                            if (!stillCoverUrl.empty()) {
+                                staticCoverPath = CacheRemoteArtwork(item.appId, L"static_cover", stillCoverUrl);
+                            } else if (!coverUrl.empty() && !isGif(coverUrl)) {
+                                staticCoverPath = CacheRemoteArtwork(item.appId, L"static_cover", coverUrl);
                             }
 
+                            // Details art: animated gifs are allowed in details view
+                            if (!coverUrl.empty() && isGif(coverUrl)) {
+                                item.detailsArtPath = CacheRemoteArtwork(item.appId, L"animated_details", coverUrl);
+                            } else if (!staticCoverPath.empty()) {
+                                item.detailsArtPath = staticCoverPath;
+                            }
+
+                            // Grid/list view: only use static cover
                             if (!staticCoverPath.empty()) {
+                                item.coverArtPath = staticCoverPath;
                                 item.heroArtPath = staticCoverPath;
                             }
 
@@ -2164,12 +2639,60 @@ std::vector<GameItem> StorefrontScanner::ScanItch() {
                 const fs::path exePath = FindPrimaryGameExecutable(entry.path());
                 if (!exePath.empty()) {
                     GameItem item{};
-                    item.appId = L"itch_" + fn;
-                    item.title = CleanTitleFromFolderName(fn);
+                    auto itSlug = butlerGamesBySlug.find(lowerFn);
+                    auto itTitle = (itSlug == butlerGamesBySlug.end()) ? butlerGamesByTitle.find(lowerFn) : butlerGamesBySlug.end();
+                    const ItchGameInfo* pInfo = (itSlug != butlerGamesBySlug.end()) ? &itSlug->second : ((itTitle != butlerGamesByTitle.end()) ? &itTitle->second : nullptr);
+
+                    if (pInfo) {
+                        item.appId = L"itch_" + std::to_wstring(pInfo->id);
+                        item.title = pInfo->title.empty() ? CleanTitleFromFolderName(fn) : pInfo->title;
+                        item.developer = pInfo->developer;
+                        item.publisher = pInfo->developer.empty() ? L"itch.io" : pInfo->developer;
+                        item.synopsis = pInfo->synopsis;
+                        item.releaseDate = pInfo->releaseDate;
+                        item.storePageUrl = pInfo->url;
+                    } else {
+                        item.appId = L"itch_" + fn;
+                        item.title = CleanTitleFromFolderName(fn);
+                        item.developer = L"itch.io";
+                        item.publisher = L"itch.io";
+                    }
+
                     item.platform = PlatformType::Itch;
+                    item.genres = L"Indie";
+                    item.rating = classifyItchRating(item.title, item.synopsis);
                     item.executablePath = exePath.wstring();
                     item.workingDirectory = exePath.parent_path().wstring();
                     item.launchUri = L"";
+
+                    if (pInfo) {
+                        auto isGif = [](const std::wstring& u) {
+                            std::wstring lower = u;
+                            std::transform(lower.begin(), lower.end(), lower.begin(), ::towlower);
+                            return lower.find(L".gif") != std::wstring::npos;
+                        };
+
+                        std::wstring staticCoverPath;
+                        if (!pInfo->stillCoverUrl.empty()) {
+                            staticCoverPath = CacheRemoteArtwork(item.appId, L"static_cover", pInfo->stillCoverUrl);
+                        } else if (!pInfo->coverUrl.empty() && !isGif(pInfo->coverUrl)) {
+                            staticCoverPath = CacheRemoteArtwork(item.appId, L"static_cover", pInfo->coverUrl);
+                        }
+
+                        if (!pInfo->coverUrl.empty() && isGif(pInfo->coverUrl)) {
+                            item.detailsArtPath = CacheRemoteArtwork(item.appId, L"animated_details", pInfo->coverUrl);
+                        } else if (!staticCoverPath.empty()) {
+                            item.detailsArtPath = staticCoverPath;
+                        }
+
+                        if (!staticCoverPath.empty()) {
+                            item.coverArtPath = staticCoverPath;
+                            item.heroArtPath = staticCoverPath;
+                        }
+                    }
+
+                    LoadPerGameMetadata(item);
+                    SavePerGameMetadata(item);
                     games.push_back(std::move(item));
                     discoveredFolderNames.insert(lowerFn);
                 }
@@ -3754,42 +4277,59 @@ void StorefrontScanner::EnrichGameMetadata(GameItem& item) {
 
     const auto settings = SettingsManager::Load();
 
-    // For itch.io, default to itch source first! Native itch cover art (e.g. 315x250 static cover)
-    // is preserved as primary truth, avoiding overwriting with external provider fallbacks.
     const bool isItch = (item.platform == PlatformType::Itch);
-    const bool needsCover = item.coverArtPath.empty() || (!isItch && !ImageValidator::IsValidCover(item.coverArtPath));
-    const bool needsHero  = item.heroArtPath.empty() || (!isItch && !ImageValidator::IsValidHero(item.heroArtPath));
+
+    // For itch.io games, enrich from authentic itch store page first if icon, details, or synopsis are missing
+    if (isItch) {
+        EnrichFromItchStorePage(item);
+    }
+
+    const bool needsCover = (!isItch || item.coverArtPath.empty()) && (item.coverArtPath.empty() || !ImageValidator::IsValidCover(item.coverArtPath));
     const bool needsMeta  = item.synopsis.empty() || item.genres.empty() || item.developer.empty() ||
                             item.publisher.empty() || item.releaseDate.empty() || item.rating.empty();
 
-    // 1. PRIMARY METADATA PROVIDERS (When enabled by user configuration)
-    // A. SteamGridDB: Primary default for artwork (600x900 Cover Art, 1920x620 Hero Banners, Icons)
-    if (!settings.steamGridDbApiKey.empty() && (needsCover || needsHero || item.iconPath.empty())) {
+    // 1. DEDICATED VISUAL NOVEL & ADULT GAME METADATA PROVIDER (VNDB Kana API)
+    // VNDB is the gold standard for visual novels, adult / 18+ games, and indie VNs (both Western & Japanese).
+    // Free, public, no API key required.
+    const bool isAdultOrVn = StorefrontScanner::IsNsfwGame(item) ||
+                             item.genres.find(L"Visual Novel") != std::wstring::npos ||
+                             isItch || needsMeta;
+    if (isAdultOrVn && (needsMeta || needsCover)) {
+        EnrichFromVndb(item);
+    }
+
+    const bool postVndbNeedsCover = (!isItch || item.coverArtPath.empty()) && (item.coverArtPath.empty() || !ImageValidator::IsValidCover(item.coverArtPath));
+    const bool postVndbNeedsHero  = (!isItch || item.heroArtPath.empty()) && (item.heroArtPath.empty() || !ImageValidator::IsValidHero(item.heroArtPath));
+    const bool postVndbNeedsMeta  = item.synopsis.empty() || item.genres.empty() || item.developer.empty() ||
+                                    item.publisher.empty() || item.releaseDate.empty() || item.rating.empty();
+
+    // 2. PRIMARY METADATA PROVIDERS (When enabled by user configuration)
+    // A. SteamGridDB: Primary default for artwork with strict title verification
+    if (!settings.steamGridDbApiKey.empty() && (postVndbNeedsCover || postVndbNeedsHero || item.iconPath.empty())) {
         EnrichFromSteamGridDb(item, settings.steamGridDbApiKey);
     }
 
-    // B. IGDB: Primary default for rich game metadata (Developers, Publishers, Synopsis, Release Date, Genres, Age Rating, 1080p Cover)
-    if (!settings.igdbClientId.empty() && !settings.igdbClientSecret.empty() && needsMeta) {
+    // B. IGDB: Primary default for rich game metadata with strict title verification
+    if (!settings.igdbClientId.empty() && !settings.igdbClientSecret.empty() && postVndbNeedsMeta) {
         EnrichFromIgdb(item, settings.igdbClientId, settings.igdbClientSecret);
     }
 
-    // 2. FREE KEYLESS METADATA PROVIDER FALLBACK (Steam Store Search & AppDetails API):
-    // Zero configuration; always available as public metadata provider without requiring any API key.
-    const bool stillNeedsCover = item.coverArtPath.empty() || (!isItch && !ImageValidator::IsValidCover(item.coverArtPath));
-    const bool stillNeedsHero  = item.heroArtPath.empty() || (!isItch && !ImageValidator::IsValidHero(item.heroArtPath));
+    // 3. FREE KEYLESS METADATA PROVIDER FALLBACK (Steam Store Search & AppDetails API):
+    const bool stillNeedsCover = (!isItch || item.coverArtPath.empty()) && (item.coverArtPath.empty() || !ImageValidator::IsValidCover(item.coverArtPath));
+    const bool stillNeedsHero  = (!isItch || item.heroArtPath.empty()) && (item.heroArtPath.empty() || !ImageValidator::IsValidHero(item.heroArtPath));
     const bool stillNeedsMeta  = item.synopsis.empty() || item.genres.empty() || item.developer.empty() ||
                                  item.publisher.empty() || item.releaseDate.empty() || item.rating.empty();
 
-    if (item.platform != PlatformType::Steam && (stillNeedsCover || stillNeedsHero || stillNeedsMeta)) {
+    if (item.platform != PlatformType::Steam && !isItch && (stillNeedsCover || stillNeedsHero || stillNeedsMeta)) {
         EnrichFromSteamStoreSearch(item);
     }
 
-    // 3. EXECUTABLE PE VERSION INFO FALLBACK (For standalone/custom games):
+    // 4. EXECUTABLE PE VERSION INFO FALLBACK (For standalone/custom games):
     if (item.developer.empty() || item.publisher.empty()) {
         EnrichFromExecutableVersionInfo(item);
     }
 
-    // 4. Final sanitization pass across all metadata fields
+    // 5. Final sanitization pass across all metadata fields
     item.title = SanitizeGameText(item.title);
     item.synopsis = SanitizeGameText(item.synopsis);
     item.developer = SanitizeGameText(item.developer);
@@ -3870,6 +4410,7 @@ bool StorefrontScanner::LoadPerGameMetadata(GameItem& item) {
             else if (key == L"workingDirectory" && !val.empty() && fs::exists(val)) item.workingDirectory = val;
             else if (key == L"isFavorite") item.isFavorite = (val == L"true" || val == L"1");
             else if (key == L"isInstalled") item.isInstalled = (val == L"true" || val == L"1");
+            else if (key == L"storePageUrl" && !val.empty()) item.storePageUrl = val;
         }
     }
     return true;
@@ -3900,6 +4441,7 @@ bool StorefrontScanner::SavePerGameMetadata(const GameItem& item) {
             if (toSave.heroArtPath.empty()) toSave.heroArtPath = existing.heroArtPath;
             if (toSave.iconPath.empty()) toSave.iconPath = existing.iconPath;
             if (toSave.detailsArtPath.empty()) toSave.detailsArtPath = existing.detailsArtPath;
+            if (toSave.storePageUrl.empty()) toSave.storePageUrl = existing.storePageUrl;
             if (toSave.platform == PlatformType::Unknown) toSave.platform = existing.platform;
         }
     }
@@ -3925,7 +4467,8 @@ bool StorefrontScanner::SavePerGameMetadata(const GameItem& item) {
     outStr += L"  \"iconPath\": \"" + EscapeJsonString(toSave.iconPath) + L"\",\n";
     outStr += L"  \"coverArtPath\": \"" + EscapeJsonString(toSave.coverArtPath) + L"\",\n";
     outStr += L"  \"heroArtPath\": \"" + EscapeJsonString(toSave.heroArtPath) + L"\",\n";
-    outStr += L"  \"detailsArtPath\": \"" + EscapeJsonString(toSave.detailsArtPath) + L"\"\n";
+    outStr += L"  \"detailsArtPath\": \"" + EscapeJsonString(toSave.detailsArtPath) + L"\",\n";
+    outStr += L"  \"storePageUrl\": \"" + EscapeJsonString(toSave.storePageUrl) + L"\"\n";
     outStr += L"}\n";
 
     std::ofstream out(jsonPath, std::ios::binary);

@@ -243,19 +243,60 @@ bool GetLocalImageDimensions(const std::wstring& path, UINT* pWidth, UINT* pHeig
 
 fs::path GetApplicationDirectory() {
     wchar_t path[MAX_PATH] = { 0 };
+
+    // 1. Get the module containing this function (guaranteed to find GameExplorerShell.dll even inside explorer.exe)
+    HMODULE hThisMod = nullptr;
+    if (GetModuleHandleExW(
+            GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+            reinterpret_cast<LPCWSTR>(&GetApplicationDirectory),
+            &hThisMod) && hThisMod != nullptr) {
+        if (GetModuleFileNameW(hThisMod, path, MAX_PATH) > 0) {
+            fs::path p(path);
+            fs::path dir = p.parent_path();
+            if (fs::exists(dir / L"GameExplorerManager.exe") || fs::exists(dir / L"GameExplorerConfig.exe")) {
+                return dir;
+            }
+        }
+    }
+
+    // 2. Check process executable (if not explorer.exe or rundll32.exe)
     if (GetModuleFileNameW(nullptr, path, MAX_PATH) > 0) {
         fs::path p(path);
         std::wstring filename = p.filename().wstring();
         std::transform(filename.begin(), filename.end(), filename.begin(), ::towlower);
-        if (filename == L"explorer.exe" || filename == L"rundll32.exe") {
-            HMODULE hMod = GetModuleHandleW(L"GameExplorerShell.dll");
-            if (hMod != nullptr && GetModuleFileNameW(hMod, path, MAX_PATH) > 0) {
-                return fs::path(path).parent_path();
+        if (filename != L"explorer.exe" && filename != L"rundll32.exe") {
+            fs::path dir = p.parent_path();
+            if (fs::exists(dir / L"GameExplorerManager.exe") || fs::exists(dir / L"GameExplorerConfig.exe")) {
+                return dir;
             }
         }
-        return p.parent_path();
     }
-    return fs::current_path();
+
+    // 3. Check registry InProcServer32 for GameExplorerShell.dll CLSID {1666B3DF-60A5-4EF3-8B80-962C82401CD1}
+    const wchar_t* clsidKey = L"CLSID\\{1666B3DF-60A5-4EF3-8B80-962C82401CD1}\\InProcServer32";
+    HKEY hKey = nullptr;
+    if (RegOpenKeyExW(HKEY_CLASSES_ROOT, clsidKey, 0, KEY_READ, &hKey) == ERROR_SUCCESS ||
+        RegOpenKeyExW(HKEY_CURRENT_USER, (std::wstring(L"Software\\Classes\\") + clsidKey).c_str(), 0, KEY_READ, &hKey) == ERROR_SUCCESS) {
+        wchar_t dllPath[MAX_PATH] = { 0 };
+        DWORD cbData = sizeof(dllPath);
+        if (RegQueryValueExW(hKey, nullptr, nullptr, nullptr, reinterpret_cast<LPBYTE>(dllPath), &cbData) == ERROR_SUCCESS) {
+            fs::path p(dllPath);
+            fs::path dir = p.parent_path();
+            if (fs::exists(dir / L"GameExplorerManager.exe") || fs::exists(dir / L"GameExplorerConfig.exe")) {
+                RegCloseKey(hKey);
+                return dir;
+            }
+        }
+        RegCloseKey(hKey);
+    }
+
+    // 4. Fallback to current working directory
+    fs::path cur = fs::current_path();
+    if (fs::exists(cur / L"GameExplorerManager.exe") || fs::exists(cur / L"GameExplorerConfig.exe")) {
+        return cur;
+    }
+
+    return cur;
 }
 
 static std::vector<ProviderViewModel> s_cachedProviders;
@@ -527,8 +568,12 @@ void LibraryViewHost::LaunchCompanionExe(const wchar_t* exeName, const std::wstr
     fs::path dir = GetApplicationDirectory();
     fs::path targetExe = dir / exeName;
     if (fs::exists(targetExe)) {
-        ShellExecuteW(m_hwndContainer, L"open", targetExe.c_str(), args.empty() ? nullptr : args.c_str(), dir.c_str(), SW_SHOWNORMAL);
+        ShellExecuteW(nullptr, L"open", targetExe.c_str(), args.empty() ? nullptr : args.c_str(), dir.c_str(), SW_SHOWNORMAL);
+        return;
     }
+
+    // Fallback: search system PATH or registered App Paths
+    ShellExecuteW(nullptr, L"open", exeName, args.empty() ? nullptr : args.c_str(), nullptr, SW_SHOWNORMAL);
 }
 
 void LibraryViewHost::SwitchLayoutMode(LayoutMode mode) {
@@ -660,20 +705,27 @@ void LibraryViewHost::RebuildSidepane() {
         artCard.BorderThickness(wux::ThicknessHelper::FromUniformLength(1));
 
         std::wstring previewPath;
-        if (!game.detailsArtPath.empty() && ImageValidator::IsValidDetails(game.detailsArtPath)) {
-            previewPath = game.detailsArtPath;
-        } else if (!game.heroArtPath.empty() && ImageValidator::IsValidHero(game.heroArtPath)) {
-            previewPath = game.heroArtPath;
-        } else if (!game.coverArtPath.empty() && ImageValidator::IsValidCover(game.coverArtPath)) {
-            previewPath = game.coverArtPath;
-        } else if (!game.detailsArtPath.empty()) {
-            previewPath = game.detailsArtPath;
-        } else if (!game.heroArtPath.empty()) {
-            previewPath = game.heroArtPath;
-        } else if (!game.coverArtPath.empty()) {
-            previewPath = game.coverArtPath;
+        if (m_layoutMode == LayoutMode::HeroBanner) {
+            if (!game.heroArtPath.empty() && ImageValidator::IsValidHero(game.heroArtPath)) {
+                previewPath = game.heroArtPath;
+            } else if (!game.detailsArtPath.empty()) {
+                previewPath = game.detailsArtPath;
+            } else if (!game.coverArtPath.empty()) {
+                previewPath = game.coverArtPath;
+            } else {
+                previewPath = game.iconPath;
+            }
         } else {
-            previewPath = game.iconPath;
+            // Cover Art mode: prioritize cover art matching Game Explorer Manager's 2:3 preview
+            if (!game.coverArtPath.empty()) {
+                previewPath = game.coverArtPath;
+            } else if (!game.detailsArtPath.empty()) {
+                previewPath = game.detailsArtPath;
+            } else if (!game.heroArtPath.empty()) {
+                previewPath = game.heroArtPath;
+            } else {
+                previewPath = game.iconPath;
+            }
         }
 
         UINT imgW = 0, imgH = 0;
@@ -683,23 +735,25 @@ void LibraryViewHost::RebuildSidepane() {
         constexpr double sidepaneWidth = 300.0;
         double frameW = sidepaneWidth;
         double frameH = 169.0;
-        wuxm::Stretch imgStretch = wuxm::Stretch::UniformToFill;
+        wuxm::Stretch imgStretch = wuxm::Stretch::Fill;
 
-        if (aspect >= 1.35) {
-            frameW = sidepaneWidth;
-            frameH = sidepaneWidth / aspect;
-            if (frameH > 180.0) frameH = 180.0;
-            if (frameH < 120.0) frameH = 120.0;
-            imgStretch = wuxm::Stretch::UniformToFill;
-        } else if (aspect >= 0.85 && aspect < 1.35) {
-            frameW = sidepaneWidth;
-            frameH = sidepaneWidth / aspect;
-            if (frameH > 260.0) frameH = 260.0;
-            imgStretch = wuxm::Stretch::Uniform;
+        if (m_layoutMode == LayoutMode::HeroBanner) {
+            if (aspect >= 1.35) {
+                frameW = sidepaneWidth;
+                frameH = sidepaneWidth / aspect;
+                if (frameH > 180.0) frameH = 180.0;
+                if (frameH < 120.0) frameH = 120.0;
+                imgStretch = wuxm::Stretch::UniformToFill;
+            } else {
+                frameW = sidepaneWidth;
+                frameH = 104.0;
+                imgStretch = wuxm::Stretch::UniformToFill;
+            }
         } else {
+            // Match Game Explorer Manager's 2:3 vertical box art preview frame and fit method
             frameW = 170.0;
             frameH = 255.0;
-            imgStretch = wuxm::Stretch::UniformToFill;
+            imgStretch = wuxm::Stretch::Fill;
         }
 
         artCard.Width(frameW);
@@ -1710,7 +1764,7 @@ void LibraryViewHost::BuildXamlViewport() {
                 if (auto bmp = LoadLocalBitmap(primaryArt)) {
                     wuxc::Image artImg;
                     artImg.Source(bmp);
-                    artImg.Stretch(wuxm::Stretch::UniformToFill);
+                    artImg.Stretch(isHero ? wuxm::Stretch::UniformToFill : wuxm::Stretch::Fill);
                     artHost.Child(artImg);
                 } else if (auto iconBmp = LoadLocalBitmap(g.iconPath)) {
                     wuxc::Image icoImg;
@@ -1723,7 +1777,7 @@ void LibraryViewHost::BuildXamlViewport() {
                 } else if (auto fallbackBmp = LoadLocalBitmap(!g.detailsArtPath.empty() ? g.detailsArtPath : g.coverArtPath)) {
                     wuxc::Image artImg;
                     artImg.Source(fallbackBmp);
-                    artImg.Stretch(wuxm::Stretch::UniformToFill);
+                    artImg.Stretch(isHero ? wuxm::Stretch::UniformToFill : wuxm::Stretch::Fill);
                     artHost.Child(artImg);
                 }
                 wuxc::Grid::SetRow(artHost, 0);

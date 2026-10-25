@@ -1834,15 +1834,15 @@ LRESULT CALLBACK ManagerWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPar
 
         if (id == IDC_BTN_RESET_CACHE) {
             const int ret = MessageBoxW(hwnd,
-                L"Are you sure you want to reset and purge the artwork cache?\n\n"
-                L"This will delete all cached covers, heroes, icons, and thumbnails in:\n"
-                L"%USERPROFILE%\\Game Explorer\\cache\\art\\\n\n"
-                L"Fresh authentic images will be fetched cleanly from providers.",
-                L"Reset Artwork Cache",
+                L"Are you sure you want to completely reset and repopulate the library?\n\n"
+                L"This will purge cached artwork, refresh all storefront metadata, and repopulate authentic covers and details from installed stores.",
+                L"Reset & Repopulate Library",
                 MB_YESNO | MB_ICONQUESTION
             );
             if (ret == IDYES) {
+                HCURSOR hOldCursor = SetCursor(LoadCursor(nullptr, IDC_WAIT));
                 StorefrontScanner::ResetArtworkCache();
+                RefreshGameList(hwnd);
                 if (g_hwndGalleryCanvas) {
                     SendMessageW(g_hwndGalleryCanvas, WM_APP + 62, 0, 0);
                 }
@@ -1854,7 +1854,8 @@ LRESULT CALLBACK ManagerWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPar
                 if (g_selectedIndex >= 0 && static_cast<size_t>(g_selectedIndex) < g_games.size()) {
                     TriggerArtworkSearch(hwnd, false);
                 }
-                MessageBoxW(hwnd, L"Artwork cache has been successfully reset.", L"Reset Artwork Cache", MB_OK | MB_ICONINFORMATION);
+                SetCursor(hOldCursor);
+                MessageBoxW(hwnd, L"Library cache and metadata have been successfully reset and repopulated.", L"Reset & Repopulate Library", MB_OK | MB_ICONINFORMATION);
             }
             return 0;
         }

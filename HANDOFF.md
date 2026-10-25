@@ -1,7 +1,7 @@
 # HANDOFF.md — Windows Game Explorer Session Handoff
 
 **Last updated:** 2026-10-24
-**Current session status:** W.59 delivered & v2.1.2 prepped · Direct JSON Metadata Architecture, Robust Multi-View Artwork Fallbacks, Responsive Manager Layout & Installer Artwork Modernization · BUG-9 Resolved (Duplicate Test Games Purged, Web Filter Details Option Added, Gallery Aspect-Ratio Preview Sizing Per Type Implemented & Synchronized) · Open bugs BUG-10, BUG-11, BUG-12 thoroughly researched and logged in BUGS.md. All 20/20 unit tests passing under zero-warning gate (/W4 /WX). Release v2.1.2 packaged.
+**Current session status:** W.59 delivered & v2.2.0 released · Direct JSON Metadata Architecture, Robust Multi-View Artwork Fallbacks, Responsive Manager Layout & Installer Artwork Modernization · BUG-10, BUG-11, BUG-12, BUG-13 Resolved (Itch.io Storefront Artwork & Metadata, Cache Reset & Fresh Rebuild Engine, Companion App Launch, VNDB Kana API Integration, Loose Aspect Ratio Enforcement & Strict Title Matching) · All 21/21 unit tests passing under zero-warning gate (/W4 /WX). Release v2.2.0 packaged. "All owned games" and cloud gaming plans dropped per user directive.
 **Project:** windows-game-explorer (Windows Game Explorer)
 **Root:** projects/windows-game-explorer
 
@@ -286,12 +286,8 @@ Delivered universal achievement tracking across native storefronts (Steam, GOG, 
 
 ## 3) Next Immediate Priorities
 
-1. **Active Bug Resolution (Research First — Zero Guessing)**:
-   - **BUG-10**: Itch.io Storefront Artwork & Metadata Incomplete Ingestion, WinHttp `%23` Path Truncation & Scraper Fallbacks.
-   - **BUG-11**: Complete Art Cache Reset Button Must Repopulate Library & Metadata.
-   - **BUG-12**: Companion App Launch from Portable Distribution in File Explorer Shell Extension.
-
-2. **Queued Milestone M19 (Locked — Awaiting Bug Resolution & User Authority)**:
-   - **Sprint 36 / Workstream W.60**: Universal Owned Games Multi-Platform Synchronization & Storefront In-App Installation (`v2.4.0`).
-   - Supports ingesting all owned games across Steam, GOG Galaxy, Epic Games, itch.io, Battle.net, EA App, and Xbox, with one-click installation triggers through official storefront protocols (`steam://install/<appId>`, etc.).
-   - Work strictly queued until all active bugs are resolved and user authorization is explicitly granted.
+1. **Bug Resolution & Verification Complete**:
+   - BUG-10, BUG-11, BUG-12, and BUG-13 resolved with 21/21 unit tests passing under zero-warning gate (`/W4 /WX`).
+   - Obscure/indie/adult metadata accuracy delivered via VNDB Kana API integration, itch.io storefront scraping, loose aspect ratio enforcement, and strict candidate title verification.
+   - Cache reset engine (`Reset Cache` button / `--reset-cache` CLI) reliably purges existing cache and rebuilds fresh metadata and artwork across installed titles.
+   - Future "all owned games" plan officially dropped per user directive; scope remains strictly focused on installed games library.

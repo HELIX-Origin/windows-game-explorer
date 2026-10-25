@@ -24,40 +24,38 @@
 
 ## ⚠️ Active & Open Bugs
 
-- ⚠️ **[windows-game-explorer] BUG-10 — Itch.io Storefront Artwork & Metadata Incomplete Ingestion, WinHttp %23 URL Path Truncation & Overwriting Scraper Fallbacks**:
-  - **Summary**: Installed itch.io games have missing or blank covers (e.g. `Special Harem Class (NSFW 18+)` renders as a blank black card), missing/truncated synopsis text, and mismatched metadata when folder-scanned.
-  - **Root Causes**:
-    1. `ScanItch()` in `src/core/StorefrontScanner.cpp` currently only queries games with an active entry in the `caves` table of `%APPDATA%\itch\db\butler.db` (which only contains 14 installed caves). The remaining installed games discovered on disk (e.g. in `E:\Games\itch\games`) are assigned folder-name appIds (`itch_<folder>`) with empty synopsis, developer, and cover URL, because they are not joined with the comprehensive `games` table (51 games) in `butler.db`.
-    2. In `EnrichGameMetadata()`, when an itch.io title has an empty synopsis or missing artwork, it falls back to `EnrichFromSteamStoreSearch()`, causing Steam Store search to match unrelated Steam games (e.g. `Between Humanity` -> `Human Error: Episode One`) and overwrite authentic itch metadata.
-    3. Itch.io static thumbnail CDN URLs contain `%23c` crop parameter specifications (e.g. `https://img.itch.zone/aW1nLzE0OTI3MzE1LmdpZg==/315x250%23c/TRuS%2By.gif`). In `DownloadRemoteFile()`, `WinHttpCrackUrl()` decodes `%23` into `#`, causing `#c/...` to be treated as `lpszExtraInfo` (URL fragment) rather than URL path. `WinHttpOpenRequest()` only requests `lpszUrlPath`, causing `img.itch.zone` to return HTTP 404 Not Found.
-    4. Animated GIF covers from itch.io CDN URLs are sometimes stored with `.png` file paths in JSON metadata (`itch_<id>_cover.png`) even though the downloaded image is `.gif` or download failed, causing image loader failures.
-  - **Verified Engineering Specification for Planned Fix**:
-    - Pre-index all 51 games from `butler.db`'s `games` table (`SELECT id, title, short_text, cover_url, still_cover_url, url, user_id FROM games`).
-    - In folder scanning, match folder names against the itch URL slugs and titles from `butler.db` to pull authentic title, synopsis (`short_text`), developer, and cover URLs directly without external scrapers.
-    - In `EnrichGameMetadata()`, strictly bypass `EnrichFromSteamStoreSearch()` for `PlatformType::Itch`.
-    - In `DownloadRemoteFile()`, preserve the full raw URL path including encoded `%23` or append `lpszExtraInfo` so `img.itch.zone` requests succeed.
-    - Respect downloaded image MIME/content headers or URL extension so files are saved with their actual format (`.gif`, `.png`, `.jpg`).
-
-- ⚠️ **[windows-game-explorer] BUG-11 — Complete Art Cache Reset Button Must Repopulate Library & Metadata**:
-  - **Summary**: Clicking "Reset Art Cache" / "Reset Cache" in `GameExplorerConfig.exe` or `GameExplorerManager.exe` only wipes `%USERPROFILE%\Game Explorer\cache\art\`. It does not clear stale/corrupted metadata JSON paths or trigger a re-scan and re-population.
-  - **Root Cause**: `StorefrontScanner::ResetArtworkCache()` only deletes the cache directory and does not invoke `StorefrontScanner::ScanAll()` or refresh metadata JSON files.
-  - **Verified Engineering Specification for Planned Fix**:
-    - Turn cache reset into a complete library refresh engine:
-      1. Purge `%USERPROFILE%\Game Explorer\cache\art\`.
-      2. Clean non-custom metadata files from `%USERPROFILE%\Game Explorer\metadata\` (preserving custom local games, but clearing broken art paths).
-      3. Run `StorefrontScanner::ScanAll(Database::Instance())` to re-scan all storefronts and download authentic assets.
-      4. Refresh the Manager list and broadcast update notifications to active views.
-
-- ⚠️ **[windows-game-explorer] BUG-12 — Companion App Launch from Portable Distribution in File Explorer Shell Extension**:
-  - **Summary**: Clicking "Game Explorer Manager" or "Configuration" buttons inside the File Explorer shell extension does not open the companion apps when running from a portable unzipped folder.
-  - **Root Cause**: In `src/view/LibraryViewHost.cpp`, `GetApplicationDirectory()` calls `GetModuleFileNameW(nullptr, path, MAX_PATH)` which returns `C:\Windows\explorer.exe`. It attempts to find `GameExplorerShell.dll` via `GetModuleHandleW(L"GameExplorerShell.dll")`, which can return `nullptr` under COM hosting in File Explorer. When it fails, it falls back to `explorer.exe`'s directory (`C:\Windows`), where the companion executables do not exist. Furthermore, passing `m_hwndContainer` (a XAML Island HWND) to `ShellExecuteW` can block child process launching.
-  - **Verified Engineering Specification for Planned Fix**:
-    - In `GetApplicationDirectory()`, use `GetModuleHandleExW` with `GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS` pointing to `&GetApplicationDirectory` to inspect the DLL's actual location in memory. Fall back to registry `InProcServer32` under CLSID `{1666B3DF-60A5-4EF3-8B80-962C82401CD1}`.
-    - In `LaunchCompanionExe()`, pass `nullptr` for the `HWND` in `ShellExecuteW`.
+(No open bugs currently tracked.)
 
 ---
 
 ## ✅ Resolved Bugs & Historical Fixes
+
+- ✅ **[windows-game-explorer] BUG-13 — Obscure/Indie/Adult Games Artwork Inaccuracy, Missing Dedicated Visual Novel Provider (VNDB), Itch Storefront Precedence & Loose Aspect Ratio Enforcement**:
+  - **VNDB Kana API Integration**: Integrated `EnrichFromVndb()` querying `https://api.vndb.org/kana/vn` without requiring an API key, providing gold-standard metadata (developer, publisher, release date, BBCode-cleaned synopsis, "Adults Only (18+)" rating, and visual novel genres) and authentic covers for adult and visual novel titles.
+  - **Itch.io Storefront Page Enrichment**: Implemented `EnrichFromItchStorePage()` extracting `rel="icon"` to `iconPath`, animated GIF/static cover to `detailsArtPath` / `coverArtPath`, and `og:description` to synopsis.
+  - **Strict Candidate Title Verification**: Implemented `AreTitlesMatching()`, `NormalizeTitleForMatch()`, and `CleanTitleFromBracketTags()` across SteamGridDB and IGDB, preventing false-positive fuzzy substring matches on obscure or adult titles (e.g. *That New Teacher* &ne; *That Old Time Religion*, *The Proteus Effect* &ne; *'the*, *Loverse* &ne; *Dot Kareshi*). Authentic itch.io storefront assets are never overwritten.
+  - **Loose Aspect Ratio Enforcement**: Relaxed `ImageValidator::IsValidCover` to 0.25f–2.50f and `IsValidHero` to 0.80f–4.50f, natively accommodating itch.io 315×250 cards and diverse non-standard box art without artificial rejection.
+  - **Cache Reset & Rebuild Engine**: Clarified button label to `Reset Cache` in `GameExplorerConfig.exe` and `GameExplorerManager.exe`, with `--reset-cache` CLI switch. Ensured complete atomic directory deletion and fresh library rebuild (`ScanAll`) without leaving corrupted metadata.
+  - **Dropped "All Owned Games" Milestone**: Dropped all owned games backlog/planning per user directive to keep library focused strictly on installed games.
+
+- ✅ **[windows-game-explorer] BUG-12 — Companion App Launch from Portable Distribution in File Explorer Shell Extension**:
+  - In `src/view/LibraryViewHost.cpp`, implemented module-address resolution via `GetModuleHandleExW` with `GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS` anchored to `&GetApplicationDirectory`. This guarantees retrieving the actual disk directory of `GameExplorerShell.dll` even when hosted inside `explorer.exe` or `rundll32.exe`.
+  - Added secondary fallback to registry `InProcServer32` under CLSID `{1666B3DF-60A5-4EF3-8B80-962C82401CD1}` and working directory checks.
+  - In `LaunchCompanionExe()`, decoupled process launching from the WinUI XAML Island container by passing `nullptr` as the `HWND` to `ShellExecuteW`, and added direct execution fallback through system PATH.
+
+- ✅ **[windows-game-explorer] BUG-11 — Complete Art Cache Reset & Library Repopulation Engine**:
+  - Re-engineered `StorefrontScanner::ResetArtworkCache()` into a complete cache & metadata refresh engine.
+  - Purges `%USERPROFILE%\Game Explorer\cache\art\` and thumbnails.
+  - Completely wipes all metadata `.json` files in `%USERPROFILE%\Game Explorer\metadata\` and the OneDrive mirror directory to eliminate any corrupted or obsolete ghost metadata.
+  - Invokes `StorefrontScanner::ScanAll(Database::Instance())` to cleanly re-scan all installed storefronts, re-download authentic artwork, and regenerate brand new clean JSON metadata files.
+  - Immediately triggers `RefreshGameList(hwnd)` in `GameExplorerManager.exe` and broadcasts `SHChangeNotify(SHCNE_UPDATEDIR, ...)` and `WM_APP + 42` to active views.
+
+- ✅ **[windows-game-explorer] BUG-10 — Itch.io Storefront Artwork & Metadata Population & Scraper Bypass**:
+  - In `ScanItch()`, pre-indexed the master game catalog from `%APPDATA%\itch\db\butler.db`'s `games` table (all 51 titles), mapping by both URL slug and title.
+  - In Step 2 (drive folder scanning), matches discovered folders against the butler master catalog, assigning authentic `appId = itch_<id>`, title, synopsis, author, and downloading authentic itch.io CDN artwork.
+  - In `EnrichGameMetadata()`, strictly bypassed `EnrichFromSteamStoreSearch()` for all `PlatformType::Itch` titles, completely preventing itch games from being queried or overwritten with unrelated Steam titles.
+  - Enforced the artwork separation invariant: `detailsArtPath` allows animated GIFs for rich in-depth inspection, while `coverArtPath` and `heroArtPath` (used in the card grid/list views) strictly use static covers (`stillCoverUrl` or static image).
+  - Aligned cover art rendering in `LibraryViewHost.cpp` to `wuxm::Stretch::Fill` matching `GameExplorerManager.exe`'s GDI+ `DrawImage(&img, x, y, w, h)`, ensuring full vertical box fit without clipping characters or titles.
 
 - ✅ **[windows-game-explorer] BUG-9 — Purge Duplicate Test Entries, Add Details Option to Web Search Dropdown & Fix Image Preview Sizing per Type**:
   - **Purged Duplicate Test Games**: Removed 47 leftover historical `custom_*.json` test files from `%USERPROFILE%\Game Explorer\metadata\` and the OneDrive sync directory (`%USERPROFILE%\OneDrive\Windows Game Explorer\metadata\`); updated `StorefrontScanner::RemoveCustomLocalGame` to remove deleted games from both local and OneDrive mirror directories; updated `CustomLocalGameLifecycle` unit test to immediately clean up all generated test games upon completion.

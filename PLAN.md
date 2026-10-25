@@ -16,28 +16,7 @@
 
 ## 🎯 Active Sprints
 
-### 🚀 Sprint 34: [windows-game-explorer] — Cloud Gaming Streaming Hooks & Gamepad Handheld Mode (`v2.2.0`)
-- **Project Identifier:** `[windows-game-explorer]`
-- **Repository Path:** `projects/windows-game-explorer`
-- **Target Objective:** Expand platform launcher hooks to cloud gaming providers (GeForce NOW, Xbox Cloud Gaming) and deliver a controller-friendly Big Picture overlay mode for handheld PCs.
-
----
-
-## ⏳ Queued Sprints
-
-### 🔒 Sprint 36: [windows-game-explorer] — Universal Owned Games Multi-Platform Synchronization & Storefront In-App Installation (`v2.4.0`)
-- **Status:** ⏳ Queued (Locked — Pending full resolution of active bugs BUG-10, BUG-11, BUG-12 & explicit user authorization)
-- **Target Objective:** Expand storefront scanners beyond local physical drive installations to ingest all owned titles from Steam, GOG Galaxy, Epic Games, itch.io, Battle.net, EA App, and Xbox, with one-click installation through each official storefront.
-- **Key Deliverables:**
-  - **Account Library Discovery**: Ingest complete account catalogs from local client caches and APIs (`butler.db`, GOG Galaxy `galaxy-2.0.db`, Steam package cache / Web API, Epic manifests).
-  - **Storefront Installation Triggers**: Clicking Play/Install on an owned uninstalled game delegates installation directly through that platform's official client protocol:
-    - Steam: `steam://install/<appId>`
-    - Epic Games: `com.epicgames.launcher://apps/<appName>?action=install`
-    - GOG Galaxy: `goggalaxy://openGameView/<gameId>` / client install command
-    - itch.io: `itch://games/<gameId>`
-    - Battle.net / EA / Xbox: Official storefront client deep link / protocol handlers
-  - **Library Presentation & Filters**: Distinct visual state badges (`Installed` vs `Owned (Ready to Install)`) and filter toggles (`All Owned Games`, `Installed Only`, `Ready to Install`).
-  - **Non-Destructive Metadata Cache**: Store owned titles in `%USERPROFILE%\Game Explorer\metadata\` with `isInstalled = false`, preserving offline artwork and metadata without physical game files.
+(No active sprints — awaiting user directive.)
 
 ---
 

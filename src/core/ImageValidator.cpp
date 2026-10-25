@@ -223,12 +223,13 @@ bool ImageValidator::IsAnimatedImage(const std::wstring& path) {
 bool ImageValidator::IsValidCover(const std::wstring& path) {
     ImageDimensions info{};
     if (!GetImageInfo(path, info)) return false;
-    // Cover MUST NOT be animated GIF
+    // Cover MUST NOT be animated GIF (grid/list view strictly uses static images)
     if (info.isAnimated) return false;
-    // SteamGridDB reference standard 2:3 vertical grid (0.667), accepting 0.58 to 0.82 (e.g. 600x900, 600x800, 342x482)
-    if (info.aspectRatio < 0.58f || info.aspectRatio > 0.82f) return false;
+    // Ratio enforcement is a loose requirement to fully support itch.io (e.g. 315x250, aspect ratio ~1.26)
+    // and various custom storefront box art without artificial rejection (0.25f to 2.50f).
+    if (info.aspectRatio < 0.25f || info.aspectRatio > 2.50f) return false;
     // Minimum resolution
-    if (info.width < 100 || info.height < 140) return false;
+    if (info.width < 32 || info.height < 32) return false;
     return true;
 }
 
@@ -237,10 +238,10 @@ bool ImageValidator::IsValidHero(const std::wstring& path) {
     if (!GetImageInfo(path, info)) return false;
     // Hero MUST NOT be animated GIF
     if (info.isAnimated) return false;
-    // Widescreen landscape ratio (typically 16:9 = 1.78, 21:9 = 2.33, Steam banner = 2.14, Steam hero = 3.10)
-    if (info.aspectRatio < 1.30f || info.aspectRatio > 3.60f) return false;
+    // Loose landscape ratio requirement (0.80f to 4.50f)
+    if (info.aspectRatio < 0.80f || info.aspectRatio > 4.50f) return false;
     // Minimum resolution
-    if (info.width < 240 || info.height < 70) return false;
+    if (info.width < 64 || info.height < 32) return false;
     return true;
 }
 
@@ -347,8 +348,10 @@ bool ImageValidator::ValidateAndFixGameArtwork(GameItem& item) {
     if (item.detailsArtPath.empty()) {
         if (!item.heroArtPath.empty() && IsValidDetails(item.heroArtPath)) {
             item.detailsArtPath = item.heroArtPath;
+            modified = true;
         } else if (!item.coverArtPath.empty() && IsValidDetails(item.coverArtPath)) {
             item.detailsArtPath = item.coverArtPath;
+            modified = true;
         }
     }
 

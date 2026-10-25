@@ -61,18 +61,16 @@ TEST_CASE(ImageValidatorSlotDimensionsAndAspectRatios) {
     ASSERT_TRUE(SaveDummyImage(iconImg, 256, 256, Gdiplus::Color(255, 50, 180, 70)));
     ASSERT_TRUE(SaveDummyImage(cardImg, 315, 250, Gdiplus::Color(255, 120, 120, 120)));
 
-    // 1. Cover validation (universal 3:4 / 2:3 poster, ratio 0.55 - 0.95)
+    // 1. Cover validation (loose aspect ratio 0.25 - 2.50 to support itch.io and custom covers)
     ASSERT_TRUE(ImageValidator::IsValidCover(coverImg));
     ASSERT_TRUE(ImageValidator::IsValidCover(posterImg));
-    ASSERT_FALSE(ImageValidator::IsValidCover(heroImg)); // 16:9 cannot be cover
-    ASSERT_FALSE(ImageValidator::IsValidCover(iconImg)); // Square cannot be cover
-    ASSERT_FALSE(ImageValidator::IsValidCover(cardImg)); // 315x250 (1.26) cannot be cover
+    ASSERT_TRUE(ImageValidator::IsValidCover(cardImg)); // 315x250 (1.26) itch.io cover is valid
+    ASSERT_TRUE(ImageValidator::IsValidCover(iconImg));
 
-    // 2. Hero validation (strictly landscape widescreen, ratio >= 1.30)
+    // 2. Hero validation (landscape widescreen, ratio 0.80 - 4.50)
     ASSERT_TRUE(ImageValidator::IsValidHero(heroImg));
-    ASSERT_FALSE(ImageValidator::IsValidHero(coverImg)); // 2:3 cannot be hero
-    ASSERT_FALSE(ImageValidator::IsValidHero(iconImg));  // Square cannot be hero
-    ASSERT_FALSE(ImageValidator::IsValidHero(cardImg));  // 1.26 is less than 1.30
+    ASSERT_TRUE(ImageValidator::IsValidHero(cardImg));
+    ASSERT_FALSE(ImageValidator::IsValidHero(coverImg)); // 2:3 (0.67) cannot be hero
 
     // 3. Icon validation (strictly square, 0.75 - 1.33)
     ASSERT_TRUE(ImageValidator::IsValidIcon(iconImg));
@@ -99,19 +97,19 @@ TEST_CASE(ImageValidatorAssetPreservationAndNonDestructiveValidation) {
     std::wstring genCover = ImageValidator::GenerateFittingCover(L"test_crop_game", cardImg);
     ASSERT_TRUE(genCover.empty());
 
-    // 2. Non-destructive artwork validation preserves original ill-fitting cards in detailsArtPath
+    // 2. Authentic itch.io covers (315x250) are preserved in coverArtPath under the loose ratio requirement
     GameItem item{};
     item.appId = L"test_fix_game";
     item.title = L"Test Artwork Fixing Game";
-    item.coverArtPath = cardImg; // 315x250 is ill-fitting for 2:3 vertical cover
-    item.heroArtPath = L"";       // Missing hero
+    item.coverArtPath = cardImg; // 315x250 static cover
+    item.heroArtPath = cardImg;  // Shared hero/card
     item.detailsArtPath = L"";
 
     ASSERT_TRUE(ImageValidator::ValidateAndFixGameArtwork(item));
 
-    // Verify original asset was preserved in detailsArtPath without being destroyed by cropping
+    // Verify authentic static cover was preserved in coverArtPath and detailsArtPath
+    ASSERT_EQ(item.coverArtPath, cardImg);
+    ASSERT_TRUE(ImageValidator::IsValidCover(item.coverArtPath));
     ASSERT_EQ(item.detailsArtPath, cardImg);
     ASSERT_TRUE(ImageValidator::IsValidDetails(item.detailsArtPath));
-    // Verify coverArtPath was cleared so metadata providers can fetch authentic 600x900 box art
-    ASSERT_TRUE(item.coverArtPath.empty());
 }
