@@ -35,9 +35,10 @@
 | # | Milestone | Scope | Status | Version / Target | Focus |
 |---|---|---|---|---|---|
 | **M15** | Windows Game Explorer Shell Extension & Native Re-Architecture | Shell extension & Win32 apps | ✅ Released | `v2.0.0` | Native C++20 Win32 COM virtual namespace extension (`GameExplorerShell.dll`), two-section categorization (`Installed Providers` & `Games Library`), 17-platform scanner, `GameExplorerConfig.exe`, and `GameExplorerManager.exe` |
-| **M16** | Universal Multi-Source Achievement Tracking & Multi-Viewport Artwork Engine | Core, Shell & Config | ✅ Delivered | `v2.1.1` | Hybrid native storefront + external tracker integration (RetroAchievements, Steam Web API, GOG Galaxy), multi-viewport aspect ratio fitting, in-place scroll preservation, OneDrive cloud sync, config UI, and Inspector trophy rendering |
+| **M16** | Universal Multi-Source Achievement Tracking & Multi-Viewport Artwork Engine | Core, Shell & Config | ✅ Delivered | `v2.1.2` | Hybrid native storefront + external tracker integration (RetroAchievements, Steam Web API, GOG Galaxy), multi-viewport aspect ratio fitting, in-place scroll preservation, OneDrive cloud sync, config UI, and Inspector trophy rendering |
 | **M17** | Cloud Gaming Hooks & Handheld Overlay | Handheld/Cloud | ⏳ Planned | `v2.2.0` | Cloud streaming hooks (GeForce NOW, Xbox Cloud), Gamepad Big Picture mode |
 | **M18** | Emulator Auto-Configuration Presets | Emulation | ⏳ Planned | `v2.3.0` | Standalone emulator presets (RetroArch, Dolphin, PCSX2, RPCS3) |
+| **M19** | Universal Owned Games Multi-Platform Synchronization | Owned Game Catalog | ⏳ Queued | `v2.4.0` | Ingestion of complete owned libraries across all supported platforms (Steam, GOG, Epic Games, itch.io, Battle.net, EA App, Xbox); installed vs. uninstalled/cloud-ready badges; store install protocol invocation (`steam://install/<appId>`, etc.). Strictly queued until all active bugs are resolved and explicit user authorization is granted. |
 
 ---
 
@@ -67,3 +68,29 @@ flowchart TD
 - 🎯 **[windows-game-explorer] Phase 5 — Front-End Custom Gallery & Details Side Pane**: Native Fluent Design game view supporting selectable layouts (Cover Art, Hero Banner, Details View), authentic native Windows light and dark styles, keyboard navigation hooks, and contextual details side panel.
 - 🎯 **[windows-game-explorer] Phase 6 — Integration Configuration Utility (`GameExplorerConfig.exe`)**: Standalone lightweight Win32 configuration utility dedicated to enabling/disabling shell integration, selecting library layout mode, toggling storefront integrations, and managing OneDrive cloud sync.
 - 🎯 **[windows-game-explorer] Phase 7 — Advanced Execution, OneDrive Sync & OS Integration**: Client-executable launch invocation (`steam.exe -applaunch <appId>`, etc.), custom Explorer right-click context menus, and dynamic OneDrive cloud-save backup.
+
+---
+
+### [windows-game-explorer] — Milestone M19: Universal Owned Games Multi-Platform Synchronization (`v2.4.0`)
+
+> **Strategic Directive:** Complete owned game discovery and ingestion across all supported platforms (Steam, GOG Galaxy, Epic Games, itch.io, Battle.net, EA App, and Xbox).
+> **Prerequisite & Authority Requirement:** Strictly queued for a future development cycle. Work will commence ONLY after all active and open bugs are resolved AND the user explicitly authorizes work to begin.
+
+#### Scope & Architecture
+- **Complete Owned Library Ingestion**:
+  - Extend storefront parsers to discover all games tied to the user's accounts, not solely titles installed on local physical disks.
+  - Ingest owned title catalogs via local client caches/databases (`butler.db`, GOG Galaxy `galaxy-2.0.db`, Steam web API / package cache, Epic manifests).
+- **Installed vs. Uninstalled/Cloud-Ready Status Badging**:
+  - Display distinct visual status badges (`Installed` vs `Cloud / In Library`).
+  - Add filter controls to view: `All Games`, `Installed Only`, or `Ready to Install`.
+- **One-Click Native Store Installation Triggers**:
+  - For uninstalled owned games, clicking Play/Install delegates installation directly through that platform's official client installer protocol:
+    - Steam: `steam://install/<appId>`
+    - Epic Games: `com.epicgames.launcher://apps/<appName>?action=install`
+    - GOG Galaxy: `goggalaxy://openGameView/<gameId>`
+    - itch.io: `itch://games/<gameId>`
+    - Battle.net: `battlenet://<gameCode>`
+    - EA App: `origin2://game/launch?offerId=<offerId>` / EA client protocol
+    - Xbox: `ms-windows-store://pdp/?ProductId=<productId>` / Xbox App deep link
+- **Non-Destructive Metadata Cache**:
+  - Keep owned uninstalled game entries stored cleanly in `%USERPROFILE%\Game Explorer\metadata\` with `isInstalled = false`, ensuring box art and metadata remain browsable offline without cluttering disk space.

@@ -286,9 +286,12 @@ Delivered universal achievement tracking across native storefronts (Steam, GOG, 
 
 ## 3) Next Immediate Priorities
 
-- Await user review and explicit order before committing or pushing.
-- Ready to explore Sprint 34: Cloud Gaming Streaming Hooks & Gamepad Handheld Mode (`v2.2.0`).
+1. **Active Bug Resolution (Research First — Zero Guessing)**:
+   - **BUG-10**: Itch.io Storefront Artwork & Metadata Incomplete Ingestion, WinHttp `%23` Path Truncation & Scraper Fallbacks.
+   - **BUG-11**: Complete Art Cache Reset Button Must Repopulate Library & Metadata.
+   - **BUG-12**: Companion App Launch from Portable Distribution in File Explorer Shell Extension.
 
-1. **Post-v2.0.0 Maintenance**:
-   - Tab switching stability and `DesktopWindowXamlSource` teardown verified.
-   - Catalog normalization, deduplication, and database synchronization verified with 11 unit tests passing.
+2. **Queued Milestone M19 (Locked — Awaiting Bug Resolution & User Authority)**:
+   - **Sprint 36 / Workstream W.60**: Universal Owned Games Multi-Platform Synchronization & Storefront In-App Installation (`v2.4.0`).
+   - Supports ingesting all owned games across Steam, GOG Galaxy, Epic Games, itch.io, Battle.net, EA App, and Xbox, with one-click installation triggers through official storefront protocols (`steam://install/<appId>`, etc.).
+   - Work strictly queued until all active bugs are resolved and user authorization is explicitly granted.

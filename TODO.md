@@ -18,7 +18,45 @@
 
 ## 🔥 Active Workstreams
 
-*No open workstreams currently active. All planned tasks up to v2.1.0 are delivered.*
+### 🐛 Bug Resolution Workstream (Zero Guessing / Research-Backed Fixes)
+- [ ] **[windows-game-explorer] (projects/windows-game-explorer) BUG-10: Fix Itch.io Storefront Artwork & Metadata Ingestion**
+  - [ ] Pre-index all 51 games from `%APPDATA%\itch\db\butler.db` `games` table (`id`, `title`, `short_text`, `cover_url`, `still_cover_url`, `url`, `user_id`).
+  - [ ] Match folder-scanned games against itch slugs/titles directly to populate authentic title, synopsis, developer, and cover URLs without scrapers.
+  - [ ] Bypass `EnrichFromSteamStoreSearch()` for all `PlatformType::Itch` titles to prevent overwriting with unrelated Steam titles.
+  - [ ] Fix WinHttp `%23` decoding in `DownloadRemoteFile` preserving `%23c` crop paths for `img.itch.zone`.
+  - [ ] Enforce authentic image extensions (`.gif`, `.png`, `.jpg`) matching content/URL.
+- [ ] **[windows-game-explorer] (projects/windows-game-explorer) BUG-11: Complete Art Cache Reset & Repopulation Engine**
+  - [ ] Purge `%USERPROFILE%\Game Explorer\cache\art\`.
+  - [ ] Purge non-custom metadata JSON files from `%USERPROFILE%\Game Explorer\metadata\` (preserving user custom local games).
+  - [ ] Invoke `StorefrontScanner::ScanAll(Database::Instance())` to re-scan all storefronts and download authentic assets.
+  - [ ] Refresh active library views and broadcast notifications.
+- [ ] **[windows-game-explorer] (projects/windows-game-explorer) BUG-12: Fix Companion App Launch from Portable Distribution**
+  - [ ] Use `GetModuleHandleExW` with `GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS` pointing to `&GetApplicationDirectory` in `LibraryViewHost.cpp`.
+  - [ ] Fall back to registry `InProcServer32` for CLSID `{1666B3DF-60A5-4EF3-8B80-962C82401CD1}`.
+  - [ ] Pass `nullptr` as the `HWND` in `ShellExecuteW` to avoid child process activation blocking from XAML Island.
+
+---
+
+## ⏳ Queued Workstreams (Pending Bug Resolution & Explicit User Authorization)
+
+### 🔒 Workstream W.60: Universal Owned Games Multi-Platform Synchronization & Storefront Installation (`v2.4.0`)
+- **Status:** ⏳ Queued (Locked — Work commences ONLY after BUG-10, BUG-11, and BUG-12 are resolved AND the user explicitly authorizes work to begin)
+- **Directives:**
+  - [ ] **[windows-game-explorer] (projects/windows-game-explorer) Multi-Store Owned Games Discovery**:
+    - [ ] Ingest complete owned account catalogs beyond locally installed games across Steam, GOG Galaxy, Epic Games, itch.io, Battle.net, EA App, and Xbox.
+    - [ ] Leverage client local databases/caches (`butler.db`, GOG `galaxy-2.0.db`, Steam package cache / Web API, Epic manifests).
+  - [ ] **[windows-game-explorer] (projects/windows-game-explorer) Storefront In-App Installation Support**:
+    - [ ] Integrate one-click native storefront installation for all owned uninstalled titles:
+      - [ ] Steam: Trigger install via `steam://install/<appId>`.
+      - [ ] Epic Games: Trigger install via `com.epicgames.launcher://apps/<appName>?action=install`.
+      - [ ] GOG Galaxy: Trigger install via `goggalaxy://openGameView/<gameId>` / client install command.
+      - [ ] itch.io: Trigger install via `itch://games/<gameId>`.
+      - [ ] Xbox / Battle.net / EA: Trigger official client install protocol deep links.
+  - [ ] **[windows-game-explorer] (projects/windows-game-explorer) Library Presentation & Filter States**:
+    - [ ] Add visual badges distinguishing `Installed` vs `Owned (Ready to Install)`.
+    - [ ] Add library filter toggles: `All Owned Games`, `Installed Only`, and `Ready to Install`.
+  - [ ] **[windows-game-explorer] (projects/windows-game-explorer) Non-Destructive Offline Metadata Caching**:
+    - [ ] Persist owned uninstalled game entries in `%USERPROFILE%\Game Explorer\metadata\` with `isInstalled = false`, preserving offline artwork and metadata without physical game files.
 
 ---
 
