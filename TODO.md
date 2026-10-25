@@ -19,6 +19,21 @@
 ## 🔥 Active Workstreams
 
 ### 🐛 Bug Resolution Workstream (Zero Guessing / Research-Backed Fixes)
+- [x] **[windows-game-explorer] (projects/windows-game-explorer) BUG-14: Preserve 32-bit ARGB Transparency in Extracted Platform & Provider Icons**
+  - [x] Research root cause of solid black square backgrounds on extracted provider icons in `EnsureExtractedIconPng()`.
+  - [x] Replace GDI `CreateDIBSection` and `DrawIconEx` with alpha-preserving `Gdiplus::Bitmap::FromHICON(hIcon)`.
+  - [x] Add fallback alpha fixup for legacy/broken icons with unpopulated alpha channels to prevent inadvertent invisibility.
+  - [x] Purge stale black-background `icon_prov_*.png` cache files from `%USERPROFILE%\Game Explorer\cache\art\`.
+
+### 🎮 Emulation & Provider Expansion Workstream
+- [x] **[windows-game-explorer] (projects/windows-game-explorer) EMU-01: Native Xemu & VICE Emulation Architecture Support**
+  - [x] Add `PlatformType::Xemu` and `PlatformType::Vice` platform enumerations.
+  - [x] Implement executable auto-discovery and DB overrides (`xemu_path`, `vice_path`) in `PlatformLauncher`.
+  - [x] Implement launch command formulations for xemu (`xemu.exe -full-screen -dvd_path "<rom>"`) and VICE (`x64sc.exe` / `x64.exe -autostart "<rom>"`).
+  - [x] Add ROM scanning for xemu (`xbox`, `xboxclassic`) and VICE (`c64`, `commodore64`, `c128`, `vic20`, `plus4`, `pet`).
+  - [x] Populate `assets/roms-template/ROMs/` with `xbox`, `xboxclassic`, `c128`, `pet`.
+  - [x] Add unit test coverage in `TestPlatformLauncher.cpp` (21/21 tests passing).
+
 - [x] **[windows-game-explorer] (projects/windows-game-explorer) BUG-10: Fix Itch.io Storefront Artwork & Metadata Ingestion**
   - [x] Pre-index all 51 games from `%APPDATA%\itch\db\butler.db` `games` table (`id`, `title`, `short_text`, `cover_url`, `still_cover_url`, `url`, `user_id`).
   - [x] Match folder-scanned games against itch slugs/titles directly to populate authentic title, synopsis, developer, and cover URLs without scrapers.

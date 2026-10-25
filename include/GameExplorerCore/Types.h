@@ -68,7 +68,9 @@ enum class PlatformType : uint32_t {
     melonDS = 30,
     Citra = 31,
     Flycast = 32,
-    RPCS3 = 33
+    RPCS3 = 33,
+    Xemu = 34,
+    Vice = 35
 };
 
 [[nodiscard]] constexpr std::wstring_view PlatformToString(PlatformType platform) noexcept {
@@ -109,6 +111,10 @@ enum class PlatformType : uint32_t {
         return L"Flycast";
     case PlatformType::RPCS3:
         return L"RPCS3";
+    case PlatformType::Xemu:
+        return L"xemu";
+    case PlatformType::Vice:
+        return L"VICE";
     case PlatformType::Itch:
         return L"itch.io";
     case PlatformType::SquareEnix:
@@ -174,6 +180,8 @@ enum class PlatformType : uint32_t {
     if (str == L"Citra") return PlatformType::Citra;
     if (str == L"Flycast") return PlatformType::Flycast;
     if (str == L"RPCS3") return PlatformType::RPCS3;
+    if (str == L"xemu" || str == L"Xemu") return PlatformType::Xemu;
+    if (str == L"VICE" || str == L"Vice" || str == L"vice") return PlatformType::Vice;
     if (str == L"Standalone" || str == L"Custom") return PlatformType::CustomExecutable;
     return PlatformType::Unknown;
 }

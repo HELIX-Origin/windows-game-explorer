@@ -13,11 +13,15 @@ TEST_CASE(PlatformEnumToStringAndBack) {
     ASSERT_EQ(GameExplorer::PlatformToString(GameExplorer::PlatformType::EAApp), L"EA App");
     ASSERT_EQ(GameExplorer::PlatformToString(GameExplorer::PlatformType::Amazon), L"Amazon Games");
     ASSERT_EQ(GameExplorer::PlatformToString(GameExplorer::PlatformType::Xbox), L"Xbox");
+    ASSERT_EQ(GameExplorer::PlatformToString(GameExplorer::PlatformType::Xemu), L"xemu");
+    ASSERT_EQ(GameExplorer::PlatformToString(GameExplorer::PlatformType::Vice), L"VICE");
 
     ASSERT_EQ(GameExplorer::StringToPlatform(L"Steam"), GameExplorer::PlatformType::Steam);
     ASSERT_EQ(GameExplorer::StringToPlatform(L"Epic Games"), GameExplorer::PlatformType::Epic);
     ASSERT_EQ(GameExplorer::StringToPlatform(L"itch.io"), GameExplorer::PlatformType::Itch);
     ASSERT_EQ(GameExplorer::StringToPlatform(L"Xbox"), GameExplorer::PlatformType::Xbox);
+    ASSERT_EQ(GameExplorer::StringToPlatform(L"xemu"), GameExplorer::PlatformType::Xemu);
+    ASSERT_EQ(GameExplorer::StringToPlatform(L"VICE"), GameExplorer::PlatformType::Vice);
 }
 
 TEST_CASE(PlatformLauncherSteamPathQuery) {
@@ -32,7 +36,7 @@ TEST_CASE(PlatformLauncherSteamPathQuery) {
 }
 
 TEST_CASE(PlatformLauncherEmulatorDiscovery) {
-    // Tests emulator path discovery for Dolphin and Project64
+    // Tests emulator path discovery for Dolphin, Project64, Xemu, and VICE
     const std::wstring dolphinExe = GameExplorer::PlatformLauncher::GetDolphinExecutablePath();
     if (!dolphinExe.empty()) {
         ASSERT_TRUE(dolphinExe.find(L"Dolphin.exe") != std::wstring::npos);
@@ -40,5 +44,13 @@ TEST_CASE(PlatformLauncherEmulatorDiscovery) {
     const std::wstring pj64Exe = GameExplorer::PlatformLauncher::GetProject64ExecutablePath();
     if (!pj64Exe.empty()) {
         ASSERT_TRUE(pj64Exe.find(L"Project64.exe") != std::wstring::npos);
+    }
+    const std::wstring xemuExe = GameExplorer::PlatformLauncher::GetXemuExecutablePath();
+    if (!xemuExe.empty()) {
+        ASSERT_TRUE(xemuExe.find(L"xemu.exe") != std::wstring::npos);
+    }
+    const std::wstring viceExe = GameExplorer::PlatformLauncher::GetViceExecutablePath();
+    if (!viceExe.empty()) {
+        ASSERT_TRUE(viceExe.find(L"x64sc.exe") != std::wstring::npos || viceExe.find(L"x64.exe") != std::wstring::npos);
     }
 }

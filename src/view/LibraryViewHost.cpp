@@ -28,6 +28,7 @@
 #include <windows.ui.xaml.hosting.desktopwindowxamlsource.h>
 
 #include <algorithm>
+#include <memory>
 #include <mutex>
 #include <thread>
 #include <gdiplus.h>
@@ -124,8 +125,13 @@ std::wstring EnsureExtractedIconPng(const std::wstring& cacheKey, const std::wst
     }
 
     HICON hIcon = nullptr;
-    if (FAILED(SHDefExtractIconW(sourceExeOrIco.c_str(), 0, 0, &hIcon, nullptr, 128)) || hIcon == nullptr) {
-        ExtractIconExW(sourceExeOrIco.c_str(), 0, &hIcon, nullptr, 1);
+    if (_wcsicmp(ext.c_str(), L".ico") == 0) {
+        hIcon = static_cast<HICON>(LoadImageW(nullptr, sourceExeOrIco.c_str(), IMAGE_ICON, 128, 128, LR_LOADFROMFILE));
+    }
+    if (hIcon == nullptr) {
+        if (FAILED(SHDefExtractIconW(sourceExeOrIco.c_str(), 0, 0, &hIcon, nullptr, 128)) || hIcon == nullptr) {
+            ExtractIconExW(sourceExeOrIco.c_str(), 0, &hIcon, nullptr, 1);
+        }
     }
     if (hIcon == nullptr) {
         // If the executable has no embedded PE icon resource (common in NW.js, Python, Ren'Py, Electron),
@@ -160,42 +166,47 @@ std::wstring EnsureExtractedIconPng(const std::wstring& cacheKey, const std::wst
     }
     if (hIcon == nullptr) return L"";
 
-    constexpr int iconDim = 128;
-    BITMAPINFO bi{};
-    bi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
-    bi.bmiHeader.biWidth = iconDim;
-    bi.bmiHeader.biHeight = iconDim;
-    bi.bmiHeader.biPlanes = 1;
-    bi.bmiHeader.biBitCount = 32;
-    bi.bmiHeader.biCompression = BI_RGB;
+    EnsureGdiplusInitialized();
+    std::unique_ptr<Gdiplus::Bitmap> pBmp(Gdiplus::Bitmap::FromHICON(hIcon));
+    DestroyIcon(hIcon);
 
-    void* pBits = nullptr;
-    HDC hdcScreen = GetDC(nullptr);
-    HBITMAP hDib = CreateDIBSection(hdcScreen, &bi, DIB_RGB_COLORS, &pBits, nullptr, 0);
-    ReleaseDC(nullptr, hdcScreen);
-
-    if (hDib == nullptr) {
-        DestroyIcon(hIcon);
+    if (!pBmp || pBmp->GetLastStatus() != Gdiplus::Ok) {
         return L"";
     }
 
-    HDC hdcMem = CreateCompatibleDC(nullptr);
-    auto hOldBmp = SelectObject(hdcMem, hDib);
-    DrawIconEx(hdcMem, 0, 0, hIcon, iconDim, iconDim, 0, nullptr, DI_NORMAL);
-    SelectObject(hdcMem, hOldBmp);
-    DeleteDC(hdcMem);
-    DestroyIcon(hIcon);
+    // Preserve 32-bit ARGB alpha transparency; if all pixels have alpha 0 (uninitialized alpha mask), make them opaque
+    Gdiplus::BitmapData bData{};
+    Gdiplus::Rect rect(0, 0, pBmp->GetWidth(), pBmp->GetHeight());
+    if (pBmp->LockBits(&rect, Gdiplus::ImageLockModeRead, PixelFormat32bppARGB, &bData) == Gdiplus::Ok) {
+        bool hasNonZeroAlpha = false;
+        auto* scan = reinterpret_cast<const uint32_t*>(bData.Scan0);
+        const size_t totalPixels = static_cast<size_t>(bData.Width) * bData.Height;
+        for (size_t i = 0; i < totalPixels; ++i) {
+            if ((scan[i] & 0xFF000000) != 0) {
+                hasNonZeroAlpha = true;
+                break;
+            }
+        }
+        pBmp->UnlockBits(&bData);
 
-    EnsureGdiplusInitialized();
-    Gdiplus::Bitmap gdiBmp(hDib, nullptr);
+        if (!hasNonZeroAlpha) {
+            if (pBmp->LockBits(&rect, Gdiplus::ImageLockModeWrite, PixelFormat32bppARGB, &bData) == Gdiplus::Ok) {
+                auto* outScan = reinterpret_cast<uint32_t*>(bData.Scan0);
+                for (size_t i = 0; i < totalPixels; ++i) {
+                    outScan[i] |= 0xFF000000;
+                }
+                pBmp->UnlockBits(&bData);
+            }
+        }
+    }
+
     CLSID pngClsid{};
     std::wstring result;
     if (GetPngEncoderClsid(&pngClsid)) {
-        if (gdiBmp.Save(pngPath.c_str(), &pngClsid, nullptr) == Gdiplus::Ok) {
+        if (pBmp->Save(pngPath.c_str(), &pngClsid, nullptr) == Gdiplus::Ok) {
             result = pngPath.wstring();
         }
     }
-    DeleteObject(hDib);
     return result;
 }
 
@@ -522,6 +533,8 @@ void LibraryViewHost::LoadDataAsync(HWND hwndNotify) {
         addProviderIfInstalled(PlatformType::Citra,       L"Citra",           L"Citra Team",             PlatformLauncher::GetCitraExecutablePath());
         addProviderIfInstalled(PlatformType::Flycast,     L"Flycast",         L"flyinghead / Flycast",   PlatformLauncher::GetFlycastExecutablePath());
         addProviderIfInstalled(PlatformType::RPCS3,       L"RPCS3",           L"RPCS3 Team",             PlatformLauncher::GetRPCS3ExecutablePath());
+        addProviderIfInstalled(PlatformType::Xemu,        L"xemu",            L"xemu Team",              PlatformLauncher::GetXemuExecutablePath());
+        addProviderIfInstalled(PlatformType::Vice,        L"VICE",            L"VICE Team",              PlatformLauncher::GetViceExecutablePath());
         addProviderIfInstalled(PlatformType::RetroArch,   L"RetroArch",       L"Libretro Team",          PlatformLauncher::GetRetroArchExecutablePath());
 
         // Direct instant access: load games directly from metadata/*.json files without DB bottleneck

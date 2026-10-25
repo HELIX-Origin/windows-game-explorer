@@ -1,7 +1,7 @@
 # HANDOFF.md — Windows Game Explorer Session Handoff
 
 **Last updated:** 2026-10-24
-**Current session status:** W.59 delivered & v2.2.0 released · Direct JSON Metadata Architecture, Robust Multi-View Artwork Fallbacks, Responsive Manager Layout & Installer Artwork Modernization · BUG-10, BUG-11, BUG-12, BUG-13 Resolved (Itch.io Storefront Artwork & Metadata, Cache Reset & Fresh Rebuild Engine, Companion App Launch, VNDB Kana API Integration, Loose Aspect Ratio Enforcement & Strict Title Matching) · All 21/21 unit tests passing under zero-warning gate (/W4 /WX). Release v2.2.0 packaged. "All owned games" and cloud gaming plans dropped per user directive.
+**Current session status:** Emulation Support for Xemu & VICE Added · Platform & Provider Icon 32-bit ARGB Transparency Restored (BUG-14 Resolved) · Release v2.2.0 Published · BUG-10, BUG-11, BUG-12, BUG-13 Resolved · All 21/21 unit tests passing under zero-warning gate (/W4 /WX).
 **Project:** windows-game-explorer (Windows Game Explorer)
 **Root:** projects/windows-game-explorer
 
@@ -291,3 +291,11 @@ Delivered universal achievement tracking across native storefronts (Steam, GOG, 
    - Obscure/indie/adult metadata accuracy delivered via VNDB Kana API integration, itch.io storefront scraping, loose aspect ratio enforcement, and strict candidate title verification.
    - Cache reset engine (`Reset Cache` button / `--reset-cache` CLI) reliably purges existing cache and rebuilds fresh metadata and artwork across installed titles.
    - Future "all owned games" plan officially dropped per user directive; scope remains strictly focused on installed games library.
+2. **Emulation Support Expansion**:
+   - Added native support for **Xemu** (Original Xbox) and **VICE** (Commodore 64, C128, VIC-20, Plus/4, PET) emulators and launch commands.
+   - Updated `assets/roms-template/ROMs` with systems `xbox`, `xboxclassic`, `c128`, and `pet`.
+   - Verified 21/21 unit tests passing under `/W4 /WX`.
+3. **Provider Icon Transparency Fix (BUG-14)**:
+   - Root cause identified: GDI `CreateDIBSection` + `DrawIconEx` zeroed alpha bytes and `Gdiplus::Bitmap(hDib, nullptr)` crushed transparent areas to solid opaque black.
+   - Replaced with direct `Gdiplus::Bitmap::FromHICON` preserving 32-bit ARGB alpha transparency and icon masks.
+   - Stale black-background `icon_prov_*.png` cached files purged from `%USERPROFILE%\Game Explorer\cache\art\`.

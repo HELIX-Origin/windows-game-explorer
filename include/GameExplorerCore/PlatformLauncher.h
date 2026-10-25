@@ -42,6 +42,8 @@ public:
     static std::wstring GetCitraExecutablePath();
     static std::wstring GetFlycastExecutablePath();
     static std::wstring GetRPCS3ExecutablePath();
+    static std::wstring GetXemuExecutablePath();
+    static std::wstring GetViceExecutablePath();
     static std::wstring GetRetroArchExecutablePath();
 };
 

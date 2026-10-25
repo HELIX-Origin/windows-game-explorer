@@ -901,6 +901,87 @@ std::wstring PlatformLauncher::GetRPCS3ExecutablePath() {
     return L"";
 }
 
+std::wstring PlatformLauncher::GetXemuExecutablePath() {
+    const std::wstring uninst = FindUninstallExecutable(L"xemu", L"xemu.exe");
+    if (!uninst.empty()) return uninst;
+
+    auto& db = Database::Instance();
+    if (auto val = db.GetSetting(L"xemu_path")) {
+        if (!val->empty() && fs::exists(*val)) return *val;
+    }
+
+    const auto drives = StorefrontScanner::GetAllMountedDrives();
+    for (const auto& drive : drives) {
+        const fs::path cands[] = {
+            fs::path(drive) / L"Games" / L"Emulators" / L"xemu" / L"xemu.exe",
+            fs::path(drive) / L"Emulators" / L"xemu" / L"xemu.exe",
+            fs::path(drive) / L"Games" / L"xemu" / L"xemu.exe",
+            fs::path(drive) / L"Games" / L"ES-DE" / L"Emulators" / L"xemu" / L"xemu.exe",
+            fs::path(drive) / L"Program Files" / L"xemu" / L"xemu.exe",
+            fs::path(drive) / L"Program Files (x86)" / L"xemu" / L"xemu.exe"
+        };
+        for (const auto& c : cands) {
+            std::error_code ec;
+            if (fs::exists(c, ec)) return c.wstring();
+        }
+    }
+
+    wchar_t localApp[MAX_PATH] = { 0 };
+    if (GetEnvironmentVariableW(L"LOCALAPPDATA", localApp, MAX_PATH) > 0) {
+        const fs::path p = fs::path(localApp) / L"Programs" / L"xemu" / L"xemu.exe";
+        std::error_code ec;
+        if (fs::exists(p, ec)) return p.wstring();
+    }
+
+    return L"";
+}
+
+std::wstring PlatformLauncher::GetViceExecutablePath() {
+    std::wstring uninst = FindUninstallExecutable(L"VICE", L"x64sc.exe");
+    if (uninst.empty()) uninst = FindUninstallExecutable(L"VICE", L"x64.exe");
+    if (!uninst.empty()) return uninst;
+
+    auto& db = Database::Instance();
+    if (auto val = db.GetSetting(L"vice_path")) {
+        if (!val->empty() && fs::exists(*val)) return *val;
+    }
+
+    const auto drives = StorefrontScanner::GetAllMountedDrives();
+    for (const auto& drive : drives) {
+        const fs::path cands[] = {
+            fs::path(drive) / L"Games" / L"Emulators" / L"VICE" / L"bin" / L"x64sc.exe",
+            fs::path(drive) / L"Games" / L"Emulators" / L"VICE" / L"x64sc.exe",
+            fs::path(drive) / L"Games" / L"Emulators" / L"VICE" / L"bin" / L"x64.exe",
+            fs::path(drive) / L"Games" / L"Emulators" / L"VICE" / L"x64.exe",
+            fs::path(drive) / L"Emulators" / L"VICE" / L"bin" / L"x64sc.exe",
+            fs::path(drive) / L"Emulators" / L"VICE" / L"x64sc.exe",
+            fs::path(drive) / L"Emulators" / L"VICE" / L"bin" / L"x64.exe",
+            fs::path(drive) / L"Games" / L"VICE" / L"bin" / L"x64sc.exe",
+            fs::path(drive) / L"Games" / L"VICE" / L"x64sc.exe",
+            fs::path(drive) / L"Games" / L"ES-DE" / L"Emulators" / L"VICE" / L"bin" / L"x64sc.exe",
+            fs::path(drive) / L"Program Files" / L"VICE" / L"bin" / L"x64sc.exe",
+            fs::path(drive) / L"Program Files" / L"VICE" / L"x64sc.exe",
+            fs::path(drive) / L"Program Files (x86)" / L"VICE" / L"bin" / L"x64sc.exe",
+            fs::path(drive) / L"Program Files (x86)" / L"VICE" / L"x64sc.exe"
+        };
+        for (const auto& c : cands) {
+            std::error_code ec;
+            if (fs::exists(c, ec)) return c.wstring();
+        }
+    }
+
+    wchar_t localApp[MAX_PATH] = { 0 };
+    if (GetEnvironmentVariableW(L"LOCALAPPDATA", localApp, MAX_PATH) > 0) {
+        const fs::path p1 = fs::path(localApp) / L"Programs" / L"VICE" / L"bin" / L"x64sc.exe";
+        const fs::path p2 = fs::path(localApp) / L"Programs" / L"VICE" / L"x64sc.exe";
+        std::error_code ec;
+        if (fs::exists(p1, ec)) return p1.wstring();
+        if (fs::exists(p2, ec)) return p2.wstring();
+    }
+
+    return L"";
+}
+
 bool PlatformLauncher::Launch(HWND hwndOwner, const GameItem& game) {
     // 1. STEAM: DRM validation and Steam profile overlay strictly require passing steam.exe in launch path
     if (game.platform == PlatformType::Steam) {
@@ -1135,6 +1216,30 @@ bool PlatformLauncher::Launch(HWND hwndOwner, const GameItem& game) {
             const std::wstring args = L"--no-gui \"" + game.executablePath + L"\"";
             const auto res = reinterpret_cast<INT_PTR>(
                 ShellExecuteW(hwndOwner, L"open", rpcs3Exe.c_str(), args.c_str(), nullptr, SW_SHOWNORMAL)
+            );
+            if (res > 32) return true;
+        }
+    }
+
+    // 18. XEMU (Microsoft Xbox Original):
+    if (game.platform == PlatformType::Xemu) {
+        const std::wstring xemuExe = GetXemuExecutablePath();
+        if (!xemuExe.empty() && !game.executablePath.empty()) {
+            const std::wstring args = L"-full-screen -dvd_path \"" + game.executablePath + L"\"";
+            const auto res = reinterpret_cast<INT_PTR>(
+                ShellExecuteW(hwndOwner, L"open", xemuExe.c_str(), args.c_str(), nullptr, SW_SHOWNORMAL)
+            );
+            if (res > 32) return true;
+        }
+    }
+
+    // 19. VICE (Commodore 64 / 128 / VIC-20):
+    if (game.platform == PlatformType::Vice) {
+        const std::wstring viceExe = GetViceExecutablePath();
+        if (!viceExe.empty() && !game.executablePath.empty()) {
+            const std::wstring args = L"-autostart \"" + game.executablePath + L"\"";
+            const auto res = reinterpret_cast<INT_PTR>(
+                ShellExecuteW(hwndOwner, L"open", viceExe.c_str(), args.c_str(), nullptr, SW_SHOWNORMAL)
             );
             if (res > 32) return true;
         }

@@ -6,6 +6,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [2.3.0] - 2026-10-24
+
+### Added
+- **Xemu & VICE Emulation Architecture Support**:
+  - Added native platform enumeration and discovery for **xemu** (Original Xbox) and **VICE** (Commodore 64, Commodore 128, VIC-20, Plus/4, PET).
+  - Implemented automatic emulator executable discovery via registry uninstall paths, custom database overrides (`xemu_path`, `vice_path`), mounted drive scanning, and `%LOCALAPPDATA%\Programs\`.
+  - Added dedicated launch commands: `xemu.exe -full-screen -dvd_path "<rom>"` and `x64sc.exe` / `x64.exe -autostart "<rom>"`.
+  - Configured ROM scanning for Xbox disc images (`.iso`, `.xiso`, `.xiso.iso`) and Commodore media (`.d64`, `.t64`, `.tap`, `.crt`, `.prg`, `.g64`, `.p00`, `.d81`, `.zip`, `.7z`).
+  - Added systems `xbox`, `xboxclassic`, `c128`, and `pet` to the distributed ROMs template directory (`assets/roms-template/ROMs/`).
+
+### Fixed
+- **Platform/Provider Icon Alpha Transparency Extraction**:
+  - Replaced GDI `CreateDIBSection` + `DrawIconEx` routine in `EnsureExtractedIconPng()` with direct `Gdiplus::Bitmap::FromHICON()` extraction.
+  - Eliminated solid black square backgrounds on extracted provider icons in the `▾ Installed Providers` section, properly preserving genuine 32-bit ARGB per-pixel alpha channels and monochrome icon masks.
+  - Added alpha fixup fallback for broken icons with unpopulated alpha channels to prevent inadvertent invisibility.
+
 ## [2.2.0] - 2026-10-24
 
 ### Added

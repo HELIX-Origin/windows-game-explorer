@@ -54,6 +54,8 @@ std::wstring GetPlatformCompany(PlatformType platform) {
     case PlatformType::Citra: return L"Citra Team";
     case PlatformType::Flycast: return L"flyinghead / Flycast Team";
     case PlatformType::RPCS3: return L"RPCS3 Team";
+    case PlatformType::Xemu: return L"xemu Team";
+    case PlatformType::Vice: return L"VICE Team";
     default: return L"Game Provider";
     }
 }
@@ -89,6 +91,8 @@ std::wstring GetPlatformExecutablePath(PlatformType platform) {
     case PlatformType::Citra: return PlatformLauncher::GetCitraExecutablePath();
     case PlatformType::Flycast: return PlatformLauncher::GetFlycastExecutablePath();
     case PlatformType::RPCS3: return PlatformLauncher::GetRPCS3ExecutablePath();
+    case PlatformType::Xemu: return PlatformLauncher::GetXemuExecutablePath();
+    case PlatformType::Vice: return PlatformLauncher::GetViceExecutablePath();
     default: return L"";
     }
 }
@@ -382,6 +386,8 @@ IFACEMETHODIMP ShellFolder::EnumObjects(HWND /*hwnd*/, SHCONTF grfFlags, IEnumID
     addProvIfFound(PlatformType::Citra, L"Citra", PlatformLauncher::GetCitraExecutablePath());
     addProvIfFound(PlatformType::Flycast, L"Flycast", PlatformLauncher::GetFlycastExecutablePath());
     addProvIfFound(PlatformType::RPCS3, L"RPCS3", PlatformLauncher::GetRPCS3ExecutablePath());
+    addProvIfFound(PlatformType::Xemu, L"xemu", PlatformLauncher::GetXemuExecutablePath());
+    addProvIfFound(PlatformType::Vice, L"VICE", PlatformLauncher::GetViceExecutablePath());
     addProvIfFound(PlatformType::RetroArch, L"RetroArch", PlatformLauncher::GetRetroArchExecutablePath());
 
     for (const auto& prov : detectedProviders) {

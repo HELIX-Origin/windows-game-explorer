@@ -30,6 +30,10 @@
 
 ## ✅ Resolved Bugs & Historical Fixes
 
+- ✅ **[windows-game-explorer] BUG-14 — Platform & Provider Icons Solid Black Background Transparency Degradation**:
+  - **Root Cause**: `EnsureExtractedIconPng()` allocated a 32-bit DIB section with `CreateDIBSection` (which initializes pixel bytes to zero: `0x00000000`) and drew the icon onto it via standard Win32 GDI `DrawIconEx(hdcMem, ..., DI_NORMAL)`. GDI does not write to the alpha channel of 32-bit DIBs. The DIB handle was then passed to `Gdiplus::Bitmap(hDib, nullptr)`, which treated the DIB as opaque RGB (`0xFF000000`), turning all transparent pixels into solid opaque black squares upon saving to PNG.
+  - **Resolution**: Replaced the GDI DIB drawing routine with direct `Gdiplus::Bitmap::FromHICON(hIcon)`, which extracts native 32-bit ARGB per-pixel alpha channels and evaluates 1-bit monochrome masks. Added fallback alpha fixup if an icon has all zero alpha to ensure visibility. Purged stale black-background `icon_prov_*.png` files from `%USERPROFILE%\Game Explorer\cache\art\`.
+
 - ✅ **[windows-game-explorer] BUG-13 — Obscure/Indie/Adult Games Artwork Inaccuracy, Missing Dedicated Visual Novel Provider (VNDB), Itch Storefront Precedence & Loose Aspect Ratio Enforcement**:
   - **VNDB Kana API Integration**: Integrated `EnrichFromVndb()` querying `https://api.vndb.org/kana/vn` without requiring an API key, providing gold-standard metadata (developer, publisher, release date, BBCode-cleaned synopsis, "Adults Only (18+)" rating, and visual novel genres) and authentic covers for adult and visual novel titles.
   - **Itch.io Storefront Page Enrichment**: Implemented `EnrichFromItchStorePage()` extracting `rel="icon"` to `iconPath`, animated GIF/static cover to `detailsArtPath` / `coverArtPath`, and `og:description` to synopsis.

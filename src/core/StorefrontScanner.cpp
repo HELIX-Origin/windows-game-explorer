@@ -3973,6 +3973,9 @@ std::vector<GameItem> StorefrontScanner::ScanEmulatedGames() {
     static const wchar_t* const dcExts[] = { L".chd", L".cdi", L".gdi", L".cue" };
     static const wchar_t* const mdExts[] = { L".md", L".gen", L".bin", L".zip", L".7z" };
     static const wchar_t* const satExts[] = { L".chd", L".cue", L".iso" };
+    static const wchar_t* const xboxExts[] = { L".iso", L".xiso", L".xiso.iso" };
+    static const wchar_t* const c64Exts[] = { L".d64", L".t64", L".tap", L".crt", L".prg", L".g64", L".p00", L".d81", L".zip", L".7z" };
+    static const wchar_t* const vicExts[] = { L".prg", L".d64", L".tap", L".crt", L".20", L".40", L".60", L".a0", L".b0", L".zip", L".7z" };
 
     const RetroSystemSpec systems[] = {
         { L"gc", L"Nintendo GameCube", PlatformType::Dolphin, L"Nintendo_-_GameCube", gcExts, ARRAYSIZE(gcExts), L"Nintendo", L"Action, Adventure" },
@@ -3995,7 +3998,15 @@ std::vector<GameItem> StorefrontScanner::ScanEmulatedGames() {
         { L"dreamcast", L"Sega Dreamcast", PlatformType::Flycast, L"Sega_-_Dreamcast", dcExts, ARRAYSIZE(dcExts), L"Sega", L"Arcade" },
         { L"genesis", L"Sega Genesis", PlatformType::RetroArch, L"Sega_-_Mega_Drive_-_Genesis", mdExts, ARRAYSIZE(mdExts), L"Sega", L"Platformer" },
         { L"megadrive", L"Sega Mega Drive", PlatformType::RetroArch, L"Sega_-_Mega_Drive_-_Genesis", mdExts, ARRAYSIZE(mdExts), L"Sega", L"Platformer" },
-        { L"saturn", L"Sega Saturn", PlatformType::Flycast, L"Sega_-_Saturn", satExts, ARRAYSIZE(satExts), L"Sega", L"Action" }
+        { L"saturn", L"Sega Saturn", PlatformType::Flycast, L"Sega_-_Saturn", satExts, ARRAYSIZE(satExts), L"Sega", L"Action" },
+        { L"xbox", L"Microsoft Xbox", PlatformType::Xemu, L"Microsoft_-_Xbox", xboxExts, ARRAYSIZE(xboxExts), L"Microsoft Game Studios", L"Action, Adventure" },
+        { L"xboxclassic", L"Microsoft Xbox", PlatformType::Xemu, L"Microsoft_-_Xbox", xboxExts, ARRAYSIZE(xboxExts), L"Microsoft Game Studios", L"Action, Adventure" },
+        { L"c64", L"Commodore 64", PlatformType::Vice, L"Commodore_-_64", c64Exts, ARRAYSIZE(c64Exts), L"Commodore", L"Retro" },
+        { L"commodore64", L"Commodore 64", PlatformType::Vice, L"Commodore_-_64", c64Exts, ARRAYSIZE(c64Exts), L"Commodore", L"Retro" },
+        { L"c128", L"Commodore 128", PlatformType::Vice, L"Commodore_-_128", c64Exts, ARRAYSIZE(c64Exts), L"Commodore", L"Retro" },
+        { L"vic20", L"Commodore VIC-20", PlatformType::Vice, L"Commodore_-_VIC-20", vicExts, ARRAYSIZE(vicExts), L"Commodore", L"Retro" },
+        { L"plus4", L"Commodore Plus/4", PlatformType::Vice, L"Commodore_-_Plus-4", c64Exts, ARRAYSIZE(c64Exts), L"Commodore", L"Retro" },
+        { L"pet", L"Commodore PET", PlatformType::Vice, L"Commodore_-_PET", c64Exts, ARRAYSIZE(c64Exts), L"Commodore", L"Retro" }
     };
 
     const auto romDirs = GetDiscoveredRomsDirectories();
