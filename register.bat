@@ -61,13 +61,16 @@ echo.
 echo  %C_WHITE%Registering Windows Shell Extension with regsvr32...%C_RST%
 regsvr32.exe /s "!DLL_PATH!"
 if %errorLevel% equ 0 (
+
+
+
     echo.
     echo %C_GREEN%+--------------------------------------------------------------------------+%C_RST%
     echo %C_GREEN%^|%C_BOLD%%C_WHITE%      [SUCCESS] Windows Game Explorer Shell Successfully Registered       %C_GREEN%^|%C_RST%
     echo %C_GREEN%+--------------------------------------------------------------------------+%C_RST%
     echo.
     echo  %C_WHITE%The %C_BOLD%"Games"%C_RST%%C_WHITE% tab is now pinned to the File Explorer navigation pane.%C_RST%
-    echo  %C_GRAY%Note: If File Explorer has not updated, restart explorer.exe or sign out.%C_RST%
+    echo  %C_WHITE%Desktop and Start Menu shortcuts created for Windows Game Explorer.%C_RST%
 ) else (
     echo.
     echo  %C_RED%[ERROR] Failed to register GameExplorerShell.dll (Exit code: %errorLevel%)%C_RST%

@@ -1,7 +1,7 @@
 # HANDOFF.md — Windows Game Explorer Session Handoff
 
 **Last updated:** 2026-10-24
-**Current session status:** W.57 delivered · v2.1.1 released & documentation suite delivered · Primary Metadata Provider Architecture (SteamGridDB & IGDB primary defaults, keyless Steam Store & Libretro fallbacks), Hero Banner Display Widescreen Standard (1920x620 / 3.1:1), Universal Text & Mojibake Sanitizer (`SanitizeGameText`), Game Explorer Manager Integrated Artwork Gallery Viewport (Generic Chrome User-Agent Anti-Block, Internal Exact-Match Web Search `"{{game.title}}" {{content.type}}`, SafeSearch / NSFW Unblock Toggle, Artwork Cache Reset Mechanism, Type & Resolution Filters, Viewport Selection, Apply Dropdown, Local Game Browse Button, Patreon Media Discovery), Non-Destructive Image Validation, v2.1.1 published with 20/20 unit tests passing & zero compiler warnings (`/W4 /WX`), comprehensive documentation suite delivered in `docs/` (`README.md`, `overview.md`, `quick-start.md`, `user-guide.md`, `developer-guide.md`, `metadata-customization.md`), and `README.md` entry point rewritten. Confirmed that legacy `shell:Games` alias was never actually registered; left out of documentation until properly implemented to preserve Windows 11 tabbed Explorer stability.
+**Current session status:** W.59 delivered & v2.1.2 prepped · Direct JSON Metadata Architecture, Robust Multi-View Artwork Fallbacks, Responsive Manager Layout & Installer Artwork Modernization · BUG-9 Resolved (Duplicate Test Games Purged, Web Filter Details Option Added, Gallery Aspect-Ratio Preview Sizing Per Type Implemented & Synchronized) · Open bugs BUG-10, BUG-11, BUG-12 thoroughly researched and logged in BUGS.md. All 20/20 unit tests passing under zero-warning gate (/W4 /WX). Release v2.1.2 packaged.
 **Project:** windows-game-explorer (Windows Game Explorer)
 **Root:** projects/windows-game-explorer
 
@@ -12,7 +12,118 @@
 
 ---
 
-## 1) [windows-game-explorer] W.57: Viewport Scroll Position Reset Prevention, Multi-Viewport Aspect Ratio Fitting & OneDrive Sync Engine (Delivered, v2.1.1)
+## 1) [windows-game-explorer] W.59: Direct JSON Metadata Architecture, Robust Artwork Fallbacks, Responsive Manager & Installer Modernization (Delivered, v2.1.1)
+
+### Direct Per-Game JSON Metadata Architecture & SQLite Decoupling
+- **Per-Game JSON Source of Truth**:
+  - `%USERPROFILE%\Game Explorer\metadata\<appId>.json` is established as the sole, authoritative source of truth for all editable game data:
+    - Titles, descriptions, scores/ratings, developer, publisher, release dates, genres.
+    - Executable paths, working directories, launch strings (`launchCommand` / `launchUri`), launch arguments.
+    - Slot artwork paths (`coverArtPath`, `heroArtPath`, `detailsArtPath`, `iconPath`).
+    - Platform type, favorite flag (`isFavorite`), and install state (`isInstalled`).
+  - Users can freely customize their entries directly via JSON (advanced user method) or via the GUI Game Explorer Manager.
+- **Instant Direct Filesystem Loading (`LoadAllGamesFromMetadata`)**:
+  - Implemented `StorefrontScanner::LoadAllGamesFromMetadata()`, iterating directly through all JSON files in `%USERPROFILE%\Game Explorer\metadata\`.
+  - Bypasses SQLite database query latency and lock contention, rendering library views virtually instantaneously.
+- **SQLite Role Restored**:
+  - SQLite database is strictly reserved for secure configuration (`settings` key-value table) and secure/unexposed tracking data (`achievements` table and internal indexed pointers).
+  - SQLite is never used to cache or overwrite human-managed file paths or easily editable metadata.
+- **Zero-Destruction Load & Persistence**:
+  - Removed destructive `ValidateAndFixGameArtwork` and `SavePerGameMetadata` calls from `LibraryViewHost::LoadDataAsync`. The view loader is strictly a read-only consumer and never mutates user JSON files on disk.
+  - In `StorefrontScanner::SavePerGameMetadata()`, implemented non-destructive merging: if a user already has values or paths in their JSON file, incoming empty strings will never overwrite or wipe them.
+
+### Robust Multi-View Artwork Fallbacks (Itch.io & Local Games Fix)
+- **Hero View Fallback Chain**:
+  - Resolved blank cards for itch.io games (whose native covers are 315×250 with aspect ratio 1.26):
+    - Added `else if (!g.detailsArtPath.empty()) primaryArt = g.detailsArtPath;` in Hero view mode in `LibraryViewHost.cpp`.
+    - Added comprehensive fallback: `heroArtPath` -> `detailsArtPath` -> `coverArtPath`.
+- **Card Canvas Image Fallback**:
+  - If `LoadLocalBitmap(primaryArt)` fails, tries `LoadLocalBitmap(g.iconPath)`.
+  - If `iconPath` also fails/missing, falls back to `LoadLocalBitmap(!g.detailsArtPath.empty() ? g.detailsArtPath : g.coverArtPath)`. Cards never render as blank grey rectangles if any valid artwork exists on disk.
+- **Executable Directory Icon Scanning**:
+  - In `EnsureExtractedIconPng()`, if the target Win32 PE executable contains no embedded icon resource (typical in Electron, Ren'Py, NW.js, and Python wrappers), automatically inspects the executable's folder for `icon.png`, `icon.ico`, `logo.png`, `game.png`, and `icon/icon.png`.
+- **Details View Thumbnail Fallback**:
+  - In Details view (`thumbPath`), if `iconPath` is empty and icon extraction returns empty, falls back to `detailsArtPath` or `coverArtPath`.
+
+### Game Explorer Manager (`GameExplorerManager.exe`) Responsive Layout & Workflow
+- **Responsive Layout (`WM_SIZE`)**:
+  - Implemented `UpdateLayout(HWND, int w, int h)` using `BeginDeferWindowPos` / `DeferWindowPos` / `EndDeferWindowPos`:
+    - Column 1 (Library listbox): Stretches vertically down to bottom buttons; Add/Remove/Refresh buttons remain anchored to bottom.
+    - Column 2 (Metadata & launch inspection): Action buttons stay pinned to bottom; Synopsis edit box expands vertically to fill remaining space.
+    - Column 3 (Artwork Discovery & Gallery): Gallery card expands to fill `w - 16`. Search query, resolution/type combos stretch horizontally, and canvas fills edge-to-edge.
+    - Adaptive Gallery Grid: In `GalleryCanvasWndProc`, replaced static 3 columns with dynamic `cols = (std::max)(1, (w - padX) / (cardW + padX))` in both `WM_PAINT` and `WM_LBUTTONDOWN` click hit-testing, plus `WM_SIZE` scroll clamping.
+- **Division of Responsibility**:
+  - The in-app image browser is the primary GUI method for discovering, browsing, and customizing artwork (SteamGridDB, IGDB, Google Images, Patreon, Web images).
+  - The middle section displays the active metadata and file paths for inspection.
+  - Manual editing of launch paths and deep parameters is reserved for the per-game JSON files (the advanced user method).
+  - Saving from Game Manager non-destructively preserves all manual JSON customizations.
+
+### Test Game Cleanup & Artwork Discovery Gallery Card Sizing (BUG-9)
+- **Purged 47 Duplicate Custom Test Games**: Removed historical test artifacts from both local `%USERPROFILE%\Game Explorer\metadata\` and `%USERPROFILE%\OneDrive\Windows Game Explorer\metadata\`; updated `StorefrontScanner::RemoveCustomLocalGame` to remove from both directories; updated test suite to clean up immediately.
+- **Added "Details / Screenshots" to Web Filter Dropdown**: Included `"Details / Screenshots"` in `g_hwndComboWebFilter` and mapped queries to `Details` filter.
+- **Aspect-Ratio-Accurate Image Preview Card Sizing**:
+  - `Hero Banners`: ~3.1:1 widescreen card (`cardW` ~380px, `imgH` ~123px, `cardH` 149px).
+  - `Details / Screenshots`: 16:9 widescreen cards (`cardW` ~192px, `imgH` 108px, `cardH` 134px, 2 columns).
+  - `Box Art (~2:3 Cover)`: 2:3 vertical cards (`cardW` 148px, `imgH` 222px, `cardH` 248px).
+  - `Icons / Logos`: 1:1 square cards (`cardW` 105px, `imgH` 105px, `cardH` 131px).
+  - `All Types`: Dynamic adaptation to the dominant aspect ratio of candidates.
+- **Win32 Dropdown Synchronization**: Replaced `GetWindowTextW` with `GetComboSelectedText` (`CB_GETCURSEL`/`CB_GETLBTEXT`) and added `SetActiveArtworkType` keeping `g_hwndComboType` and `g_hwndComboWebFilter` synchronized.
+- **Screenshot Candidate Classification**: Reclassified Steam Store `appdetails` and IGDB screenshots from `Hero` to `Details`.
+
+### Installer Artwork Modernization
+- **Modern 3D Icon Setup Bitmaps**:
+  - Regenerated `installer/sidebar.bmp` (164×314, 24-bit BMP3) and `installer/header.bmp` (150×57, 24-bit BMP3) using `scripts/generate-installer-art.ps1`.
+  - NSIS setup installer `dist/windows-game-explorer-v2.1.1-setup.exe` compiled cleanly with 0 warnings.
+- **Verification**:
+  - MSVC `/W4 /WX` compiled cleanly with 0 errors and 0 warnings.
+  - All 20/20 C++ unit tests passed.
+
+---
+
+## 2) [windows-game-explorer] W.58: Dedicated Standalone GUI Application (`GameExplorer.exe`), Shared Viewport Architecture & In-Place Achievement Sync Engine (Delivered, v2.1.1)
+
+### Dedicated Standalone GUI Application (`GameExplorer.exe`) & Shared Viewport (`LibraryViewHost`)
+- **Dual Experience Architecture**:
+  - **Dedicated Standalone Application (`GameExplorer.exe`)**: Built `src/app/AppMain.cpp` producing `GameExplorer.exe`. Runs as an independent top-level Win32 window (`GameExplorerMainWindowClass`) with custom 38px Fluent title bar, controller icon `🎮`, title text, pill pod controls (Minimize `─`, Maximize/Restore `□`/`❐`, Close `✕`), native Win32 draggability (`WM_NCLBUTTONDOWN` with `HTCAPTION`), native sizing borders (`WM_NCHITTEST` returning `HTLEFT`, `HTRIGHT`, `HTBOTTOM`, etc.), DWM rounded corners (`DWMWCP_ROUND`), and immersive dark mode.
+  - **Shared Modular Viewport (`LibraryViewHost`)**: Extracted complete XAML Island construction logic into `src/view/LibraryViewHost.h` and `src/view/LibraryViewHost.cpp`. Compiled into both `GameExplorerApp` and `GameExplorerShell` with zero duplicate code. Contains all category providers, games wrap grid/details view, search box, filters, and persistent Details sidepane.
+  - **Preserved File Explorer Shell Integration (`GameExplorerShell.dll`)**: When navigating within standard File Explorer tabs or clicking the pinned Games navigation entry, `ShellView` hosts `LibraryViewHost` with `showCustomTitleBar = false`. The view embeds seamlessly into the Explorer tab with zero intrusive title bar chrome, zero frame subclassing, and zero sidebar conflicts.
+  - **Seamless `explorer.exe shell:games` Delegation**: When `explorer.exe shell:games` (or Win+R `shell:games`) is invoked, `ShellView::CreateViewWindow` detects standalone Explorer mode (`ptParent.y < 30`), launches `GameExplorer.exe`, and closes the empty standalone Explorer window. The user gets the dedicated GUI experience immediately.
+  - **Shortcut & App Paths Registration**: Start Menu `Games.lnk` and App Paths (`GameExplorer.exe`, `games.exe`) point directly to `GameExplorer.exe`.
+
+### In-Place Sidepane Achievement Sync Engine
+- **Zero-Flicker In-Place Update**:
+  - Defined `WM_APP_ACHIEVEMENTS_UPDATED` (`WM_APP + 45`).
+  - In `syncBtn` and `resyncBtn`, runs background sync via `AchievementEngine::Instance().GetAchievements(gToSync, true)` and posts `WM_APP_ACHIEVEMENTS_UPDATED` to the container window.
+  - Handled by calling `RebuildSidepane()` directly, preserving the library viewport, card selection, and scroll position with zero reload flicker.
+  - Added "Refresh Achievements" button when achievements already exist.
+
+### Dedicated Shell Integration (`GameExplorerShell.dll`), Shortcuts & Modern 3D Icon Branding
+- **Standalone `GameExplorer.exe` Dropped**: Removed `GameExplorerApp` target and `AppMain.cpp`. All integration centers strictly on `GameExplorerShell.dll`.
+- **System Title Bar & Window Frame Initialization**:
+  - `ShellView::EnsureSystemTitleBar()` forces immediate non-client frame calculation (`SWP_FRAMECHANGED`) on the top-level Explorer window upon view creation, `UIActivate`, and on a fast 50ms timer (`9901`). Native title bar, caption text, and min/max/close controls display reliably by default in `shell:games` without requiring manual resize.
+  - Left navigation pane / sidebar remains intact per user instruction.
+- **Desktop & Start Menu Shortcuts Resolution**:
+  - Desktop `Games.lnk` and Start Menu `Games.lnk` target `%SystemRoot%\explorer.exe` with arguments `shell:games` and icon `GameExplorerShell.dll, -100`.
+  - Elevation check (`IsUserAnAdmin()`): creates shortcuts in `FOLDERID_PublicDesktop` and `FOLDERID_CommonPrograms` when elevated, or `FOLDERID_Desktop` and `FOLDERID_Programs` when per-user, preventing duplicate desktop icons.
+  - Companion applications (`GameExplorerConfig.exe` and `GameExplorerManager.exe`) use standard direct executable shortcuts.
+  - Uninstaller cleanly sweeps both `current` and `all` contexts (`SetShellVarContext current` and `SetShellVarContext all`), plus OneDrive desktop redirected paths.
+- **Modern 3D Icon & Installer Sidecar Art Integration**:
+  - Replaced legacy icon with user-provided modern 3D rendition of the classic rook, puzzle piece, and spade across `assets/game-explorer-icon.png` (256x256), `assets/game-explorer-icon.ico` (256, 128, 64, 48, 32, 24, 16 frames), and `src/shell/Resource.ico` (Resource ID 100).
+  - Installer sidecar and header bitmaps regenerated via `scripts/generate-installer-art.ps1`:
+    - `installer/sidebar.bmp` (164×314, 24-bit BMP3): Modern 3D icon with Fluent slate gradient (`#141e33` to `#090e18`) and typography.
+    - `installer/header.bmp` (150×57, 24-bit BMP3): Header wizard bitmap with scaled 3D icon.
+  - NSIS setup installer updated with `MULTIUSER_EXECUTIONLEVEL Admin`, in-use DLL rename protection (`.old.<tick>` with `Delete /REBOOTOK`), and dual context cleanup.
+  - Windows shortcut icon display on end-user machines will refresh once Explorer's persistent icon cache (`iconcache_*.db`) flushes upon reboot/restart.
+
+### Adult/NSFW Metadata & Slot Persistence
+- SteamGridDB queries use `?nsfw=any&humor=any` for adult games.
+- Steam Store API calls send mature content age-verification cookies (`birthtime`, `mature_content=1`, `lastagecheckage`).
+- Itch.io native covers remain primary source of truth without being overwritten by external provider fallbacks.
+- Multi-slot artwork assignment persistence and Bing delimiter unescaping.
+
+---
+
+## 2) [windows-game-explorer] W.57: Viewport Scroll Position Reset Prevention, Multi-Viewport Aspect Ratio Fitting & OneDrive Sync Engine (Delivered, v2.1.1)
 
 ### Viewport Scroll Position Reset Prevention
 - **In-Place Card Selection Highlight**:

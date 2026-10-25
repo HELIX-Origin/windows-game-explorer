@@ -211,6 +211,7 @@ int g_selectedCandidateIdx = -1;
 int g_galleryScrollY = 0;
 bool g_isSearchingArt = false;
 std::wstring g_lastSearchedTitle;
+std::wstring g_activeArtworkType = L"All";
 
 HFONT g_hFont = nullptr;
 HFONT g_hFontBold = nullptr;
@@ -269,6 +270,56 @@ std::wstring ReadEditString(HWND hEdit) {
     return str;
 }
 
+std::wstring GetComboSelectedText(HWND hCombo) {
+    if (hCombo == nullptr) return L"";
+    const int sel = static_cast<int>(SendMessageW(hCombo, CB_GETCURSEL, 0, 0));
+    if (sel == CB_ERR) return L"";
+    const int len = static_cast<int>(SendMessageW(hCombo, CB_GETLBTEXTLEN, sel, 0));
+    if (len <= 0) return L"";
+    std::wstring text(static_cast<size_t>(len), L'\0');
+    SendMessageW(hCombo, CB_GETLBTEXT, sel, reinterpret_cast<LPARAM>(text.data()));
+    return text;
+}
+
+void SetActiveArtworkType(const std::wstring& typeName) {
+    g_activeArtworkType = typeName;
+
+    auto syncCombo = [](HWND hCombo, const wchar_t* keyword) {
+        if (!hCombo) return;
+        const int count = static_cast<int>(SendMessageW(hCombo, CB_GETCOUNT, 0, 0));
+        for (int i = 0; i < count; ++i) {
+            const int len = static_cast<int>(SendMessageW(hCombo, CB_GETLBTEXTLEN, i, 0));
+            if (len > 0) {
+                std::wstring text(static_cast<size_t>(len), L'\0');
+                SendMessageW(hCombo, CB_GETLBTEXT, i, reinterpret_cast<LPARAM>(text.data()));
+                if (text.find(keyword) != std::wstring::npos) {
+                    SendMessageW(hCombo, CB_SETCURSEL, i, 0);
+                    return;
+                }
+            }
+        }
+    };
+
+    if (typeName == L"Cover") {
+        syncCombo(g_hwndComboType, L"Box Art");
+        syncCombo(g_hwndComboWebFilter, L"Box Art");
+    } else if (typeName == L"Hero") {
+        syncCombo(g_hwndComboType, L"Hero Banner");
+        syncCombo(g_hwndComboWebFilter, L"Hero Banners");
+    } else if (typeName == L"Details") {
+        syncCombo(g_hwndComboType, L"Details");
+        syncCombo(g_hwndComboWebFilter, L"Details");
+    } else if (typeName == L"Icon") {
+        syncCombo(g_hwndComboType, L"Icon");
+        syncCombo(g_hwndComboWebFilter, L"Icons");
+    } else if (typeName == L"Patreon") {
+        syncCombo(g_hwndComboWebFilter, L"Patreon");
+    } else {
+        syncCombo(g_hwndComboType, L"All Types");
+        syncCombo(g_hwndComboWebFilter, L"All Web Sources");
+    }
+}
+
 std::wstring GetThumbnailCachePath(const std::wstring& url) {
     uint32_t h = 2166136261u;
     for (wchar_t c : url) {
@@ -322,10 +373,16 @@ void PopulateEditorFromSelected(HWND hwnd) {
         SetWindowTextW(g_hwndGalleryQuery, g.title.c_str());
         SetWindowTextW(g_hwndWebSearchQuery, g.title.c_str());
 
+        // Automatically configure NSFW SafeSearch unblock checkbox based on game type
+        const bool isNsfw = StorefrontScanner::IsNsfwGame(g);
+        if (g_hwndChkSafeSearch != nullptr) {
+            SendMessageW(g_hwndChkSafeSearch, BM_SETCHECK, isNsfw ? BST_CHECKED : BST_UNCHECKED, 0);
+        }
+
         // Automatically load metadata provider artwork candidates for selected title
         if (g.title != g_lastSearchedTitle) {
             g_lastSearchedTitle = g.title;
-            TriggerArtworkSearch(hwnd, false);
+            TriggerArtworkSearch(hwnd, false, L"", L"", L"", isNsfw);
         }
     }
 
@@ -334,7 +391,10 @@ void PopulateEditorFromSelected(HWND hwnd) {
 }
 
 void RefreshGameList(HWND hwnd, const std::wstring& selectAppId = L"") {
-    g_games = StorefrontScanner::ScanAllInstalledGames();
+    g_games = StorefrontScanner::LoadAllGamesFromMetadata();
+    if (g_games.empty()) {
+        g_games = StorefrontScanner::ScanAllInstalledGames();
+    }
     SendMessageW(g_hwndListGames, LB_RESETCONTENT, 0, 0);
 
     int targetIdx = 0;
@@ -461,22 +521,19 @@ void TriggerArtworkSearch(
     if (explicitType.empty()) {
         HWND combo = includeWebSearch ? g_hwndComboWebFilter : g_hwndComboType;
         if (combo != nullptr) {
-            wchar_t buf[64] = { 0 };
-            GetWindowTextW(combo, buf, 64);
-            std::wstring s = buf;
+            std::wstring s = GetComboSelectedText(combo);
             if (s.find(L"Box Art") != std::wstring::npos) typeF = L"Cover";
             else if (s.find(L"Hero") != std::wstring::npos) typeF = L"Hero";
             else if (s.find(L"Patreon") != std::wstring::npos) typeF = L"Patreon";
-            else if (s.find(L"Icon") != std::wstring::npos) typeF = L"Icon";
+            else if (s.find(L"Icon") != std::wstring::npos || s.find(L"Logo") != std::wstring::npos) typeF = L"Icon";
             else if (s.find(L"Details") != std::wstring::npos || s.find(L"Screenshot") != std::wstring::npos) typeF = L"Details";
         }
     }
+    SetActiveArtworkType(typeF);
 
     std::wstring resF = explicitRes.empty() ? L"All" : explicitRes;
     if (explicitRes.empty() && g_hwndComboRes != nullptr) {
-        wchar_t buf[64] = { 0 };
-        GetWindowTextW(g_hwndComboRes, buf, 64);
-        std::wstring s = buf;
+        std::wstring s = GetComboSelectedText(g_hwndComboRes);
         if (s.find(L"600x900") != std::wstring::npos) resF = L"600x900";
         else if (s.find(L"300x450") != std::wstring::npos) resF = L"300x450";
         else if (s.find(L"1920x620") != std::wstring::npos) resF = L"1920x620";
@@ -484,7 +541,7 @@ void TriggerArtworkSearch(
         else if (s.find(L"256x256") != std::wstring::npos) resF = L"256x256+";
     }
 
-    const bool safeOff = disableSafeSearch || (g_hwndChkSafeSearch != nullptr && SendMessageW(g_hwndChkSafeSearch, BM_GETCHECK, 0, 0) == BST_CHECKED);
+    const bool safeOff = disableSafeSearch || StorefrontScanner::IsNsfwText(q) || (g_hwndChkSafeSearch != nullptr && SendMessageW(g_hwndChkSafeSearch, BM_GETCHECK, 0, 0) == BST_CHECKED);
 
     g_isSearchingArt = true;
     g_selectedCandidateIdx = -1;
@@ -515,7 +572,7 @@ void ApplySelectedArtwork(HWND hwnd, int targetSlotId) {
     }
 
     const auto& cand = g_galleryCandidates[static_cast<size_t>(g_selectedCandidateIdx)];
-    const auto& game = g_games[static_cast<size_t>(g_selectedIndex)];
+    auto& game = g_games[static_cast<size_t>(g_selectedIndex)];
 
     std::wstring slotName;
     HWND targetEdit = nullptr;
@@ -543,17 +600,115 @@ void ApplySelectedArtwork(HWND hwnd, int targetSlotId) {
     SetWindowTextW(g_hwndGalleryStatus, L"Downloading high-resolution artwork...");
     UpdateWindow(g_hwndGalleryStatus);
 
-    const std::wstring cachedPath = StorefrontScanner::CacheArtworkFromUrl(game.appId, slotName, cand.highResUrl);
+    const std::wstring cachedPath = StorefrontScanner::CacheArtworkFromUrl(game.appId, slotName, cand.highResUrl, true);
     if (!cachedPath.empty()) {
         SetWindowTextW(targetEdit, cachedPath.c_str());
+
+        // Strictly override the target slot value on the in-memory GameItem
+        if (targetSlotId == IDM_APPLY_COVER) {
+            game.coverArtPath = cachedPath;
+        } else if (targetSlotId == IDM_APPLY_HERO) {
+            game.heroArtPath = cachedPath;
+        } else if (targetSlotId == IDM_APPLY_DETAILS) {
+            game.detailsArtPath = cachedPath;
+        } else if (targetSlotId == IDM_APPLY_ICON) {
+            game.iconPath = cachedPath;
+        }
+
+        // Persist immediately to Database & per-game metadata JSON
+        Database::Instance().UpsertGame(game);
+        StorefrontScanner::SavePerGameMetadata(game);
+
         if (targetSlotId == IDM_APPLY_COVER) {
             RECT rcPreview = { PREVIEW_BOX_X - 4, PREVIEW_BOX_Y - 4, PREVIEW_BOX_X + PREVIEW_BOX_W + 4, PREVIEW_BOX_Y + PREVIEW_BOX_H + 4 };
             InvalidateRect(hwnd, &rcPreview, FALSE);
         }
-        std::wstring msg = L"Applied to " + slotName + L"! Click 'Save Game Metadata' to persist.";
+
+        SHChangeNotify(SHCNE_UPDATEDIR, SHCNF_PATHW, Storage::GetUserRootPath().c_str(), nullptr);
+        EnumWindows(BroadcastRefreshToShellViews, 0);
+
+        std::wstring msg = L"Successfully applied and saved to " + slotName + L"!";
         SetWindowTextW(g_hwndGalleryStatus, msg.c_str());
     } else {
         SetWindowTextW(g_hwndGalleryStatus, L"Failed to download remote artwork.");
+    }
+}
+
+void GetGalleryCardDimensions(int& cardW, int& cardH, int& imgH, HWND hwndCanvas = nullptr) {
+    RECT rc{};
+    if (hwndCanvas && IsWindow(hwndCanvas)) {
+        GetClientRect(hwndCanvas, &rc);
+    } else if (g_hwndGalleryCanvas && IsWindow(g_hwndGalleryCanvas)) {
+        GetClientRect(g_hwndGalleryCanvas, &rc);
+    }
+    const int canvasW = (rc.right - rc.left > 100) ? (rc.right - rc.left) : 460;
+
+    std::wstring typeStr = g_activeArtworkType;
+    if (typeStr.empty() || typeStr == L"All") {
+        const std::wstring s1 = GetComboSelectedText(g_hwndComboType);
+        const std::wstring s2 = GetComboSelectedText(g_hwndComboWebFilter);
+        if (s1.find(L"Hero") != std::wstring::npos || s2.find(L"Hero") != std::wstring::npos) typeStr = L"Hero";
+        else if (s1.find(L"Details") != std::wstring::npos || s2.find(L"Details") != std::wstring::npos || s1.find(L"Screenshot") != std::wstring::npos || s2.find(L"Screenshot") != std::wstring::npos) typeStr = L"Details";
+        else if (s1.find(L"Icon") != std::wstring::npos || s2.find(L"Icon") != std::wstring::npos || s1.find(L"Logo") != std::wstring::npos) typeStr = L"Icon";
+        else if (s1.find(L"Cover") != std::wstring::npos || s2.find(L"Cover") != std::wstring::npos || s1.find(L"Box") != std::wstring::npos) typeStr = L"Cover";
+        else if (s2.find(L"Patreon") != std::wstring::npos) typeStr = L"Details";
+    }
+
+    constexpr int padX = 8;
+    const int usableW = canvasW - padX * 2;
+
+    if (typeStr == L"Hero" || typeStr.find(L"Hero") != std::wstring::npos) {
+        if (usableW >= 700) {
+            cardW = (usableW - padX) / 2;
+        } else {
+            cardW = (std::max)(280, usableW - 16);
+        }
+        imgH = (std::max)(75, static_cast<int>(static_cast<double>(cardW) / 3.096)); // ~3.1:1 ratio
+        cardH = imgH + 26;
+    } else if (typeStr == L"Details" || typeStr.find(L"Details") != std::wstring::npos || typeStr.find(L"Screenshot") != std::wstring::npos) {
+        if (usableW >= 380) {
+            cardW = (usableW - padX - 16) / 2; // 2 columns (16:9 ratio)
+        } else {
+            cardW = usableW - 16;
+        }
+        imgH = static_cast<int>(static_cast<double>(cardW) / (16.0 / 9.0)); // 16:9 ratio
+        cardH = imgH + 26;
+    } else if (typeStr == L"Icon" || typeStr.find(L"Icon") != std::wstring::npos || typeStr.find(L"Logo") != std::wstring::npos) {
+        cardW = 105;
+        imgH = 105; // 1:1 ratio
+        cardH = 131;
+    } else if (typeStr == L"Cover" || typeStr.find(L"Cover") != std::wstring::npos || typeStr.find(L"Box") != std::wstring::npos) {
+        cardW = 148;
+        imgH = 222; // 2:3 ratio
+        cardH = 248;
+    } else if (!g_galleryCandidates.empty()) {
+        int heroCount = 0;
+        int detailsCount = 0;
+        int iconCount = 0;
+        int coverCount = 0;
+        for (const auto& c : g_galleryCandidates) {
+            if (c.type == L"Hero" || (c.width > 0 && c.height > 0 && static_cast<double>(c.width) / c.height >= 2.4)) heroCount++;
+            else if (c.type == L"Details" || (c.width > 0 && c.height > 0 && static_cast<double>(c.width) / c.height >= 1.25)) detailsCount++;
+            else if (c.type == L"Icon" || (c.width > 0 && c.height > 0 && static_cast<double>(c.width) / c.height >= 0.85 && static_cast<double>(c.width) / c.height <= 1.25)) iconCount++;
+            else coverCount++;
+        }
+        if (heroCount > coverCount && heroCount >= detailsCount) {
+            cardW = (usableW >= 700) ? ((usableW - padX) / 2) : (std::max)(280, usableW - 16);
+            imgH = static_cast<int>(static_cast<double>(cardW) / 3.096);
+            cardH = imgH + 26;
+        } else if (detailsCount > coverCount) {
+            cardW = (usableW >= 380) ? ((usableW - padX - 16) / 2) : (usableW - 16);
+            imgH = static_cast<int>(static_cast<double>(cardW) / (16.0 / 9.0));
+            cardH = imgH + 26;
+        } else if (iconCount > coverCount) {
+            cardW = 105; imgH = 105; cardH = 131;
+        } else {
+            cardW = 148; imgH = 222; cardH = 248;
+        }
+    } else {
+        cardW = 148;
+        imgH = 222;
+        cardH = 248;
     }
 }
 
@@ -606,29 +761,15 @@ LRESULT CALLBACK GalleryCanvasWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARA
             graphics.SetSmoothingMode(Gdiplus::SmoothingModeHighQuality);
 
             // Determine grid columns and card dimensions based on selected filter
-            wchar_t typeBuf[64] = { 0 };
-            GetWindowTextW(g_hwndComboType, typeBuf, 64);
-            const std::wstring typeStr = typeBuf;
-
-            int cols = 3;
             int cardW = 148;
             int cardH = 248;
             int imgH = 222;
-
-            if (typeStr.find(L"Hero") != std::wstring::npos) {
-                cols = 2;
-                cardW = 226;
-                imgH = 73;
-                cardH = 99;
-            } else if (typeStr.find(L"Icon") != std::wstring::npos) {
-                cols = 4;
-                cardW = 108;
-                imgH = 108;
-                cardH = 134;
-            }
+            GetGalleryCardDimensions(cardW, cardH, imgH, hwnd);
 
             constexpr int padX = 8;
             constexpr int padY = 8;
+
+            const int cols = (std::max)(1, (w - padX) / (cardW + padX));
 
             const int totalRows = static_cast<int>((g_galleryCandidates.size() + cols - 1) / cols);
             const int totalHeight = totalRows * (cardH + padY) + padY;
@@ -674,7 +815,22 @@ LRESULT CALLBACK GalleryCanvasWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARA
                 if (fs::exists(thumbPath)) {
                     Gdiplus::Image gImg(thumbPath.c_str());
                     if (gImg.GetLastStatus() == Gdiplus::Ok && gImg.GetWidth() > 0 && gImg.GetHeight() > 0) {
-                        graphics.DrawImage(&gImg, x + 2, y + 2, cardW - 4, imgH);
+                        const UINT srcW = gImg.GetWidth();
+                        const UINT srcH = gImg.GetHeight();
+                        const float srcAspect = static_cast<float>(srcW) / static_cast<float>(srcH);
+                        const int dstW = cardW - 4;
+                        const int dstH = imgH;
+                        const float dstAspect = static_cast<float>(dstW) / static_cast<float>(dstH);
+
+                        if (srcAspect > dstAspect) {
+                            const int cropW = static_cast<int>(static_cast<float>(srcH) * dstAspect);
+                            const int cropX = (static_cast<int>(srcW) - cropW) / 2;
+                            graphics.DrawImage(&gImg, Gdiplus::Rect(x + 2, y + 2, dstW, dstH), cropX, 0, cropW, static_cast<int>(srcH), Gdiplus::UnitPixel);
+                        } else {
+                            const int cropH = static_cast<int>(static_cast<float>(srcW) / dstAspect);
+                            const int cropY = (static_cast<int>(srcH) - cropH) / 2;
+                            graphics.DrawImage(&gImg, Gdiplus::Rect(x + 2, y + 2, dstW, dstH), 0, cropY, static_cast<int>(srcW), cropH, Gdiplus::UnitPixel);
+                        }
                         drewImage = true;
                     }
                 }
@@ -788,30 +944,52 @@ LRESULT CALLBACK GalleryCanvasWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARA
         return 0;
     }
 
+    case WM_SIZE: {
+        RECT rcClient;
+        GetClientRect(hwnd, &rcClient);
+        const int w = rcClient.right - rcClient.left;
+        int cardW = 148, cardH = 248, dummyImgH = 222;
+        GetGalleryCardDimensions(cardW, cardH, dummyImgH, hwnd);
+        constexpr int padX = 8;
+        constexpr int padY = 8;
+        const int cols = (std::max)(1, (w - padX) / (cardW + padX));
+        const int totalRows = static_cast<int>((g_galleryCandidates.size() + cols - 1) / cols);
+        const int totalHeight = totalRows * (cardH + padY) + padY;
+
+        SCROLLINFO si{};
+        si.cbSize = sizeof(si);
+        si.fMask = SIF_RANGE | SIF_PAGE | SIF_POS;
+        si.nMin = 0;
+        si.nMax = totalHeight;
+        si.nPage = static_cast<UINT>(rcClient.bottom - rcClient.top);
+        si.nPos = g_galleryScrollY;
+        SetScrollInfo(hwnd, SB_VERT, &si, TRUE);
+
+        if (g_galleryScrollY > si.nMax - static_cast<int>(si.nPage)) {
+            g_galleryScrollY = (std::max)(0, si.nMax - static_cast<int>(si.nPage));
+            SetScrollPos(hwnd, SB_VERT, g_galleryScrollY, TRUE);
+        }
+        InvalidateRect(hwnd, nullptr, TRUE);
+        return 0;
+    }
+
     case WM_LBUTTONDOWN: {
         const int clickX = GET_X_LPARAM(lParam);
         const int clickY = GET_Y_LPARAM(lParam) + g_galleryScrollY;
 
-        wchar_t typeBuf[64] = { 0 };
-        GetWindowTextW(g_hwndComboType, typeBuf, 64);
-        const std::wstring typeStr = typeBuf;
+        RECT rcClient;
+        GetClientRect(hwnd, &rcClient);
+        const int w = rcClient.right - rcClient.left;
 
-        int cols = 3;
         int cardW = 148;
         int cardH = 248;
-
-        if (typeStr.find(L"Hero") != std::wstring::npos) {
-            cols = 2;
-            cardW = 226;
-            cardH = 99;
-        } else if (typeStr.find(L"Icon") != std::wstring::npos) {
-            cols = 4;
-            cardW = 108;
-            cardH = 134;
-        }
+        int dummyImgH = 222;
+        GetGalleryCardDimensions(cardW, cardH, dummyImgH, hwnd);
 
         constexpr int padX = 8;
         constexpr int padY = 8;
+
+        const int cols = (std::max)(1, (w - padX) / (cardW + padX));
 
         for (size_t i = 0; i < g_galleryCandidates.size(); ++i) {
             const int row = static_cast<int>(i / cols);
@@ -836,14 +1014,17 @@ LRESULT CALLBACK GalleryCanvasWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARA
 
     case WM_LBUTTONDBLCLK: {
         if (g_selectedCandidateIdx >= 0 && static_cast<size_t>(g_selectedCandidateIdx) < g_galleryCandidates.size()) {
-            wchar_t typeBuf[64] = { 0 };
-            GetWindowTextW(g_hwndComboType, typeBuf, 64);
-            const std::wstring typeStr = typeBuf;
-
+            const auto& cand = g_galleryCandidates[static_cast<size_t>(g_selectedCandidateIdx)];
             int targetSlot = IDM_APPLY_COVER;
-            if (typeStr.find(L"Hero") != std::wstring::npos) targetSlot = IDM_APPLY_HERO;
-            else if (typeStr.find(L"Icon") != std::wstring::npos) targetSlot = IDM_APPLY_ICON;
-            else if (typeStr.find(L"Details") != std::wstring::npos) targetSlot = IDM_APPLY_DETAILS;
+            if (cand.type == L"Hero" || g_activeArtworkType == L"Hero") targetSlot = IDM_APPLY_HERO;
+            else if (cand.type == L"Details" || g_activeArtworkType == L"Details") targetSlot = IDM_APPLY_DETAILS;
+            else if (cand.type == L"Icon" || g_activeArtworkType == L"Icon") targetSlot = IDM_APPLY_ICON;
+            else {
+                const std::wstring typeStr = GetComboSelectedText(g_hwndComboType);
+                if (typeStr.find(L"Hero") != std::wstring::npos) targetSlot = IDM_APPLY_HERO;
+                else if (typeStr.find(L"Icon") != std::wstring::npos || typeStr.find(L"Logo") != std::wstring::npos) targetSlot = IDM_APPLY_ICON;
+                else if (typeStr.find(L"Details") != std::wstring::npos) targetSlot = IDM_APPLY_DETAILS;
+            }
 
             ApplySelectedArtwork(GetParent(hwnd), targetSlot);
         }
@@ -852,6 +1033,110 @@ LRESULT CALLBACK GalleryCanvasWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARA
     }
 
     return DefWindowProcW(hwnd, uMsg, wParam, lParam);
+}
+
+void UpdateLayout(HWND /*hwnd*/, int w, int h) {
+    if (w <= 0 || h <= 0) return;
+
+    const int cardBottom = h - 16;
+    constexpr int topY = TITLE_BAR_HEIGHT + 48;
+
+    HDWP hdwp = BeginDeferWindowPos(45);
+    if (!hdwp) return;
+
+    auto deferPos = [&](HWND hCtrl, int x, int y, int width, int height) {
+        if (hCtrl != nullptr && IsWindow(hCtrl)) {
+            hdwp = DeferWindowPos(hdwp, hCtrl, nullptr, x, y, width, height, SWP_NOZORDER | SWP_NOACTIVATE);
+        }
+    };
+
+    // ==========================================
+    // COLUMN 1: Installed & Custom Games (Left)
+    // ==========================================
+    constexpr int col1Left = 26;
+    constexpr int col1W = 230;
+    const int btnY1 = cardBottom - 14 - 32;
+    const int listH = (std::max)(100, (btnY1 - 8) - topY);
+
+    deferPos(g_hwndListGames, col1Left, topY, col1W, listH);
+    deferPos(g_hwndBtnAddGame, col1Left, btnY1, 130, 32);
+    deferPos(g_hwndBtnRemoveGame, col1Left + 134, btnY1, 56, 32);
+    deferPos(g_hwndBtnRefreshList, col1Left + 194, btnY1, 36, 32);
+
+    // ==========================================
+    // COLUMN 2: Game Properties & Launch Setup
+    // ==========================================
+    const int actionBtnY = cardBottom - 14 - 34;
+    deferPos(g_hwndBtnSave, 288, actionBtnY, 138, 34);
+    deferPos(g_hwndBtnLaunch, 288 + 144, actionBtnY, 102, 34);
+    deferPos(g_hwndBtnOpenShell, 288 + 252, actionBtnY, 116, 34);
+
+    const int synY = topY + 428;
+    const int synH = (std::max)(24, (actionBtnY - 8) - synY);
+    deferPos(g_hwndEditSynopsis, 398, synY + 2, 306, synH);
+
+    // ==========================================
+    // COLUMN 3: Online Artwork Discovery & Gallery (Fluid width & height)
+    // ==========================================
+    constexpr int rightX = 738;
+    const int rightLimit = w - 30; // 14px padding inside right card edge
+    const int col3W = (std::max)(400, rightLimit - rightX);
+
+    // Row 1: Search Query + Search Providers + Reset Cache
+    constexpr int r1Y = topY + 1;
+    constexpr int btnResetW = 118;
+    constexpr int btnSearchW = 136;
+    const int resetX = rightLimit - btnResetW;
+    const int searchX = resetX - 6 - btnSearchW;
+    const int queryW = (std::max)(120, (searchX - 6) - rightX);
+
+    deferPos(g_hwndGalleryQuery, rightX, r1Y + 1, queryW, 24);
+    deferPos(g_hwndBtnSearchProviders, searchX, r1Y, btnSearchW, 26);
+    deferPos(g_hwndBtnResetCache, resetX, r1Y, btnResetW, 26);
+
+    // Row 2: Type filter + Resolution filter
+    constexpr int r2Y = topY + 34;
+    deferPos(g_hwndLblType, rightX, r2Y + 2, 38, 20);
+    const int comboTypeW = 180;
+    deferPos(g_hwndComboType, rightX + 42, r2Y, comboTypeW, 200);
+    const int resLblX = rightX + 42 + comboTypeW + 12;
+    deferPos(g_hwndLblRes, resLblX, r2Y + 2, 72, 20);
+    const int resComboX = resLblX + 76;
+    const int resComboW = (std::max)(120, rightLimit - resComboX);
+    deferPos(g_hwndComboRes, resComboX, r2Y, resComboW, 200);
+
+    // Bottom Rows in Column 3 (anchored to cardBottom)
+    // Row B3: SafeSearch Checkbox
+    const int rowB3Y = cardBottom - 14 - 22;
+    deferPos(g_hwndChkSafeSearch, rightX, rowB3Y, 320, 22);
+
+    // Row B2: Dedicated Web Image Search
+    const int rowB2Y = rowB3Y - 6 - 28;
+    constexpr int btnWebW = 138;
+    constexpr int filterWebW = 150;
+    const int btnWebX = rightLimit - btnWebW;
+    const int filterWebX = btnWebX - 6 - filterWebW;
+    const int webQueryW = (std::max)(100, (filterWebX - 6) - rightX);
+
+    deferPos(g_hwndWebSearchQuery, rightX, rowB2Y + 1, webQueryW, 26);
+    deferPos(g_hwndComboWebFilter, filterWebX, rowB2Y + 1, filterWebW, 200);
+    deferPos(g_hwndBtnWebSearch, btnWebX, rowB2Y, btnWebW, 28);
+
+    // Row B1: Status & Apply Artwork
+    const int rowB1Y = rowB2Y - 8 - 30;
+    constexpr int btnApplyW = 250;
+    const int btnApplyX = rightLimit - btnApplyW;
+    const int statusW = (std::max)(120, (btnApplyX - 6) - rightX);
+
+    deferPos(g_hwndGalleryStatus, rightX, rowB1Y + 4, statusW, 24);
+    deferPos(g_hwndBtnApplyArt, btnApplyX, rowB1Y, btnApplyW, 30);
+
+    // Viewport Gallery Canvas: Stretches from below Row 2 down to above Row B1
+    constexpr int canvasY = topY + 66;
+    const int canvasH = (std::max)(150, (rowB1Y - 8) - canvasY);
+    deferPos(g_hwndGalleryCanvas, rightX, canvasY, col3W, canvasH);
+
+    EndDeferWindowPos(hdwp);
 }
 
 LRESULT CALLBACK ManagerWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
@@ -886,30 +1171,30 @@ LRESULT CALLBACK ManagerWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPar
         SendMessageW(g_hwndListGames, WM_SETFONT, reinterpret_cast<WPARAM>(g_hFont), TRUE);
         DarkMode::ApplyWindowTheme(g_hwndListGames, g_isDarkMode);
 
-        HWND hBtnAdd = CreateWindowExW(0, L"BUTTON", L"\U0001F4C1 Browse & Add...",
+        g_hwndBtnAddGame = CreateWindowExW(0, L"BUTTON", L"\U0001F4C1 Browse & Add...",
             WS_CHILD | WS_VISIBLE | BS_OWNERDRAW,
             leftX, topY + 568, 130, 32, hwnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_BTN_ADD_GAME)), nullptr, nullptr);
-        SendMessageW(hBtnAdd, WM_SETFONT, reinterpret_cast<WPARAM>(g_hFontBold), TRUE);
+        SendMessageW(g_hwndBtnAddGame, WM_SETFONT, reinterpret_cast<WPARAM>(g_hFontBold), TRUE);
 
-        HWND hBtnRemove = CreateWindowExW(0, L"BUTTON", L"Remove",
+        g_hwndBtnRemoveGame = CreateWindowExW(0, L"BUTTON", L"Remove",
             WS_CHILD | WS_VISIBLE | BS_OWNERDRAW,
             leftX + 134, topY + 568, 56, 32, hwnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_BTN_REMOVE_GAME)), nullptr, nullptr);
-        SendMessageW(hBtnRemove, WM_SETFONT, reinterpret_cast<WPARAM>(g_hFont), TRUE);
+        SendMessageW(g_hwndBtnRemoveGame, WM_SETFONT, reinterpret_cast<WPARAM>(g_hFont), TRUE);
 
-        HWND hBtnRefresh = CreateWindowExW(0, L"BUTTON", L"\u21BB",
+        g_hwndBtnRefreshList = CreateWindowExW(0, L"BUTTON", L"\u21BB",
             WS_CHILD | WS_VISIBLE | BS_OWNERDRAW,
             leftX + 194, topY + 568, 36, 32, hwnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_BTN_REFRESH_LIST)), nullptr, nullptr);
-        SendMessageW(hBtnRefresh, WM_SETFONT, reinterpret_cast<WPARAM>(g_hFontBold), TRUE);
+        SendMessageW(g_hwndBtnRefreshList, WM_SETFONT, reinterpret_cast<WPARAM>(g_hFontBold), TRUE);
 
         // Column 2: Editor controls next to the 2:3 Box Art Preview (Center)
         constexpr int formLabelX = 422;
         constexpr int formEditX  = 512;
         constexpr int formEditW  = 192;
 
-        auto createField = [&](const wchar_t* label, HWND& outEdit, int id, int xLbl, int xEd, int wEd, int y) {
-            HWND hLbl = CreateWindowExW(0, L"STATIC", label, WS_CHILD | WS_VISIBLE,
+        auto createField = [&](const wchar_t* label, HWND& outEdit, HWND& outLbl, int id, int xLbl, int xEd, int wEd, int y) {
+            outLbl = CreateWindowExW(0, L"STATIC", label, WS_CHILD | WS_VISIBLE,
                 xLbl, y + 3, xEd - xLbl - 4, 20, hwnd, nullptr, nullptr, nullptr);
-            SendMessageW(hLbl, WM_SETFONT, reinterpret_cast<WPARAM>(g_hFont), TRUE);
+            SendMessageW(outLbl, WM_SETFONT, reinterpret_cast<WPARAM>(g_hFont), TRUE);
 
             outEdit = CreateWindowExW(0, L"EDIT", L"", WS_CHILD | WS_VISIBLE | ES_AUTOHSCROLL,
                 xEd, y + 2, wEd, 20, hwnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(id)), nullptr, nullptr);
@@ -917,68 +1202,68 @@ LRESULT CALLBACK ManagerWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPar
             DarkMode::ApplyWindowTheme(outEdit, g_isDarkMode);
         };
 
-        createField(L"Title:",        g_hwndEditTitle,     IDC_EDIT_TITLE,        formLabelX, formEditX, formEditW, topY + 2);
-        createField(L"Developer:",    g_hwndEditDeveloper, IDC_EDIT_DEVELOPER,    formLabelX, formEditX, formEditW, topY + 34);
-        createField(L"Publisher:",    g_hwndEditPublisher, IDC_EDIT_PUBLISHER,    formLabelX, formEditX, formEditW, topY + 66);
-        createField(L"Release Date:", g_hwndEditRelease,   IDC_EDIT_RELEASE_DATE, formLabelX, formEditX, formEditW, topY + 98);
-        createField(L"Genres:",       g_hwndEditGenres,    IDC_EDIT_GENRES,       formLabelX, formEditX, formEditW, topY + 130);
-        createField(L"Box Rating:",   g_hwndEditRating,    IDC_EDIT_RATING,       formLabelX, formEditX, formEditW, topY + 162);
+        createField(L"Title:",        g_hwndEditTitle,     g_hwndLblTitle,     IDC_EDIT_TITLE,        formLabelX, formEditX, formEditW, topY + 2);
+        createField(L"Developer:",    g_hwndEditDeveloper, g_hwndLblDeveloper, IDC_EDIT_DEVELOPER,    formLabelX, formEditX, formEditW, topY + 34);
+        createField(L"Publisher:",    g_hwndEditPublisher, g_hwndLblPublisher, IDC_EDIT_PUBLISHER,    formLabelX, formEditX, formEditW, topY + 66);
+        createField(L"Release Date:", g_hwndEditRelease,   g_hwndLblRelease,   IDC_EDIT_RELEASE_DATE, formLabelX, formEditX, formEditW, topY + 98);
+        createField(L"Genres:",       g_hwndEditGenres,    g_hwndLblGenres,    IDC_EDIT_GENRES,       formLabelX, formEditX, formEditW, topY + 130);
+        createField(L"Box Rating:",   g_hwndEditRating,    g_hwndLblRating,    IDC_EDIT_RATING,       formLabelX, formEditX, formEditW, topY + 162);
 
         // Full-width fields below the 2:3 Box Art Preview
         constexpr int fullLabelX = 288;
         constexpr int fullEditX  = 398;
         constexpr int fullEditW  = 238;
 
-        createField(L"Executable:",   g_hwndEditExePath,    IDC_EDIT_EXE_PATH,    fullLabelX, fullEditX, fullEditW, topY + 204);
-        HWND hBtnBrowseExe = CreateWindowExW(0, L"BUTTON", L"Browse...",
+        createField(L"Executable:",   g_hwndEditExePath,   g_hwndLblExe,       IDC_EDIT_EXE_PATH,    fullLabelX, fullEditX, fullEditW, topY + 204);
+        g_hwndBtnBrowseExe = CreateWindowExW(0, L"BUTTON", L"Browse...",
             WS_CHILD | WS_VISIBLE | BS_OWNERDRAW,
             fullEditX + fullEditW + 6, topY + 201, 62, 24, hwnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_BTN_BROWSE_EXE)), nullptr, nullptr);
-        SendMessageW(hBtnBrowseExe, WM_SETFONT, reinterpret_cast<WPARAM>(g_hFont), TRUE);
+        SendMessageW(g_hwndBtnBrowseExe, WM_SETFONT, reinterpret_cast<WPARAM>(g_hFont), TRUE);
 
-        createField(L"Arguments:",    g_hwndEditLaunchArgs, IDC_EDIT_LAUNCH_ARGS, fullLabelX, fullEditX, 306, topY + 236);
-        createField(L"Working Dir:",  g_hwndEditWorkDir,    IDC_EDIT_WORK_DIR,    fullLabelX, fullEditX, 306, topY + 268);
+        createField(L"Arguments:",    g_hwndEditLaunchArgs, g_hwndLblArgs,     IDC_EDIT_LAUNCH_ARGS, fullLabelX, fullEditX, 306, topY + 236);
+        createField(L"Working Dir:",  g_hwndEditWorkDir,    g_hwndLblWorkDir,  IDC_EDIT_WORK_DIR,    fullLabelX, fullEditX, 306, topY + 268);
 
-        createField(L"Box Art (~2:3):", g_hwndEditCoverPath, IDC_EDIT_COVER_PATH, fullLabelX, fullEditX, fullEditW, topY + 300);
-        HWND hBtnBrowseCover = CreateWindowExW(0, L"BUTTON", L"Browse...",
+        createField(L"Box Art (~2:3):", g_hwndEditCoverPath, g_hwndLblCover,   IDC_EDIT_COVER_PATH, fullLabelX, fullEditX, fullEditW, topY + 300);
+        g_hwndBtnBrowseCover = CreateWindowExW(0, L"BUTTON", L"Browse...",
             WS_CHILD | WS_VISIBLE | BS_OWNERDRAW,
             fullEditX + fullEditW + 6, topY + 297, 62, 24, hwnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_BTN_BROWSE_COVER)), nullptr, nullptr);
-        SendMessageW(hBtnBrowseCover, WM_SETFONT, reinterpret_cast<WPARAM>(g_hFont), TRUE);
+        SendMessageW(g_hwndBtnBrowseCover, WM_SETFONT, reinterpret_cast<WPARAM>(g_hFont), TRUE);
 
-        createField(L"Hero Banner:",  g_hwndEditHeroPath,   IDC_EDIT_HERO_PATH,   fullLabelX, fullEditX, fullEditW, topY + 332);
-        HWND hBtnBrowseHero = CreateWindowExW(0, L"BUTTON", L"Browse...",
+        createField(L"Hero Banner:",  g_hwndEditHeroPath,   g_hwndLblHero,     IDC_EDIT_HERO_PATH,   fullLabelX, fullEditX, fullEditW, topY + 332);
+        g_hwndBtnBrowseHero = CreateWindowExW(0, L"BUTTON", L"Browse...",
             WS_CHILD | WS_VISIBLE | BS_OWNERDRAW,
             fullEditX + fullEditW + 6, topY + 329, 62, 24, hwnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_BTN_BROWSE_HERO)), nullptr, nullptr);
-        SendMessageW(hBtnBrowseHero, WM_SETFONT, reinterpret_cast<WPARAM>(g_hFont), TRUE);
+        SendMessageW(g_hwndBtnBrowseHero, WM_SETFONT, reinterpret_cast<WPARAM>(g_hFont), TRUE);
 
-        createField(L"Details Art:",  g_hwndEditDetailsPath, IDC_EDIT_DETAILS_PATH, fullLabelX, fullEditX, fullEditW, topY + 364);
-        HWND hBtnBrowseDetails = CreateWindowExW(0, L"BUTTON", L"Browse...",
+        createField(L"Details Art:",  g_hwndEditDetailsPath, g_hwndLblDetails, IDC_EDIT_DETAILS_PATH, fullLabelX, fullEditX, fullEditW, topY + 364);
+        g_hwndBtnBrowseDetails = CreateWindowExW(0, L"BUTTON", L"Browse...",
             WS_CHILD | WS_VISIBLE | BS_OWNERDRAW,
             fullEditX + fullEditW + 6, topY + 361, 62, 24, hwnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_BTN_BROWSE_DETAILS)), nullptr, nullptr);
-        SendMessageW(hBtnBrowseDetails, WM_SETFONT, reinterpret_cast<WPARAM>(g_hFont), TRUE);
+        SendMessageW(g_hwndBtnBrowseDetails, WM_SETFONT, reinterpret_cast<WPARAM>(g_hFont), TRUE);
 
-        createField(L"Icon Path:",    g_hwndEditIconPath,   IDC_EDIT_ICON_PATH,   fullLabelX, fullEditX, fullEditW, topY + 396);
-        HWND hBtnBrowseIcon = CreateWindowExW(0, L"BUTTON", L"Browse...",
+        createField(L"Icon Path:",    g_hwndEditIconPath,   g_hwndLblIcon,     IDC_EDIT_ICON_PATH,   fullLabelX, fullEditX, fullEditW, topY + 396);
+        g_hwndBtnBrowseIcon = CreateWindowExW(0, L"BUTTON", L"Browse...",
             WS_CHILD | WS_VISIBLE | BS_OWNERDRAW,
             fullEditX + fullEditW + 6, topY + 393, 62, 24, hwnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_BTN_BROWSE_ICON)), nullptr, nullptr);
-        SendMessageW(hBtnBrowseIcon, WM_SETFONT, reinterpret_cast<WPARAM>(g_hFont), TRUE);
+        SendMessageW(g_hwndBtnBrowseIcon, WM_SETFONT, reinterpret_cast<WPARAM>(g_hFont), TRUE);
 
-        createField(L"Synopsis:",     g_hwndEditSynopsis,   IDC_EDIT_SYNOPSIS,    fullLabelX, fullEditX, 306, topY + 428);
+        createField(L"Synopsis:",     g_hwndEditSynopsis,   g_hwndLblSynopsis, IDC_EDIT_SYNOPSIS,    fullLabelX, fullEditX, 306, topY + 428);
 
         // Bottom Action Buttons in Center Column
-        HWND hBtnSave = CreateWindowExW(0, L"BUTTON", L"Save Game Metadata",
+        g_hwndBtnSave = CreateWindowExW(0, L"BUTTON", L"Save Game Metadata",
             WS_CHILD | WS_VISIBLE | BS_OWNERDRAW,
             fullLabelX, topY + 568, 138, 34, hwnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_BTN_SAVE_METADATA)), nullptr, nullptr);
-        SendMessageW(hBtnSave, WM_SETFONT, reinterpret_cast<WPARAM>(g_hFontBold), TRUE);
+        SendMessageW(g_hwndBtnSave, WM_SETFONT, reinterpret_cast<WPARAM>(g_hFontBold), TRUE);
 
-        HWND hBtnLaunch = CreateWindowExW(0, L"BUTTON", L"\u25B6 Play Game",
+        g_hwndBtnLaunch = CreateWindowExW(0, L"BUTTON", L"\u25B6 Play Game",
             WS_CHILD | WS_VISIBLE | BS_OWNERDRAW,
             fullLabelX + 144, topY + 568, 102, 34, hwnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_BTN_LAUNCH_SELECTED)), nullptr, nullptr);
-        SendMessageW(hBtnLaunch, WM_SETFONT, reinterpret_cast<WPARAM>(g_hFontBold), TRUE);
+        SendMessageW(g_hwndBtnLaunch, WM_SETFONT, reinterpret_cast<WPARAM>(g_hFontBold), TRUE);
 
-        HWND hBtnOpenShell = CreateWindowExW(0, L"BUTTON", L"Open Folder",
+        g_hwndBtnOpenShell = CreateWindowExW(0, L"BUTTON", L"Open Folder",
             WS_CHILD | WS_VISIBLE | BS_OWNERDRAW,
             fullLabelX + 252, topY + 568, 116, 34, hwnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_BTN_OPEN_SHELL)), nullptr, nullptr);
-        SendMessageW(hBtnOpenShell, WM_SETFONT, reinterpret_cast<WPARAM>(g_hFont), TRUE);
+        SendMessageW(g_hwndBtnOpenShell, WM_SETFONT, reinterpret_cast<WPARAM>(g_hFont), TRUE);
 
         // Column 3: Online Artwork Gallery & Discovery (Right)
         constexpr int rightX = 738;
@@ -989,20 +1274,20 @@ LRESULT CALLBACK ManagerWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPar
         SendMessageW(g_hwndGalleryQuery, WM_SETFONT, reinterpret_cast<WPARAM>(g_hFont), TRUE);
         DarkMode::ApplyWindowTheme(g_hwndGalleryQuery, g_isDarkMode);
 
-        HWND hBtnSearch = CreateWindowExW(0, L"BUTTON", L"\U0001F50D Search Providers",
+        g_hwndBtnSearchProviders = CreateWindowExW(0, L"BUTTON", L"\U0001F50D Search Providers",
             WS_CHILD | WS_VISIBLE | BS_OWNERDRAW,
             rightX + 226, topY + 1, 136, 26, hwnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_BTN_GALLERY_SEARCH)), nullptr, nullptr);
-        SendMessageW(hBtnSearch, WM_SETFONT, reinterpret_cast<WPARAM>(g_hFontBold), TRUE);
+        SendMessageW(g_hwndBtnSearchProviders, WM_SETFONT, reinterpret_cast<WPARAM>(g_hFontBold), TRUE);
 
-        HWND hBtnResetCache = CreateWindowExW(0, L"BUTTON", L"\U0001F9F9 Reset Cache",
+        g_hwndBtnResetCache = CreateWindowExW(0, L"BUTTON", L"\U0001F9F9 Reset Cache",
             WS_CHILD | WS_VISIBLE | BS_OWNERDRAW,
             rightX + 368, topY + 1, 118, 26, hwnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_BTN_RESET_CACHE)), nullptr, nullptr);
-        SendMessageW(hBtnResetCache, WM_SETFONT, reinterpret_cast<WPARAM>(g_hFont), TRUE);
+        SendMessageW(g_hwndBtnResetCache, WM_SETFONT, reinterpret_cast<WPARAM>(g_hFont), TRUE);
 
         // Filters: Type and Resolution Dropdowns
-        HWND hLblType = CreateWindowExW(0, L"STATIC", L"Type:", WS_CHILD | WS_VISIBLE,
+        g_hwndLblType = CreateWindowExW(0, L"STATIC", L"Type:", WS_CHILD | WS_VISIBLE,
             rightX, topY + 36, 38, 20, hwnd, nullptr, nullptr, nullptr);
-        SendMessageW(hLblType, WM_SETFONT, reinterpret_cast<WPARAM>(g_hFont), TRUE);
+        SendMessageW(g_hwndLblType, WM_SETFONT, reinterpret_cast<WPARAM>(g_hFont), TRUE);
 
         g_hwndComboType = CreateWindowExW(0, L"COMBOBOX", nullptr,
             WS_CHILD | WS_VISIBLE | CBS_DROPDOWNLIST | WS_VSCROLL,
@@ -1016,9 +1301,9 @@ LRESULT CALLBACK ManagerWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPar
         SendMessageW(g_hwndComboType, CB_SETCURSEL, 0, 0);
         DarkMode::ApplyWindowTheme(g_hwndComboType, g_isDarkMode);
 
-        HWND hLblRes = CreateWindowExW(0, L"STATIC", L"Resolution:", WS_CHILD | WS_VISIBLE,
+        g_hwndLblRes = CreateWindowExW(0, L"STATIC", L"Resolution:", WS_CHILD | WS_VISIBLE,
             rightX + 228, topY + 36, 72, 20, hwnd, nullptr, nullptr, nullptr);
-        SendMessageW(hLblRes, WM_SETFONT, reinterpret_cast<WPARAM>(g_hFont), TRUE);
+        SendMessageW(g_hwndLblRes, WM_SETFONT, reinterpret_cast<WPARAM>(g_hFont), TRUE);
 
         g_hwndComboRes = CreateWindowExW(0, L"COMBOBOX", nullptr,
             WS_CHILD | WS_VISIBLE | CBS_DROPDOWNLIST | WS_VSCROLL,
@@ -1063,15 +1348,16 @@ LRESULT CALLBACK ManagerWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPar
         SendMessageW(g_hwndComboWebFilter, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"All Web Sources"));
         SendMessageW(g_hwndComboWebFilter, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"Box Art (~2:3 Cover)"));
         SendMessageW(g_hwndComboWebFilter, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"Hero Banners"));
+        SendMessageW(g_hwndComboWebFilter, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"Details / Screenshots"));
         SendMessageW(g_hwndComboWebFilter, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"Patreon Campaign Media"));
         SendMessageW(g_hwndComboWebFilter, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"Icons / Logos"));
         SendMessageW(g_hwndComboWebFilter, CB_SETCURSEL, 0, 0);
         DarkMode::ApplyWindowTheme(g_hwndComboWebFilter, g_isDarkMode);
 
-        HWND hBtnWebSearch = CreateWindowExW(0, L"BUTTON", L"\U0001F310 Search Web",
+        g_hwndBtnWebSearch = CreateWindowExW(0, L"BUTTON", L"\U0001F310 Search Web",
             WS_CHILD | WS_VISIBLE | BS_OWNERDRAW,
             rightX + 348, topY + 547, 138, 28, hwnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_BTN_GALLERY_WEB)), nullptr, nullptr);
-        SendMessageW(hBtnWebSearch, WM_SETFONT, reinterpret_cast<WPARAM>(g_hFontBold), TRUE);
+        SendMessageW(g_hwndBtnWebSearch, WM_SETFONT, reinterpret_cast<WPARAM>(g_hFontBold), TRUE);
 
         // Bottom Row 3: NSFW / SafeSearch Unblock Checkbox (Disables SafeSearch on web + unblocks NSFW in metadata providers)
         g_hwndChkSafeSearch = CreateWindowExW(0, L"BUTTON", L"Disable SafeSearch (Unblock NSFW)",
@@ -1080,7 +1366,21 @@ LRESULT CALLBACK ManagerWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPar
         SendMessageW(g_hwndChkSafeSearch, WM_SETFONT, reinterpret_cast<WPARAM>(g_hFontSmall), TRUE);
         DarkMode::ApplyWindowTheme(g_hwndChkSafeSearch, g_isDarkMode);
 
+        RECT rcClient{};
+        GetClientRect(hwnd, &rcClient);
+        UpdateLayout(hwnd, rcClient.right - rcClient.left, rcClient.bottom - rcClient.top);
+
         RefreshGameList(hwnd, g_initialSelectAppId);
+        return 0;
+    }
+
+    case WM_SIZE: {
+        const int w = LOWORD(lParam);
+        const int h = HIWORD(lParam);
+        if (w > 0 && h > 0) {
+            UpdateLayout(hwnd, w, h);
+            InvalidateRect(hwnd, nullptr, TRUE);
+        }
         return 0;
     }
 
@@ -1497,7 +1797,14 @@ LRESULT CALLBACK ManagerWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPar
         }
 
         if (id == IDC_COMBO_GALLERY_TYPE && code == CBN_SELCHANGE) {
-            TriggerArtworkSearch(hwnd, false);
+            const std::wstring s = GetComboSelectedText(g_hwndComboType);
+            std::wstring t = L"All";
+            if (s.find(L"Box Art") != std::wstring::npos) t = L"Cover";
+            else if (s.find(L"Hero") != std::wstring::npos) t = L"Hero";
+            else if (s.find(L"Details") != std::wstring::npos || s.find(L"Screenshot") != std::wstring::npos) t = L"Details";
+            else if (s.find(L"Icon") != std::wstring::npos || s.find(L"Logo") != std::wstring::npos) t = L"Icon";
+            SetActiveArtworkType(t);
+            TriggerArtworkSearch(hwnd, false, L"", t);
             return 0;
         }
 
@@ -1507,6 +1814,14 @@ LRESULT CALLBACK ManagerWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPar
         }
 
         if (id == IDC_COMBO_WEB_FILTER && code == CBN_SELCHANGE) {
+            const std::wstring s = GetComboSelectedText(g_hwndComboWebFilter);
+            std::wstring t = L"All";
+            if (s.find(L"Box Art") != std::wstring::npos) t = L"Cover";
+            else if (s.find(L"Hero") != std::wstring::npos) t = L"Hero";
+            else if (s.find(L"Details") != std::wstring::npos || s.find(L"Screenshot") != std::wstring::npos) t = L"Details";
+            else if (s.find(L"Patreon") != std::wstring::npos) t = L"Patreon";
+            else if (s.find(L"Icon") != std::wstring::npos || s.find(L"Logo") != std::wstring::npos) t = L"Icon";
+            SetActiveArtworkType(t);
             SendMessageW(hwnd, WM_COMMAND, MAKEWPARAM(IDC_BTN_GALLERY_WEB, BN_CLICKED), 0);
             return 0;
         }
@@ -1562,14 +1877,14 @@ LRESULT CALLBACK ManagerWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPar
 
             std::wstring webFilter = L"All";
             if (g_hwndComboWebFilter != nullptr) {
-                wchar_t buf[64] = { 0 };
-                GetWindowTextW(g_hwndComboWebFilter, buf, 64);
-                std::wstring s = buf;
+                const std::wstring s = GetComboSelectedText(g_hwndComboWebFilter);
                 if (s.find(L"Box Art") != std::wstring::npos) webFilter = L"Cover";
                 else if (s.find(L"Hero") != std::wstring::npos) webFilter = L"Hero";
+                else if (s.find(L"Details") != std::wstring::npos || s.find(L"Screenshot") != std::wstring::npos) webFilter = L"Details";
                 else if (s.find(L"Patreon") != std::wstring::npos) webFilter = L"Patreon";
-                else if (s.find(L"Icon") != std::wstring::npos) webFilter = L"Icon";
+                else if (s.find(L"Icon") != std::wstring::npos || s.find(L"Logo") != std::wstring::npos) webFilter = L"Icon";
             }
+            SetActiveArtworkType(webFilter);
 
             const bool safeOff = (g_hwndChkSafeSearch != nullptr && SendMessageW(g_hwndChkSafeSearch, BM_GETCHECK, 0, 0) == BST_CHECKED);
             TriggerArtworkSearch(hwnd, true, webQuery, webFilter, L"", safeOff);
@@ -1697,8 +2012,19 @@ LRESULT CALLBACK ManagerWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPar
         }
 
         if (id == IDC_BTN_OPEN_SHELL) {
-            const std::wstring cmd = std::wstring(L"::") + SZ_CLSID_GAME_EXPLORER;
-            ShellExecuteW(hwnd, L"open", L"explorer.exe", cmd.c_str(), nullptr, SW_SHOWNORMAL);
+            const std::wstring cmd = std::wstring(L"shell:::") + SZ_CLSID_GAME_EXPLORER;
+            PIDLIST_ABSOLUTE pidl = nullptr;
+            if (SUCCEEDED(SHParseDisplayName(cmd.c_str(), nullptr, &pidl, 0, nullptr)) && pidl != nullptr) {
+                SHELLEXECUTEINFOW sei = { sizeof(sei) };
+                sei.fMask = SEE_MASK_IDLIST;
+                sei.lpIDList = pidl;
+                sei.nShow = SW_SHOWNORMAL;
+                sei.hwnd = hwnd;
+                ShellExecuteExW(&sei);
+                ILFree(pidl);
+            } else {
+                ShellExecuteW(hwnd, L"open", L"explorer.exe", cmd.c_str(), nullptr, SW_SHOWNORMAL);
+            }
             return 0;
         }
         break;

@@ -2,27 +2,16 @@
 
 #include <windows.h>
 #include <shlobj.h>
+#include <shlguid.h>
 #include <atomic>
-#include <vector>
-#include <string>
 #include <memory>
-#include "GameExplorerCore/Models.h"
-#include "GameExplorerCore/Types.h"
-#include "GameExplorerCore/DarkMode.h"
+#include "view/LibraryViewHost.h"
 
 namespace GameExplorer {
 
 class ShellFolder;
 
-struct ProviderViewModel {
-    PlatformType platform{ PlatformType::Unknown };
-    std::wstring name;
-    std::wstring company;
-    std::wstring executablePath;
-    std::wstring iconPngPath;
-};
-
-class ShellView final : public IShellView, public IOleCommandTarget {
+class ShellView final : public IShellView, public IOleCommandTarget, public IExplorerPaneVisibility {
 public:
     explicit ShellView(ShellFolder* pFolder);
     virtual ~ShellView();
@@ -58,41 +47,24 @@ public:
     IFACEMETHODIMP QueryStatus(const GUID* pguidCmdGroup, ULONG cCmds, OLECMD prgCmds[], OLECMDTEXT* pCmdText) override;
     IFACEMETHODIMP Exec(const GUID* pguidCmdGroup, DWORD nCmdID, DWORD nCmdexecopt, VARIANT* pvaIn, VARIANT* pvaOut) override;
 
-    struct XamlState;
+    // IExplorerPaneVisibility
+    IFACEMETHODIMP GetPaneState(REFEXPLORERPANE ep, EXPLORERPANESTATE* peps) override;
 
 private:
-
     static LRESULT CALLBACK WndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
-
-    void RefreshData();
-    void LoadDataAsync(HWND hwnd);
-    void ShowLoadingState();
-    void BuildXamlViewport();
-    void RebuildSidepane();
-    void SelectGame(int index);
-    void SelectProvider(int index);
-    void SwitchLayoutMode(LayoutMode mode);
-    void LaunchCompanionExe(const wchar_t* exeName, const std::wstring& args = L"");
+    void EnsureSystemTitleBar();
 
     std::atomic<ULONG> m_refCount{ 1 };
     ShellFolder* m_pFolder{ nullptr };
     IShellBrowser* m_pShellBrowser{ nullptr };
 
     HWND m_hwndView{ nullptr };
-    HWND m_hwndXamlIsland{ nullptr };
-    std::shared_ptr<XamlState> m_xaml;
-
+    HWND m_hwndTop{ nullptr };
     FOLDERSETTINGS m_folderSettings{};
-    LayoutMode m_layoutMode{ LayoutMode::CoverArt };
-    std::vector<ProviderViewModel> m_providers;
-    std::vector<GameItem> m_games;
-
-    int m_selectedGameIndex{ -1 };
-    int m_selectedProviderIndex{ -1 };
-    bool m_providersExpanded{ true };
-    bool m_gamesExpanded{ true };
-    bool m_isDarkMode{ true };
     UINT m_uState{ SVUIA_DEACTIVATE };
+
+    std::unique_ptr<LibraryViewHost> m_viewHost;
+    int m_frameInitAttempts{ 0 };
 };
 
 } // namespace GameExplorer

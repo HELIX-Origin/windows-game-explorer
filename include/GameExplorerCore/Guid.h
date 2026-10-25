@@ -20,6 +20,15 @@ inline constexpr GUID FOLDERID_GameExplorer = {
     { 0xb2, 0xfc, 0x5f, 0x08, 0x32, 0x34, 0x17, 0x09 }
 };
 
+// Canonical Windows SDK FOLDERID_Games: {CAC52C1A-B53D-4EDC-92D7-6B2E8AC19434}
+// Used by Windows Shell for the 'shell:Games' known folder alias
+inline constexpr GUID FOLDERID_Games_Canonical = {
+    0xcac52c1a,
+    0xb53d,
+    0x4edc,
+    { 0x92, 0xd7, 0x6b, 0x2e, 0x8a, 0xc1, 0x94, 0x34 }
+};
+
 // CLSID_GameCategorizer: {C74A2736-2B1A-4F3D-9E8B-7A2E5B1D3C4F}
 // Categorizer for Game Providers vs Games grouping
 inline constexpr GUID CLSID_GameCategorizer = {
@@ -32,6 +41,7 @@ inline constexpr GUID CLSID_GameCategorizer = {
 inline constexpr const wchar_t* SZ_CLSID_GAME_EXPLORER = L"{1666B3DF-60A5-4EF3-8B80-962C82401CD1}";
 inline constexpr const wchar_t* SZ_CLSID_GAME_CATEGORIZER = L"{C74A2736-2B1A-4F3D-9E8B-7A2E5B1D3C4F}";
 inline constexpr const wchar_t* SZ_FOLDERID_GAME_EXPLORER = L"{E1A11BB3-192F-4917-B2FC-5F0832341709}";
-inline constexpr const wchar_t* SZ_FOLDERTYPEID_GAMES = L"{b689b0d0-76d3-4cbb-87f7-585d0e0ce070}";
+inline constexpr const wchar_t* SZ_FOLDERID_GAMES_CANONICAL = L"{CAC52C1A-B53D-4EDC-92D7-6B2E8AC19434}";
+inline constexpr const wchar_t* SZ_FOLDERTYPEID_GENERIC = L"{5c4f28b5-f869-4e84-8e60-f11db97c5cc7}";
 inline constexpr const wchar_t* SZ_GAME_EXPLORER_TITLE = L"Games";
 inline constexpr const wchar_t* SZ_GAME_EXPLORER_NAME = L"Games";

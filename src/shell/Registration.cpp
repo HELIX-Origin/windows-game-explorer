@@ -5,6 +5,7 @@
 #include "GameExplorerCore/StorefrontScanner.h"
 #include <string>
 #include <shlobj.h>
+#include <knownfolders.h>
 #include <filesystem>
 
 namespace fs = std::filesystem;
@@ -67,6 +68,53 @@ void DeleteRegistryValue(HKEY hRoot, const std::wstring& subKey, const std::wstr
     }
 }
 
+void CreateGamesShellLink(const std::wstring& targetLnkPath, const std::wstring& modulePath) {
+    const HRESULT hrCo = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+    const bool needCoUninit = SUCCEEDED(hrCo);
+
+    IShellLinkW* psl = nullptr;
+    HRESULT hr = CoCreateInstance(CLSID_ShellLink, nullptr, CLSCTX_INPROC_SERVER, IID_IShellLinkW, reinterpret_cast<void**>(&psl));
+    if (SUCCEEDED(hr) && psl != nullptr) {
+        wchar_t windir[MAX_PATH] = { 0 };
+        GetWindowsDirectoryW(windir, MAX_PATH);
+        const std::wstring explorerExe = (fs::path(windir) / L"explorer.exe").wstring();
+
+        psl->SetPath(explorerExe.c_str());
+        psl->SetArguments(L"shell:games");
+        psl->SetDescription(L"Open Windows Game Explorer");
+        psl->SetIconLocation(modulePath.c_str(), -100);
+
+        IPersistFile* ppf = nullptr;
+        hr = psl->QueryInterface(IID_IPersistFile, reinterpret_cast<void**>(&ppf));
+        if (SUCCEEDED(hr) && ppf != nullptr) {
+            ppf->Save(targetLnkPath.c_str(), TRUE);
+            ppf->Release();
+        }
+        psl->Release();
+    }
+
+    if (needCoUninit) {
+        CoUninitialize();
+    }
+}
+
+void DeleteFolderDescIfOurs(HKEY root, const std::wstring& folderId) {
+    const std::wstring fdKey = std::wstring(L"Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\FolderDescriptions\\") + folderId;
+    HKEY hKey = nullptr;
+    if (RegOpenKeyExW(root, fdKey.c_str(), 0, KEY_READ, &hKey) == ERROR_SUCCESS) {
+        wchar_t buf[256] = { 0 };
+        DWORD cb = sizeof(buf);
+        if (RegQueryValueExW(hKey, L"ParsingName", nullptr, nullptr, reinterpret_cast<LPBYTE>(buf), &cb) == ERROR_SUCCESS) {
+            if (std::wstring(buf) == (std::wstring(L"shell:::") + SZ_CLSID_GAME_EXPLORER)) {
+                RegCloseKey(hKey);
+                DeleteRegistryKeyRecursive(root, fdKey);
+                return;
+            }
+        }
+        RegCloseKey(hKey);
+    }
+}
+
 } // namespace
 
 HRESULT RegisterServer(HMODULE hModule) {
@@ -95,14 +143,13 @@ HRESULT RegisterServer(HMODULE hModule) {
     const std::wstring iconKey = clsidKey + L"\\DefaultIcon";
     SetRegistryValue(HKEY_CURRENT_USER, iconKey, L"", iconPath);
 
-    // Link Canonical FOLDERTYPEID_Games {b689b0d0-76d3-4cbb-87f7-585d0e0ce070}
-    SetRegistryValue(HKEY_CURRENT_USER, clsidKey, L"FolderTypeID", SZ_FOLDERTYPEID_GAMES);
-
     // ShellFolder attributes: SFGAO_FOLDER | SFGAO_BROWSABLE | SFGAO_CANLINK (NO SFGAO_HASSUBFOLDER 0x80000000 and NO SFGAO_STREAM 0x40000000)
+    // Note: FolderValueFlags = 0 and AllowChildAliasRegistration = 1 ensures modern Windows 11 tabbed Explorer hosting
     const std::wstring shellFolderKey = clsidKey + L"\\ShellFolder";
     constexpr DWORD sfgaoAttributes = 0x20000000 | 0x08000000 | 0x00000004;
     SetRegistryDword(HKEY_CURRENT_USER, shellFolderKey, L"Attributes", sfgaoAttributes);
-    SetRegistryDword(HKEY_CURRENT_USER, shellFolderKey, L"FolderValueFlags", 0x28);
+    SetRegistryDword(HKEY_CURRENT_USER, shellFolderKey, L"FolderValueFlags", 0);
+    SetRegistryDword(HKEY_CURRENT_USER, shellFolderKey, L"AllowChildAliasRegistration", 1);
 
     // Register CLSID_GameCategorizer in HKCU
     const std::wstring catClsidKey = std::wstring(L"Software\\Classes\\CLSID\\") + SZ_CLSID_GAME_CATEGORIZER;
@@ -110,17 +157,10 @@ HRESULT RegisterServer(HMODULE hModule) {
     SetRegistryValue(HKEY_CURRENT_USER, catClsidKey + L"\\InProcServer32", L"", modulePath);
     SetRegistryValue(HKEY_CURRENT_USER, catClsidKey + L"\\InProcServer32", L"ThreadingModel", L"Apartment");
 
-    // Register FolderType Games with default GroupBy = System.ItemTypeText and LogicalViewMode = 3 (Tiles / Large Icons)
-    const std::wstring ftKey = std::wstring(L"Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\FolderTypes\\") + SZ_FOLDERTYPEID_GAMES;
-    SetRegistryValue(HKEY_CURRENT_USER, ftKey, L"CanonicalName", L"Games");
-    SetRegistryDword(HKEY_CURRENT_USER, ftKey, L"LayoutType", 1);
-    const std::wstring topViewsKey = ftKey + L"\\TopViews\\{00000000-0000-0000-0000-000000000000}";
-    SetRegistryValue(HKEY_CURRENT_USER, topViewsKey, L"ColumnList", L"prop:0System.ItemNameDisplay;0System.Company;0System.ItemTypeText;0System.Rating;0System.Size;0System.Media.Year");
-    SetRegistryValue(HKEY_CURRENT_USER, topViewsKey, L"GroupBy", L"System.ItemTypeText");
-    SetRegistryDword(HKEY_CURRENT_USER, topViewsKey, L"LogicalViewMode", 3);
-    SetRegistryDword(HKEY_CURRENT_USER, topViewsKey, L"IconSize", 96);
-    SetRegistryDword(HKEY_CURRENT_USER, topViewsKey, L"Order", 0);
-    SetRegistryValue(HKEY_CURRENT_USER, topViewsKey, L"Name", L"NoName");
+    // Clean up any legacy FolderTypes key with Windows 10 ribbon associations
+    const std::wstring legacyFtKey = L"Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\FolderTypes\\{b689b0d0-76d3-4cbb-87f7-585d0e0ce070}";
+    DeleteRegistryKeyRecursive(HKEY_CURRENT_USER, legacyFtKey);
+    DeleteRegistryKeyRecursive(HKEY_LOCAL_MACHINE, legacyFtKey);
 
     // 2. Register into File Explorer Desktop NameSpace (Navigation Pane Games tab)
     const std::wstring nsKey = std::wstring(L"Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Desktop\\NameSpace\\") + SZ_CLSID_GAME_EXPLORER;
@@ -139,7 +179,8 @@ HRESULT RegisterServer(HMODULE hModule) {
     SetRegistryValue(HKEY_LOCAL_MACHINE, inprocKey, L"ThreadingModel", L"Apartment");
     SetRegistryValue(HKEY_LOCAL_MACHINE, iconKey, L"", iconPath);
     SetRegistryDword(HKEY_LOCAL_MACHINE, shellFolderKey, L"Attributes", sfgaoAttributes);
-    SetRegistryDword(HKEY_LOCAL_MACHINE, shellFolderKey, L"FolderValueFlags", 0x28);
+    SetRegistryDword(HKEY_LOCAL_MACHINE, shellFolderKey, L"FolderValueFlags", 0);
+    SetRegistryDword(HKEY_LOCAL_MACHINE, shellFolderKey, L"AllowChildAliasRegistration", 1);
     SetRegistryValue(HKEY_LOCAL_MACHINE, nsKey, L"", SZ_GAME_EXPLORER_TITLE);
     SetRegistryDword(HKEY_LOCAL_MACHINE, L"Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\HideDesktopIcons\\NewStartPanel", SZ_CLSID_GAME_EXPLORER, 1);
     SetRegistryDword(HKEY_LOCAL_MACHINE, L"Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\HideDesktopIcons\\ClassicStartMenu", SZ_CLSID_GAME_EXPLORER, 1);
@@ -149,35 +190,51 @@ HRESULT RegisterServer(HMODULE hModule) {
     SetRegistryValue(HKEY_LOCAL_MACHINE, catClsidKey + L"\\InProcServer32", L"", modulePath);
     SetRegistryValue(HKEY_LOCAL_MACHINE, catClsidKey + L"\\InProcServer32", L"ThreadingModel", L"Apartment");
 
-    // Register FolderType Games in HKLM
-    SetRegistryValue(HKEY_LOCAL_MACHINE, ftKey, L"CanonicalName", L"Games");
-    SetRegistryDword(HKEY_LOCAL_MACHINE, ftKey, L"LayoutType", 1);
-    SetRegistryValue(HKEY_LOCAL_MACHINE, topViewsKey, L"ColumnList", L"prop:0System.ItemNameDisplay;0System.Company;0System.ItemTypeText;0System.Rating;0System.Size;0System.Media.Year");
-    SetRegistryValue(HKEY_LOCAL_MACHINE, topViewsKey, L"GroupBy", L"System.ItemTypeText");
-    SetRegistryDword(HKEY_LOCAL_MACHINE, topViewsKey, L"LogicalViewMode", 3);
-    SetRegistryDword(HKEY_LOCAL_MACHINE, topViewsKey, L"IconSize", 96);
-    SetRegistryDword(HKEY_LOCAL_MACHINE, topViewsKey, L"Order", 0);
-    SetRegistryValue(HKEY_LOCAL_MACHINE, topViewsKey, L"Name", L"NoName");
+    // Known Folder descriptions for 'shell:Games':
+    // Register BOTH the canonical Windows SDK FOLDERID_Games ({CAC52C1A-B53D-4EDC-92D7-6B2E8AC19434})
+    // and the custom FOLDERID_GameExplorer ({E1A11BB3-192F-4917-B2FC-5F0832341709}).
+    // This allows Win+R or address bar 'shell:Games' to resolve directly to the modern tabbed shell extension!
+    auto registerFolderDesc = [&](HKEY root, const std::wstring& folderId) {
+        const std::wstring fdKey = std::wstring(L"Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\FolderDescriptions\\") + folderId;
+        SetRegistryValue(root, fdKey, L"Name", L"Games");
+        SetRegistryValue(root, fdKey, L"Icon", iconPath);
+        SetRegistryDword(root, fdKey, L"Category", 1); // KF_CATEGORY_VIRTUAL
+        SetRegistryValue(root, fdKey, L"ParsingName", std::wstring(L"shell:::") + SZ_CLSID_GAME_EXPLORER);
+    };
 
-    // Known Folder description (HKCU and HKLM)
-    const std::wstring folderDescKey = std::wstring(L"Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\FolderDescriptions\\") + SZ_FOLDERID_GAME_EXPLORER;
-    SetRegistryValue(HKEY_CURRENT_USER, folderDescKey, L"Name", L"Games");
-    SetRegistryValue(HKEY_CURRENT_USER, folderDescKey, L"Icon", iconPath);
-    SetRegistryDword(HKEY_CURRENT_USER, folderDescKey, L"Category", 1); // KF_CATEGORY_VIRTUAL
-    SetRegistryValue(HKEY_CURRENT_USER, folderDescKey, L"ParsingName", std::wstring(L"::") + SZ_CLSID_GAME_EXPLORER);
-    SetRegistryValue(HKEY_CURRENT_USER, folderDescKey, L"FolderTypeID", SZ_FOLDERTYPEID_GAMES);
+    registerFolderDesc(HKEY_CURRENT_USER, SZ_FOLDERID_GAMES_CANONICAL);
+    registerFolderDesc(HKEY_CURRENT_USER, SZ_FOLDERID_GAME_EXPLORER);
+    registerFolderDesc(HKEY_LOCAL_MACHINE, SZ_FOLDERID_GAMES_CANONICAL);
+    registerFolderDesc(HKEY_LOCAL_MACHINE, SZ_FOLDERID_GAME_EXPLORER);
 
-    SetRegistryValue(HKEY_LOCAL_MACHINE, folderDescKey, L"Name", L"Games");
-    SetRegistryValue(HKEY_LOCAL_MACHINE, folderDescKey, L"Icon", iconPath);
-    SetRegistryDword(HKEY_LOCAL_MACHINE, folderDescKey, L"Category", 1); // KF_CATEGORY_VIRTUAL
-    SetRegistryValue(HKEY_LOCAL_MACHINE, folderDescKey, L"ParsingName", std::wstring(L"::") + SZ_CLSID_GAME_EXPLORER);
-    SetRegistryValue(HKEY_LOCAL_MACHINE, folderDescKey, L"FolderTypeID", SZ_FOLDERTYPEID_GAMES);
+    // Create Desktop and Start Menu shell shortcuts for 'Games' (single location depending on privilege)
+    const bool isAdmin = (IsUserAnAdmin() != FALSE);
+    const KNOWNFOLDERID targetDesktopId = isAdmin ? FOLDERID_PublicDesktop : FOLDERID_Desktop;
+    const KNOWNFOLDERID targetProgramsId = isAdmin ? FOLDERID_CommonPrograms : FOLDERID_Programs;
+
+    PWSTR desktopPath = nullptr;
+    if (SUCCEEDED(SHGetKnownFolderPath(targetDesktopId, 0, nullptr, &desktopPath)) && desktopPath != nullptr) {
+        CreateGamesShellLink((fs::path(desktopPath) / L"Games.lnk").wstring(), modulePath);
+        CoTaskMemFree(desktopPath);
+    }
+
+    PWSTR programsPath = nullptr;
+    if (SUCCEEDED(SHGetKnownFolderPath(targetProgramsId, 0, nullptr, &programsPath)) && programsPath != nullptr) {
+        const fs::path rootPrograms(programsPath);
+        CreateGamesShellLink((rootPrograms / L"Games.lnk").wstring(), modulePath);
+
+        const fs::path appFolder = rootPrograms / L"Windows Game Explorer";
+        std::error_code ec;
+        fs::create_directories(appFolder, ec);
+        CreateGamesShellLink((appFolder / L"Games.lnk").wstring(), modulePath);
+        CoTaskMemFree(programsPath);
+    }
 
     // Copy on-disk game-explorer-icon.ico to library folder for external shell queries
+    const fs::path moduleDir = fs::path(modulePath).parent_path();
     const fs::path libDir = Storage::GetUserRootPath();
     std::error_code ec;
     fs::create_directories(libDir, ec);
-    const fs::path moduleDir = fs::path(modulePath).parent_path();
     const fs::path localIco = libDir / L"game-explorer-icon.ico";
     const fs::path builtIco = moduleDir / L"Resource.ico";
     if (fs::exists(builtIco)) {
@@ -203,9 +260,51 @@ HRESULT RegisterServer(HMODULE hModule) {
 HRESULT UnregisterServer() {
     const std::wstring clsidKey = std::wstring(L"Software\\Classes\\CLSID\\") + SZ_CLSID_GAME_EXPLORER;
     const std::wstring catClsidKey = std::wstring(L"Software\\Classes\\CLSID\\") + SZ_CLSID_GAME_CATEGORIZER;
-    const std::wstring ftKey = std::wstring(L"Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\FolderTypes\\") + SZ_FOLDERTYPEID_GAMES;
     const std::wstring nsKey = std::wstring(L"Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Desktop\\NameSpace\\") + SZ_CLSID_GAME_EXPLORER;
-    const std::wstring folderDescKey = std::wstring(L"Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\FolderDescriptions\\") + SZ_FOLDERID_GAME_EXPLORER;
+    const std::wstring folderDescKeyCustom = std::wstring(L"Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\FolderDescriptions\\") + SZ_FOLDERID_GAME_EXPLORER;
+    const std::wstring folderDescKeyCanonical = std::wstring(L"Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\FolderDescriptions\\") + SZ_FOLDERID_GAMES_CANONICAL;
+    const std::wstring legacyFtKey = L"Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\FolderTypes\\{b689b0d0-76d3-4cbb-87f7-585d0e0ce070}";
+
+    // Clean up created Desktop & Start Menu shortcuts
+    PWSTR desktopPath = nullptr;
+    if (SUCCEEDED(SHGetKnownFolderPath(FOLDERID_Desktop, 0, nullptr, &desktopPath)) && desktopPath != nullptr) {
+        std::error_code ec;
+        fs::remove(fs::path(desktopPath) / L"Games.lnk", ec);
+        CoTaskMemFree(desktopPath);
+    }
+
+    PWSTR publicDesktopPath = nullptr;
+    if (SUCCEEDED(SHGetKnownFolderPath(FOLDERID_PublicDesktop, 0, nullptr, &publicDesktopPath)) && publicDesktopPath != nullptr) {
+        std::error_code ec;
+        fs::remove(fs::path(publicDesktopPath) / L"Games.lnk", ec);
+        CoTaskMemFree(publicDesktopPath);
+    }
+
+    PWSTR programsPath = nullptr;
+    if (SUCCEEDED(SHGetKnownFolderPath(FOLDERID_Programs, 0, nullptr, &programsPath)) && programsPath != nullptr) {
+        const fs::path rootPrograms(programsPath);
+        std::error_code ec;
+        fs::remove(rootPrograms / L"Games.lnk", ec);
+        fs::remove(rootPrograms / L"Windows Game Explorer" / L"Games.lnk", ec);
+        CoTaskMemFree(programsPath);
+    }
+
+    PWSTR commonProgramsPath = nullptr;
+    if (SUCCEEDED(SHGetKnownFolderPath(FOLDERID_CommonPrograms, 0, nullptr, &commonProgramsPath)) && commonProgramsPath != nullptr) {
+        const fs::path rootCommon(commonProgramsPath);
+        std::error_code ec;
+        fs::remove(rootCommon / L"Games.lnk", ec);
+        fs::remove(rootCommon / L"Windows Game Explorer" / L"Games.lnk", ec);
+        CoTaskMemFree(commonProgramsPath);
+    }
+
+    wchar_t userProfile[MAX_PATH] = { 0 };
+    if (GetEnvironmentVariableW(L"USERPROFILE", userProfile, MAX_PATH) > 0) {
+        const fs::path up(userProfile);
+        std::error_code ec;
+        fs::remove(up / L"Desktop" / L"Games.lnk", ec);
+        fs::remove(up / L"OneDrive" / L"Desktop" / L"Games.lnk", ec);
+    }
 
     // Signal running background agent to cleanly terminate
     HWND hwndAgent = FindWindowW(L"WindowsGameExplorerAgentClass", nullptr);
@@ -216,9 +315,10 @@ HRESULT UnregisterServer() {
     // Delete HKCU registrations
     DeleteRegistryKeyRecursive(HKEY_CURRENT_USER, clsidKey);
     DeleteRegistryKeyRecursive(HKEY_CURRENT_USER, catClsidKey);
-    DeleteRegistryKeyRecursive(HKEY_CURRENT_USER, ftKey);
+    DeleteRegistryKeyRecursive(HKEY_CURRENT_USER, legacyFtKey);
     DeleteRegistryKeyRecursive(HKEY_CURRENT_USER, nsKey);
-    DeleteRegistryKeyRecursive(HKEY_CURRENT_USER, folderDescKey);
+    DeleteRegistryKeyRecursive(HKEY_CURRENT_USER, folderDescKeyCustom);
+    DeleteFolderDescIfOurs(HKEY_CURRENT_USER, SZ_FOLDERID_GAMES_CANONICAL);
     DeleteRegistryValue(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\HideDesktopIcons\\NewStartPanel", SZ_CLSID_GAME_EXPLORER);
     DeleteRegistryValue(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\HideDesktopIcons\\ClassicStartMenu", SZ_CLSID_GAME_EXPLORER);
     DeleteRegistryValue(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\Run", L"GameExplorerAgent");
@@ -226,9 +326,10 @@ HRESULT UnregisterServer() {
     // Delete HKLM registrations
     DeleteRegistryKeyRecursive(HKEY_LOCAL_MACHINE, clsidKey);
     DeleteRegistryKeyRecursive(HKEY_LOCAL_MACHINE, catClsidKey);
-    DeleteRegistryKeyRecursive(HKEY_LOCAL_MACHINE, ftKey);
+    DeleteRegistryKeyRecursive(HKEY_LOCAL_MACHINE, legacyFtKey);
     DeleteRegistryKeyRecursive(HKEY_LOCAL_MACHINE, nsKey);
-    DeleteRegistryKeyRecursive(HKEY_LOCAL_MACHINE, folderDescKey);
+    DeleteRegistryKeyRecursive(HKEY_LOCAL_MACHINE, folderDescKeyCustom);
+    DeleteFolderDescIfOurs(HKEY_LOCAL_MACHINE, SZ_FOLDERID_GAMES_CANONICAL);
     DeleteRegistryValue(HKEY_LOCAL_MACHINE, L"Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\HideDesktopIcons\\NewStartPanel", SZ_CLSID_GAME_EXPLORER);
     DeleteRegistryValue(HKEY_LOCAL_MACHINE, L"Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\HideDesktopIcons\\ClassicStartMenu", SZ_CLSID_GAME_EXPLORER);
 

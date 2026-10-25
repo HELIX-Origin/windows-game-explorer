@@ -6,6 +6,38 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [2.1.2] - 2026-10-24
+
+### Added
+- **Artwork Discovery Gallery Aspect Ratio Sizing & Proportional Card Layout**:
+  - Implemented dynamic card sizing per selected artwork type in `GameExplorerManager.exe`'s discovery viewport:
+    - `Hero Banners`: ~3.1:1 widescreen card (`cardW` ~380px, `imgH` ~123px, `cardH` 149px).
+    - `Details / Screenshots`: 16:9 widescreen cards (`cardW` ~192px, `imgH` 108px, `cardH` 134px, 2 columns).
+    - `Box Art (~2:3 Cover)`: 2:3 vertical cards (`cardW` 148px, `imgH` 222px, `cardH` 248px).
+    - `Icons / Logos`: 1:1 square cards (`cardW` 105px, `imgH` 105px, `cardH` 131px).
+    - `All Types`: Adapts dynamically to the dominant candidate aspect ratio in the search result set.
+- **Web Filter Dropdown Enhancement**:
+  - Added `"Details / Screenshots"` option to `g_hwndComboWebFilter` in the web image discovery bar.
+  - Sourced Steam Store `appdetails` (`path_full`) and IGDB screenshots to the `Details` slot.
+  - Implemented bidirectional dropdown synchronization between top and bottom comboboxes via `SetActiveArtworkType` and `GetComboSelectedText` (`CB_GETCURSEL` and `CB_GETLBTEXT`).
+- **Shared Modular XAML Island Viewport (`LibraryViewHost`)**:
+  - Extracted shared XAML Island presentation and event handling into `src/view/LibraryViewHost.h` and `src/view/LibraryViewHost.cpp`, ensuring identical high-performance rendering across both `GameExplorerShell.dll` and companion utilities.
+- **Modern 3D Icon Setup Installer Bitmaps**:
+  - Generated high-resolution 24-bit installer graphics (`installer/sidebar.bmp` and `installer/header.bmp`) with authentic 3D Windows Game Explorer icon branding.
+
+### Fixed
+- **Duplicate Test Games Purged**:
+  - Cleaned out 47 historical test game artifacts (`custom_*.json`) from `%USERPROFILE%\Game Explorer\metadata\` and OneDrive mirror directory.
+  - Updated test runner to clean up immediately upon test completion.
+- **Combobox Value Reading Bug**:
+  - Resolved empty string returns from `GetWindowTextW` on `CBS_DROPDOWNLIST` controls by utilizing Win32 `CB_GETCURSEL` and `CB_GETLBTEXT`.
+
+### Tracked
+- **BUG-10, BUG-11 & BUG-12 Formalization**:
+  - Fully researched and documented Itch.io storefront artwork/metadata population root causes (`butler.db` games table indexing, WinHttp `%23` path truncation, GIF/PNG extension checks, scraper bypass for itch games) in `BUGS.md`.
+  - Documented complete cache reset & repopulation engine requirements in `BUGS.md` (BUG-11).
+  - Documented portable companion app launch resolution via `GetModuleHandleExW` and `InProcServer32` in `BUGS.md` (BUG-12).
+
 ## [2.1.1] - 2026-10-24
 
 ### Added

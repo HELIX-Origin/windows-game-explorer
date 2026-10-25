@@ -4,16 +4,17 @@
 Unicode true
 
 !define APP_NAME "Windows Game Explorer"
-!define APP_VERSION "2.1.1"
+!define APP_VERSION "2.1.2"
 !define APP_PUBLISHER "HELIX Origin"
 !define APP_URL "https://github.com/HELIX-Origin/windows-game-explorer"
 !define APP_EXE_CONFIG "GameExplorerConfig.exe"
 !define APP_EXE_MANAGER "GameExplorerManager.exe"
 !define APP_DLL_SHELL "GameExplorerShell.dll"
+!define APP_EXE_MAIN "${APP_EXE_CONFIG}"
 
-!define MULTIUSER_EXECUTIONLEVEL Highest
+!define MULTIUSER_EXECUTIONLEVEL Admin
 !define MULTIUSER_MUI
-!define MULTIUSER_INSTALLMODE_DEFAULT_CURRENTUSER
+!define MULTIUSER_USE_PROGRAMFILES64
 !define MULTIUSER_INSTALLMODE_COMMANDLINE
 !define MULTIUSER_INSTALLMODE_DEFAULT_REGISTRY_KEY "Software\HELIX-Origin\WindowsGameExplorer"
 !define MULTIUSER_INSTALLMODE_DEFAULT_REGISTRY_VALUENAME "InstallMode"
@@ -83,6 +84,20 @@ Section "MainSection" SecMain
     DetailPrint "Stopping existing processes if running..."
     nsExec::Exec 'taskkill /F /IM GameExplorerConfig.exe /IM GameExplorerManager.exe'
 
+    ; Clean up any leftover temporary files from previous installations
+    Delete "$INSTDIR\GameExplorerShell.*.tmp"
+    Delete "$INSTDIR\GameExplorerShell.dll.old*"
+
+    ; If GameExplorerShell.dll already exists, attempt to unregister and move it aside if locked by Explorer
+    IfFileExists "$INSTDIR\GameExplorerShell.dll" 0 +8
+    ExecWait 'regsvr32.exe /u /s "$INSTDIR\GameExplorerShell.dll"'
+    Delete "$INSTDIR\GameExplorerShell.dll"
+    IfFileExists "$INSTDIR\GameExplorerShell.dll" 0 +5
+    System::Call 'kernel32::GetTickCount() i .r0'
+    Rename "$INSTDIR\GameExplorerShell.dll" "$INSTDIR\GameExplorerShell.dll.old.$0"
+    Delete /REBOOTOK "$INSTDIR\GameExplorerShell.dll.old.$0"
+    Delete /REBOOTOK "$INSTDIR\GameExplorerShell.dll"
+
     ; Write core application files
     File "..\build\Release\GameExplorerShell.dll"
     File "..\build\Release\GameExplorerConfig.exe"
@@ -99,17 +114,20 @@ Section "MainSection" SecMain
     ; Write uninstaller
     WriteUninstaller "$INSTDIR\Uninstall.exe"
 
-    ; Create Start Menu Shortcuts
+    ; Create Start Menu Shortcuts for Manager, Settings, and Uninstaller
+    ; (Native Games.lnk shell shortcuts for Desktop and Start Menu are created by GameExplorerShell.dll registration)
     CreateDirectory "$SMPROGRAMS\Windows Game Explorer"
     CreateShortcut "$SMPROGRAMS\Windows Game Explorer\Windows Game Explorer Settings.lnk" "$INSTDIR\${APP_EXE_CONFIG}" "" "$INSTDIR\${APP_EXE_CONFIG}" 0
     CreateShortcut "$SMPROGRAMS\Windows Game Explorer\Windows Game Explorer Manager.lnk" "$INSTDIR\${APP_EXE_MANAGER}" "" "$INSTDIR\${APP_EXE_MANAGER}" 0
     CreateShortcut "$SMPROGRAMS\Windows Game Explorer\Uninstall Windows Game Explorer.lnk" "$INSTDIR\Uninstall.exe" "" "$INSTDIR\Uninstall.exe" 0
 
     ; Write Add/Remove Programs registration into SHCTX (HKCU or HKLM depending on install mode)
+    WriteRegStr SHCTX "Software\HELIX-Origin\WindowsGameExplorer" "InstallMode" "$MultiUser.InstallMode"
+    WriteRegStr SHCTX "Software\HELIX-Origin\WindowsGameExplorer" "InstallLocation" "$INSTDIR"
     WriteRegStr SHCTX "Software\Microsoft\Windows\CurrentVersion\Uninstall\WindowsGameExplorer" "DisplayName" "${APP_NAME}"
     WriteRegStr SHCTX "Software\Microsoft\Windows\CurrentVersion\Uninstall\WindowsGameExplorer" "DisplayVersion" "${APP_VERSION}"
     WriteRegStr SHCTX "Software\Microsoft\Windows\CurrentVersion\Uninstall\WindowsGameExplorer" "Publisher" "${APP_PUBLISHER}"
-    WriteRegStr SHCTX "Software\Microsoft\Windows\CurrentVersion\Uninstall\WindowsGameExplorer" "DisplayIcon" "$INSTDIR\${APP_EXE_CONFIG},0"
+    WriteRegStr SHCTX "Software\Microsoft\Windows\CurrentVersion\Uninstall\WindowsGameExplorer" "DisplayIcon" "$INSTDIR\${APP_EXE_MAIN},0"
     WriteRegStr SHCTX "Software\Microsoft\Windows\CurrentVersion\Uninstall\WindowsGameExplorer" "UninstallString" '"$INSTDIR\Uninstall.exe"'
     WriteRegStr SHCTX "Software\Microsoft\Windows\CurrentVersion\Uninstall\WindowsGameExplorer" "QuietUninstallString" '"$INSTDIR\Uninstall.exe" /S'
     WriteRegStr SHCTX "Software\Microsoft\Windows\CurrentVersion\Uninstall\WindowsGameExplorer" "InstallLocation" "$INSTDIR"
@@ -131,11 +149,16 @@ Section "Uninstall"
     ; Ensure instances are closed
     nsExec::Exec 'taskkill /F /IM GameExplorerConfig.exe /IM GameExplorerManager.exe'
 
-    ; Unregister COM DLL
+    ; Unregister COM DLL while binary is present
     ExecWait 'regsvr32.exe /u /s "$INSTDIR\GameExplorerShell.dll"'
 
-    ; Remove files
+    ; Remove files (if Shell DLL is in use by Explorer, rename out of the way and schedule deletion)
     Delete "$INSTDIR\GameExplorerShell.dll"
+    IfFileExists "$INSTDIR\GameExplorerShell.dll" 0 +5
+    System::Call 'kernel32::GetTickCount() i .r0'
+    Rename "$INSTDIR\GameExplorerShell.dll" "$INSTDIR\GameExplorerShell.dll.old.$0"
+    Delete /REBOOTOK "$INSTDIR\GameExplorerShell.dll.old.$0"
+    Delete /REBOOTOK "$INSTDIR\GameExplorerShell.dll"
     Delete "$INSTDIR\GameExplorerConfig.exe"
     Delete "$INSTDIR\GameExplorerManager.exe"
     Delete "$INSTDIR\LICENSE"
@@ -145,19 +168,58 @@ Section "Uninstall"
     Delete "$INSTDIR\Uninstall.exe"
     RMDir "$INSTDIR"
 
-    ; Remove Start Menu Shortcuts
+    ; Remove Desktop & Start Menu Shortcuts across both Current User and All Users contexts
+    SetShellVarContext current
+    Delete "$DESKTOP\Games.lnk"
+    Delete "$SMPROGRAMS\Games.lnk"
+    Delete "$SMPROGRAMS\Windows Game Explorer\Games.lnk"
+    Delete "$SMPROGRAMS\Windows Game Explorer\Windows Game Explorer.lnk"
     Delete "$SMPROGRAMS\Windows Game Explorer\Windows Game Explorer Settings.lnk"
     Delete "$SMPROGRAMS\Windows Game Explorer\Windows Game Explorer Manager.lnk"
     Delete "$SMPROGRAMS\Windows Game Explorer\Uninstall Windows Game Explorer.lnk"
     RMDir "$SMPROGRAMS\Windows Game Explorer"
 
-    ; Clean up registry
+    SetShellVarContext all
+    Delete "$DESKTOP\Games.lnk"
+    Delete "$SMPROGRAMS\Games.lnk"
+    Delete "$SMPROGRAMS\Windows Game Explorer\Games.lnk"
+    Delete "$SMPROGRAMS\Windows Game Explorer\Windows Game Explorer.lnk"
+    Delete "$SMPROGRAMS\Windows Game Explorer\Windows Game Explorer Settings.lnk"
+    Delete "$SMPROGRAMS\Windows Game Explorer\Windows Game Explorer Manager.lnk"
+    Delete "$SMPROGRAMS\Windows Game Explorer\Uninstall Windows Game Explorer.lnk"
+    RMDir "$SMPROGRAMS\Windows Game Explorer"
+
+    ; Also ensure OneDrive redirected desktop path is checked
+    Delete "$PROFILE\Desktop\Games.lnk"
+    Delete "$PROFILE\OneDrive\Desktop\Games.lnk"
+
+    ; Clean up all registry entries (both HKLM and HKCU)
     DeleteRegKey SHCTX "Software\Microsoft\Windows\CurrentVersion\Uninstall\WindowsGameExplorer"
     DeleteRegKey SHCTX "Software\HELIX-Origin\WindowsGameExplorer"
     DeleteRegKey HKLM "Software\Microsoft\Windows\CurrentVersion\Explorer\Desktop\NameSpace\{1666B3DF-60A5-4EF3-8B80-962C82401CD1}"
     DeleteRegKey HKCU "Software\Microsoft\Windows\CurrentVersion\Explorer\Desktop\NameSpace\{1666B3DF-60A5-4EF3-8B80-962C82401CD1}"
     DeleteRegKey HKLM "Software\Classes\CLSID\{1666B3DF-60A5-4EF3-8B80-962C82401CD1}"
     DeleteRegKey HKCU "Software\Classes\CLSID\{1666B3DF-60A5-4EF3-8B80-962C82401CD1}"
+    DeleteRegKey HKLM "Software\Classes\CLSID\{6B95F573-0498-4B29-873B-F597E3A042A1}"
+    DeleteRegKey HKCU "Software\Classes\CLSID\{6B95F573-0498-4B29-873B-F597E3A042A1}"
+    ; Clean up canonical FOLDERID_Games ONLY if it points to Windows Game Explorer
+    ReadRegStr $0 HKLM "Software\Microsoft\Windows\CurrentVersion\Explorer\FolderDescriptions\{CAC52C1A-B53D-4EDC-92D7-6B2E8AC19434}" "ParsingName"
+    StrCmp $0 "shell:::{1666B3DF-60A5-4EF3-8B80-962C82401CD1}" 0 +2
+    DeleteRegKey HKLM "Software\Microsoft\Windows\CurrentVersion\Explorer\FolderDescriptions\{CAC52C1A-B53D-4EDC-92D7-6B2E8AC19434}"
+
+    ReadRegStr $0 HKCU "Software\Microsoft\Windows\CurrentVersion\Explorer\FolderDescriptions\{CAC52C1A-B53D-4EDC-92D7-6B2E8AC19434}" "ParsingName"
+    StrCmp $0 "shell:::{1666B3DF-60A5-4EF3-8B80-962C82401CD1}" 0 +2
+    DeleteRegKey HKCU "Software\Microsoft\Windows\CurrentVersion\Explorer\FolderDescriptions\{CAC52C1A-B53D-4EDC-92D7-6B2E8AC19434}"
+    DeleteRegKey HKLM "Software\Microsoft\Windows\CurrentVersion\Explorer\FolderDescriptions\{E1A11BB3-192F-4917-B2FC-5F0832341709}"
+    DeleteRegKey HKCU "Software\Microsoft\Windows\CurrentVersion\Explorer\FolderDescriptions\{E1A11BB3-192F-4917-B2FC-5F0832341709}"
+    DeleteRegKey HKLM "Software\Microsoft\Windows\CurrentVersion\App Paths\GameExplorer.exe"
+    DeleteRegKey HKCU "Software\Microsoft\Windows\CurrentVersion\App Paths\GameExplorer.exe"
+    DeleteRegKey HKLM "Software\Microsoft\Windows\CurrentVersion\App Paths\games.exe"
+    DeleteRegKey HKCU "Software\Microsoft\Windows\CurrentVersion\App Paths\games.exe"
+    DeleteRegValue HKLM "Software\Microsoft\Windows\CurrentVersion\Explorer\HideDesktopIcons\NewStartPanel" "{1666B3DF-60A5-4EF3-8B80-962C82401CD1}"
+    DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\Explorer\HideDesktopIcons\NewStartPanel" "{1666B3DF-60A5-4EF3-8B80-962C82401CD1}"
+    DeleteRegValue HKLM "Software\Microsoft\Windows\CurrentVersion\Explorer\HideDesktopIcons\ClassicStartMenu" "{1666B3DF-60A5-4EF3-8B80-962C82401CD1}"
+    DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\Explorer\HideDesktopIcons\ClassicStartMenu" "{1666B3DF-60A5-4EF3-8B80-962C82401CD1}"
 
     ; Notify shell
     System::Call 'shell32::SHChangeNotify(i 0x08000000, i 0, p 0, p 0)'

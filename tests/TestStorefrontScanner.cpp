@@ -75,16 +75,15 @@ TEST_CASE(CustomLocalGameLifecycle) {
     ASSERT_TRUE(GameExplorer::StorefrontScanner::AddCustomLocalGame(tempExe.wstring(), L"Custom Local Test Game"));
 
     const auto customGames = GameExplorer::StorefrontScanner::ScanCustomGames();
-    std::wstring createdAppId;
+    bool foundAndRemoved = false;
     for (const auto& g : customGames) {
         if (g.title == L"Custom Local Test Game") {
-            createdAppId = g.appId;
-            break;
+            if (GameExplorer::StorefrontScanner::RemoveCustomLocalGame(g.appId)) {
+                foundAndRemoved = true;
+            }
         }
     }
-
-    ASSERT_FALSE(createdAppId.empty());
-    ASSERT_TRUE(GameExplorer::StorefrontScanner::RemoveCustomLocalGame(createdAppId));
+    ASSERT_TRUE(foundAndRemoved);
 
     if (fs::exists(tempExe)) {
         fs::remove(tempExe);

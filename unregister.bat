@@ -64,13 +64,24 @@ echo.
 echo  %C_WHITE%Unregistering Windows Shell Extension with regsvr32...%C_RST%
 regsvr32.exe /u /s "!DLL_PATH!"
 if %errorLevel% equ 0 (
+    del /f /q "%USERPROFILE%\Desktop\Games.lnk" >nul 2>&1
+    del /f /q "%USERPROFILE%\OneDrive\Desktop\Games.lnk" >nul 2>&1
+    del /f /q "%PUBLIC%\Desktop\Games.lnk" >nul 2>&1
+    del /f /q "%APPDATA%\Microsoft\Windows\Start Menu\Programs\Games.lnk" >nul 2>&1
+    del /f /q "%APPDATA%\Microsoft\Windows\Start Menu\Programs\Windows Game Explorer\Games.lnk" >nul 2>&1
+    del /f /q "%PROGRAMDATA%\Microsoft\Windows\Start Menu\Programs\Games.lnk" >nul 2>&1
+    del /f /q "%PROGRAMDATA%\Microsoft\Windows\Start Menu\Programs\Windows Game Explorer\Games.lnk" >nul 2>&1
+    rmdir /s /q "%APPDATA%\Microsoft\Windows\Start Menu\Programs\Windows Game Explorer" >nul 2>&1
+    rmdir /s /q "%PROGRAMDATA%\Microsoft\Windows\Start Menu\Programs\Windows Game Explorer" >nul 2>&1
+
+
     echo.
     echo %C_GREEN%+--------------------------------------------------------------------------+%C_RST%
     echo %C_GREEN%^|%C_BOLD%%C_WHITE%     [SUCCESS] Windows Game Explorer Shell Successfully Unregistered      %C_GREEN%^|%C_RST%
     echo %C_GREEN%+--------------------------------------------------------------------------+%C_RST%
     echo.
     echo  %C_WHITE%Cleaned up all namespace and CLSID registrations from Windows Shell.%C_RST%
-    echo  %C_GRAY%Note: To move or delete the folder, you may need to restart explorer.exe.%C_RST%
+
 ) else (
     echo  %C_RED%[ERROR] Failed to unregister GameExplorerShell.dll (Exit code: %errorLevel%)%C_RST%
 )

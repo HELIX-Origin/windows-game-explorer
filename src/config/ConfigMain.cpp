@@ -953,7 +953,106 @@ LRESULT CALLBACK ConfigWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPara
     return DefWindowProcW(hwnd, uMsg, wParam, lParam);
 }
 
+bool IsRunningElevated() {
+    BOOL isElevated = FALSE;
+    HANDLE hToken = nullptr;
+    if (OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &hToken)) {
+        TOKEN_ELEVATION elevation{};
+        DWORD cbSize = sizeof(elevation);
+        if (GetTokenInformation(hToken, TokenElevation, &elevation, sizeof(elevation), &cbSize)) {
+            isElevated = elevation.TokenIsElevated != 0;
+        }
+        CloseHandle(hToken);
+    }
+    return isElevated != FALSE;
+}
+
+bool ElevateSelf(const wchar_t* argument) {
+    wchar_t exePath[MAX_PATH];
+    GetModuleFileNameW(nullptr, exePath, MAX_PATH);
+
+    SHELLEXECUTEINFOW sei{};
+    sei.cbSize = sizeof(sei);
+    sei.lpVerb = L"runas";
+    sei.lpFile = exePath;
+    sei.lpParameters = argument;
+    sei.nShow = SW_HIDE;
+    sei.fMask = SEE_MASK_NOCLOSEPROCESS;
+    if (ShellExecuteExW(&sei)) {
+        if (sei.hProcess != nullptr) {
+            WaitForSingleObject(sei.hProcess, INFINITE);
+            CloseHandle(sei.hProcess);
+        }
+        return true;
+    }
+    return false;
+}
+
+fs::path FindShellDllPath() {
+    wchar_t exePath[MAX_PATH];
+    GetModuleFileNameW(nullptr, exePath, MAX_PATH);
+    const fs::path dir = fs::path(exePath).parent_path();
+    if (fs::exists(dir / L"GameExplorerShell.dll")) {
+        return dir / L"GameExplorerShell.dll";
+    }
+    if (fs::exists(dir / L"build" / L"Release" / L"GameExplorerShell.dll")) {
+        return dir / L"build" / L"Release" / L"GameExplorerShell.dll";
+    }
+    if (fs::exists(dir / L"Release" / L"GameExplorerShell.dll")) {
+        return dir / L"Release" / L"GameExplorerShell.dll";
+    }
+    return {};
+}
+
+int HandleShellRegistrationCLI(bool doRegister) {
+    if (!IsRunningElevated()) {
+        const wchar_t* arg = doRegister ? L"--register" : L"--unregister";
+        return ElevateSelf(arg) ? 0 : 1;
+    }
+
+    const fs::path dllPath = FindShellDllPath();
+    if (dllPath.empty()) {
+        return 2;
+    }
+
+    std::wstring params = doRegister ? L"/s \"" : L"/u /s \"";
+    params += dllPath.wstring() + L"\"";
+
+    SHELLEXECUTEINFOW sei{};
+    sei.cbSize = sizeof(sei);
+    sei.lpVerb = L"open";
+    sei.lpFile = L"regsvr32.exe";
+    sei.lpParameters = params.c_str();
+    sei.nShow = SW_HIDE;
+    sei.fMask = SEE_MASK_NOCLOSEPROCESS;
+    if (ShellExecuteExW(&sei)) {
+        if (sei.hProcess != nullptr) {
+            WaitForSingleObject(sei.hProcess, INFINITE);
+            CloseHandle(sei.hProcess);
+        }
+    }
+
+    SHChangeNotify(SHCNE_ASSOCCHANGED, SHCNF_IDLIST, nullptr, nullptr);
+    return 0;
+}
+
 int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE /*hPrevInstance*/, PWSTR /*lpCmdLine*/, int nCmdShow) {
+    int argc = 0;
+    PWSTR* argv = CommandLineToArgvW(GetCommandLineW(), &argc);
+    if (argv != nullptr) {
+        for (int i = 1; i < argc; ++i) {
+            const std::wstring_view arg = argv[i];
+            if (arg == L"--register" || arg == L"/register" || arg == L"-register") {
+                LocalFree(argv);
+                return HandleShellRegistrationCLI(true);
+            }
+            if (arg == L"--unregister" || arg == L"/unregister" || arg == L"-unregister") {
+                LocalFree(argv);
+                return HandleShellRegistrationCLI(false);
+            }
+        }
+        LocalFree(argv);
+    }
     INITCOMMONCONTROLSEX icex{};
     icex.dwSize = sizeof(icex);
     icex.dwICC = ICC_STANDARD_CLASSES | ICC_WIN95_CLASSES;

@@ -31,6 +31,9 @@ public:
     // Performs direct in-memory scan of all installed storefronts without database intermediate bottleneck
     static std::vector<GameItem> ScanAllInstalledGames();
 
+    // Direct instant load from all %USERPROFILE%\Game Explorer\metadata\*.json files
+    static std::vector<GameItem> LoadAllGamesFromMetadata();
+
     // Per-game metadata.json file persistence in %USERPROFILE%\Game Explorer\metadata\<appId>.json
     static bool LoadPerGameMetadata(GameItem& item);
     static bool SavePerGameMetadata(const GameItem& item);
@@ -96,6 +99,10 @@ public:
 
     // Utility & filtering helpers
     static bool IsBlacklistedExecutable(const std::wstring& filename);
+
+    // NSFW & mature content detection helpers (ensures adult games auto-fetch authentic NSFW art)
+    static bool IsNsfwGame(const GameItem& item);
+    static bool IsNsfwText(const std::wstring& text);
 
     // Drive & library utilities
     static std::vector<std::wstring> GetAllMountedDrives();
