@@ -110,8 +110,17 @@ std::wstring FindUninstallExecutable(const std::wstring& displayNameFilter, cons
 
             std::wstring lowerDisp = dispName;
             std::transform(lowerDisp.begin(), lowerDisp.end(), lowerDisp.begin(), ::towlower);
-            if (lowerDisp.find(lowerFilter) == std::wstring::npos) {
+            const size_t matchPos = lowerDisp.find(lowerFilter);
+            if (matchPos == std::wstring::npos) {
                 continue;
+            }
+            // Avoid false positives like matching "vice" inside "service" or "device"
+            if (lowerFilter == L"vice") {
+                if (lowerDisp.find(L"service") != std::wstring::npos ||
+                    lowerDisp.find(L"device") != std::wstring::npos ||
+                    lowerDisp.find(L"advice") != std::wstring::npos) {
+                    continue;
+                }
             }
 
             // 1. Check InstallLocation or InstallPath
@@ -135,8 +144,11 @@ std::wstring FindUninstallExecutable(const std::wstring& displayNameFilter, cons
                         RegCloseKey(hParent);
                         return sibling.wstring();
                     }
-                }
-                if (!StorefrontScanner::IsBlacklistedExecutable(fs::path(iconExe).filename().wstring())) {
+                    if (_wcsicmp(fs::path(iconExe).filename().c_str(), targetExeName) == 0) {
+                        RegCloseKey(hParent);
+                        return iconExe;
+                    }
+                } else if (!StorefrontScanner::IsBlacklistedExecutable(fs::path(iconExe).filename().wstring())) {
                     RegCloseKey(hParent);
                     return iconExe;
                 }
