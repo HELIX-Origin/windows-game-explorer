@@ -10,12 +10,16 @@
 #include <thread>
 #include <atomic>
 #include "GameExplorerCore/DarkMode.h"
+#include "GameExplorerCore/ThemeControls.h"
 #include "GameExplorerCore/Settings.h"
+#include "GameExplorerCore/AchievementEngine.h"
 #include "GameExplorerCore/Database.h"
 #include "GameExplorerCore/Storage.h"
 #include "GameExplorerCore/Guid.h"
 #include "GameExplorerCore/StorefrontScanner.h"
 #include "GameExplorerCore/Localization.h"
+#include "GameExplorerCore/StudioPages.h"
+#include "GameExplorerCore/InstallTargets.h"
 
 #pragma comment(lib, "dwmapi.lib")
 
@@ -38,13 +42,34 @@
 namespace fs = std::filesystem;
 using namespace GameExplorer;
 
+// The Configuration page of GameExplorerStudio.exe. The anonymous namespace keeps every symbol
+// TU-local so this page and the Library Manager page can be linked into the same executable
+// without collisions.
+namespace {
+
+constexpr const wchar_t* CONFIG_WINDOW_CLASS = L"GameExplorerConfigWnd";
+
 constexpr int TITLE_BAR_HEIGHT = 38;
+
+// Page mode: the Studio frame owns the title bar and message loop, so the page has no title bar
+// band and lays its cards out from y = 12 instead of y = TITLE_BAR_HEIGHT + 12.
+bool g_pageMode = false;
+int g_titleBarHeight = TITLE_BAR_HEIGHT;
+bool g_resourcesReady = false;
 
 enum class TitleButton { None, Min, Max, Close };
 TitleButton g_hoverBtn = TitleButton::None;
 TitleButton g_pressedBtn = TitleButton::None;
 bool g_trackingMouse = false;
 HICON g_hAppIcon = nullptr;
+
+HFONT g_hFont = nullptr;
+HFONT g_hFontBold = nullptr;
+bool g_isDarkMode = false;
+ThemePalette g_palette{};
+HBRUSH g_hBgBrush = nullptr;
+HBRUSH g_hCardBrush = nullptr;
+HBRUSH g_hEditBrush = nullptr;
 
 RECT GetPillRect(int w) {
     return RECT{ w - 96, 6, w - 8, 32 };
@@ -76,6 +101,41 @@ TitleButton HitTestTitleButtons(int x, int y, int w) {
     return TitleButton::None;
 }
 
+LRESULT CALLBACK ConfigWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
+
+void EnsureConfigResources() {
+    if (g_resourcesReady) return;
+
+    DarkMode::Initialize();
+    g_isDarkMode = DarkMode::IsSystemDarkMode();
+    g_palette = DarkMode::GetPalette(g_isDarkMode);
+    g_hBgBrush = CreateSolidBrush(g_palette.canvasBg);
+    g_hCardBrush = CreateSolidBrush(g_palette.cardBg);
+
+    // Publish the palette before deriving the edit brush: FieldSurfaceColor() reads the shared
+    // palette, and a brush created from the zero-initialised one is solid black, which makes every
+    // field erase its background to black. The real font is installed in WM_CREATE.
+    ThemeControls::SetTheme(g_palette, g_hFont, g_isDarkMode);
+    g_hEditBrush = CreateSolidBrush(ThemeControls::FieldSurfaceColor());
+    g_resourcesReady = true;
+}
+
+void EnsureConfigWindowClass(HINSTANCE instance) {
+    static bool registered = false;
+    if (registered) return;
+
+    WNDCLASSEXW wc{};
+    wc.cbSize = sizeof(wc);
+    wc.style = CS_HREDRAW | CS_VREDRAW;
+    wc.lpfnWndProc = ConfigWndProc;
+    wc.hInstance = instance;
+    wc.hCursor = LoadCursorW(nullptr, IDC_ARROW);
+    wc.hbrBackground = g_hBgBrush;
+    wc.lpszClassName = CONFIG_WINDOW_CLASS;
+    RegisterClassExW(&wc);
+    registered = true;
+}
+
 constexpr int IDC_LBL_INTEGRATION_STATUS = 2001;
 constexpr int IDC_BTN_OPEN_EXPLORER      = 2002;
 constexpr int IDC_BTN_SCAN_LIBRARY       = 2003;
@@ -92,6 +152,11 @@ constexpr int IDC_BTN_SYNC_ONEDRIVE      = 2015;
 
 constexpr int IDC_CHK_ONEDRIVE           = 2030;
 constexpr int IDC_BTN_SAVE               = 2031;
+constexpr int IDC_CHK_AUTO_ACHIEVEMENTS  = 2032;
+constexpr int IDC_BTN_SYNC_ACHIEVEMENTS  = 2033;
+
+constexpr int WM_APP_ACHIEVEMENT_SYNC_PROGRESS = WM_APP + 51;
+constexpr int WM_APP_ACHIEVEMENT_SYNC_COMPLETE = WM_APP + 52;
 
 constexpr int IDC_EDT_STEAM_KEY          = 2040;
 constexpr int IDC_EDT_STEAM_ID           = 2041;
@@ -101,6 +166,8 @@ constexpr int IDC_EDT_SGDB_KEY           = 2044;
 constexpr int IDC_EDT_IGDB_CLIENT_ID     = 2045;
 constexpr int IDC_EDT_IGDB_CLIENT_SECRET = 2046;
 constexpr int IDC_BTN_RESET_CACHE        = 2047;
+constexpr int IDC_EDT_INSTALL_BASE       = 2048;
+constexpr int IDC_BTN_BROWSE_INSTALL_BASE = 2049;
 
 HWND g_hwndLblIntegrationStatus = nullptr;
 HWND g_hwndBtnScanLibrary       = nullptr;
@@ -114,6 +181,12 @@ HWND g_hwndBtnLaunchManager   = nullptr;
 HWND g_hwndBtnOpenMetadataDir = nullptr;
 HWND g_hwndChkOneDrive        = nullptr;
 
+HWND g_hwndChkAutoAchievements  = nullptr;
+HWND g_hwndBtnSyncAchievements  = nullptr;
+std::atomic<bool> g_isSyncingAchievements{ false };
+std::atomic<size_t> g_achSyncCompleted{ 0 };
+std::atomic<size_t> g_achSyncTotal{ 0 };
+
 HWND g_hwndEdtSteamKey          = nullptr;
 HWND g_hwndEdtSteamId           = nullptr;
 HWND g_hwndEdtRaUser            = nullptr;
@@ -121,14 +194,155 @@ HWND g_hwndEdtRaKey             = nullptr;
 HWND g_hwndEdtSgdbKey           = nullptr;
 HWND g_hwndEdtIgdbClientId      = nullptr;
 HWND g_hwndEdtIgdbClientSecret  = nullptr;
+HWND g_hwndEdtInstallBase        = nullptr;
+HWND g_hwndBtnBrowseInstallBase  = nullptr;
+HWND g_hwndLblInstallBase        = nullptr;
 
-HFONT g_hFont = nullptr;
-HFONT g_hFontBold = nullptr;
-bool g_isDarkMode = false;
-ThemePalette g_palette{};
-HBRUSH g_hBgBrush = nullptr;
-HBRUSH g_hCardBrush = nullptr;
-HBRUSH g_hEditBrush = nullptr;
+// Controls that only need to exist for layout (no command handling) still need a stable handle
+// so the page can be re-flowed whenever the Studio frame resizes it.
+HWND g_hwndBtnOpenExplorer     = nullptr;
+HWND g_hwndBtnOpenOneDriveDir  = nullptr;
+HWND g_hwndBtnSyncOneDrive     = nullptr;
+HWND g_hwndBtnSave             = nullptr;
+HWND g_hwndBtnResetCache       = nullptr;
+HWND g_hwndLblSteamKey         = nullptr;
+HWND g_hwndLblSteamId          = nullptr;
+HWND g_hwndLblRaUser           = nullptr;
+HWND g_hwndLblRaKey            = nullptr;
+HWND g_hwndLblAchHelp          = nullptr;
+HWND g_hwndLblSgdbKey          = nullptr;
+HWND g_hwndLblIgdbId           = nullptr;
+HWND g_hwndLblIgdbSecret       = nullptr;
+HWND g_hwndLblFallbackHelp     = nullptr;
+
+// Card geometry is computed on every resize and shared by the layout and paint paths, so the
+// rounded card panels and the controls inside them can never drift apart.
+constexpr int CARD_COUNT = 5;
+constexpr int CARD_HEIGHTS[CARD_COUNT] = { 100, 152, 150, 190, 122 };
+constexpr int CARD_GAP = 12;
+constexpr int PAGE_MARGIN = 20;
+constexpr int CARD_PADDING = 16;
+constexpr int MIN_CARD_WIDTH = 600;
+
+RECT g_cardRects[CARD_COUNT]{};
+RECT g_saveRect{};
+RECT g_resetCacheRect{};
+
+void ComputeConfigLayout(int w) {
+    const int left = PAGE_MARGIN;
+    const int right = (std::max)(left + MIN_CARD_WIDTH, w - PAGE_MARGIN);
+
+    int y = g_titleBarHeight + 12;
+    for (int i = 0; i < CARD_COUNT; ++i) {
+        g_cardRects[i] = RECT{ left, y, right, y + CARD_HEIGHTS[i] };
+        y += CARD_HEIGHTS[i] + CARD_GAP;
+    }
+
+    g_saveRect = RECT{ left, y, left + 190, y + 38 };
+    g_resetCacheRect = RECT{ left + 200, y, left + 390, y + 38 };
+}
+
+/**
+ * Re-flows every control into the card geometry for the current client width. Called after the
+ * controls are created and again on every WM_SIZE, so the page stretches with the Studio frame
+ * instead of staying pinned to its original 640px column.
+ */
+void LayoutConfigControls(HWND hwnd) {
+    RECT client{};
+    GetClientRect(hwnd, &client);
+    const int width = client.right - client.left;
+    if (width <= 0) return;
+
+    ComputeConfigLayout(width);
+
+    auto place = [](HWND control, int x, int y, int cx, int cy) {
+        if (control == nullptr || !IsWindow(control)) return;
+        SetWindowPos(control, nullptr, x, y, (std::max)(1, cx), (std::max)(1, cy),
+                     SWP_NOZORDER | SWP_NOACTIVATE);
+    };
+    auto placeRect = [&place](HWND control, const RECT& rect) {
+        place(control, rect.left, rect.top, rect.right - rect.left, rect.bottom - rect.top);
+    };
+
+    const RECT card0 = g_cardRects[0];
+    const RECT card1 = g_cardRects[1];
+    const RECT card2 = g_cardRects[2];
+    const RECT card3 = g_cardRects[3];
+    const RECT card4 = g_cardRects[4];
+
+    const int innerLeft = card0.left + CARD_PADDING;
+    const int innerWidth = (card0.right - CARD_PADDING) - innerLeft;
+    const int half = (innerWidth - 12) / 2;
+
+    // Card 0: shell integration.
+    place(g_hwndLblIntegrationStatus, innerLeft, card0.top + 34, innerWidth, 20);
+    place(g_hwndBtnOpenExplorer, innerLeft, card0.top + 58, half, 32);
+    place(g_hwndBtnScanLibrary, innerLeft + half + 12, card0.top + 58, innerWidth - half - 12, 32);
+
+    // Card 1: layout choice + Manager entry point.
+    place(g_hwndRadLayoutCover, innerLeft, card1.top + 32, innerWidth, 22);
+    place(g_hwndRadLayoutHero, innerLeft, card1.top + 56, innerWidth, 22);
+    place(g_hwndRadLayoutDetails, innerLeft, card1.top + 80, innerWidth, 22);
+    place(g_hwndBtnLaunchManager, innerLeft, card1.top + 112, 235, 32);
+
+    // Card 2: OneDrive sync + metadata folder actions.
+    place(g_hwndChkOneDrive, innerLeft, card2.top + 34, innerWidth, 22);
+    const int actionWidth = (innerWidth - 16) / 3;
+    place(g_hwndBtnOpenMetadataDir, innerLeft, card2.top + 64, actionWidth, 30);
+    place(g_hwndBtnOpenOneDriveDir, innerLeft + actionWidth + 8, card2.top + 64, actionWidth, 30);
+    place(g_hwndBtnSyncOneDrive, innerLeft + (actionWidth + 8) * 2, card2.top + 64,
+          innerWidth - (actionWidth + 8) * 2, 30);
+
+    // Card 2 also holds the one base folder the catalogue installs into. Each storefront gets its
+    // own subfolder inside it; a per-install custom folder stays available in the catalogue.
+    const int browseWidth = 96;
+    const int installLabelWidth = 148;
+    place(g_hwndLblInstallBase, innerLeft, card2.top + 106, installLabelWidth, 20);
+    place(g_hwndEdtInstallBase, innerLeft + installLabelWidth, card2.top + 102,
+          innerWidth - installLabelWidth - browseWidth - 8, ThemeControls::kFieldHeight);
+    place(g_hwndBtnBrowseInstallBase, innerLeft + innerWidth - browseWidth, card2.top + 102,
+          browseWidth, ThemeControls::kFieldHeight);
+
+    // Card 3: achievement credentials (two label/field rows that share the row width).
+    const int fieldH = ThemeControls::kFieldHeight;
+    const int row1Y = card3.top + 32;
+    const int steamIdLabelW = 76;
+    const int steamIdEditW = 140;
+    const int steamIdEditX = innerLeft + innerWidth - steamIdEditW;
+    const int steamIdLabelX = steamIdEditX - 4 - steamIdLabelW;
+    const int steamKeyEditX = innerLeft + 140;
+    place(g_hwndLblSteamKey, innerLeft, row1Y + 4, 136, 20);
+    place(g_hwndEdtSteamKey, steamKeyEditX, row1Y, steamIdLabelX - 8 - steamKeyEditX, fieldH);
+    place(g_hwndLblSteamId, steamIdLabelX, row1Y + 4, steamIdLabelW, 20);
+    place(g_hwndEdtSteamId, steamIdEditX, row1Y, steamIdEditW, fieldH);
+
+    const int row2Y = card3.top + 64;
+    const int raKeyEditX = innerLeft + 460;
+    place(g_hwndLblRaUser, innerLeft, row2Y + 4, 148, 20);
+    place(g_hwndEdtRaUser, innerLeft + 152, row2Y, 130, fieldH);
+    place(g_hwndLblRaKey, innerLeft + 290, row2Y + 4, 166, 20);
+    place(g_hwndEdtRaKey, raKeyEditX, row2Y, innerLeft + innerWidth - raKeyEditX, fieldH);
+
+    place(g_hwndLblAchHelp, innerLeft, card3.top + 98, innerWidth, 20);
+    place(g_hwndChkAutoAchievements, innerLeft, card3.top + 124, innerWidth, 22);
+    place(g_hwndBtnSyncAchievements, innerLeft, card3.top + 152, 260, 32);
+
+    // Card 4: optional fallback metadata providers.
+    const int sgdbEditX = innerLeft + 154;
+    place(g_hwndLblSgdbKey, innerLeft, card4.top + 36, 150, 20);
+    place(g_hwndEdtSgdbKey, sgdbEditX, card4.top + 32, innerLeft + innerWidth - sgdbEditX, fieldH);
+
+    const int igdbSecretEditX = innerLeft + 424;
+    place(g_hwndLblIgdbId, innerLeft, card4.top + 68, 116, 20);
+    place(g_hwndEdtIgdbClientId, innerLeft + 120, card4.top + 64, 160, fieldH);
+    place(g_hwndLblIgdbSecret, innerLeft + 290, card4.top + 68, 130, 20);
+    place(g_hwndEdtIgdbClientSecret, igdbSecretEditX, card4.top + 64,
+          innerLeft + innerWidth - igdbSecretEditX, fieldH);
+    place(g_hwndLblFallbackHelp, innerLeft, card4.top + 98, innerWidth, 20);
+
+    placeRect(g_hwndBtnSave, g_saveRect);
+    placeRect(g_hwndBtnResetCache, g_resetCacheRect);
+}
 
 bool IsIntegrationEnabled() {
     HKEY hKey = nullptr;
@@ -167,17 +381,12 @@ void UpdateIntegrationStatusUI() {
 }
 
 void LaunchGameExplorerManager(HWND hwndParent) {
-    wchar_t exePath[MAX_PATH];
-    GetModuleFileNameW(nullptr, exePath, MAX_PATH);
-    const fs::path dir = fs::path(exePath).parent_path();
-    const fs::path managerPath = dir / L"GameExplorerManager.exe";
-
-    if (!fs::exists(managerPath)) {
-        MessageBoxW(hwndParent, L"GameExplorerManager.exe not found in the application directory.", L"Windows Game Explorer", MB_OK | MB_ICONERROR);
-        return;
-    }
-
-    ShellExecuteW(hwndParent, L"open", managerPath.c_str(), nullptr, dir.c_str(), SW_SHOWNORMAL);
+    // The Manager is a sibling page of this Configuration page inside the single Studio window,
+    // so "Open Game Explorer Manager" is a tab switch, not a second process.
+    const HWND studio = GetAncestor(hwndParent, GA_ROOT);
+    if (studio == nullptr) return;
+    PostMessageW(studio, Studio::WM_SELECT_TAB,
+                 static_cast<WPARAM>(Studio::Tab::Manager), 0);
 }
 
 void LoadConfigValues() {
@@ -188,6 +397,9 @@ void LoadConfigValues() {
     SendMessageW(g_hwndRadLayoutDetails, BM_SETCHECK, (s.layoutMode == LayoutMode::DetailsView) ? BST_CHECKED : BST_UNCHECKED, 0);
 
     SendMessageW(g_hwndChkOneDrive, BM_SETCHECK, s.enableOneDriveBackup ? BST_CHECKED : BST_UNCHECKED, 0);
+    if (g_hwndChkAutoAchievements != nullptr) {
+        SendMessageW(g_hwndChkAutoAchievements, BM_SETCHECK, s.autoSyncAchievements ? BST_CHECKED : BST_UNCHECKED, 0);
+    }
 
     if (g_hwndEdtSteamKey != nullptr) SetWindowTextW(g_hwndEdtSteamKey, s.steamWebApiKey.c_str());
     if (g_hwndEdtSteamId != nullptr)  SetWindowTextW(g_hwndEdtSteamId, s.steamId64.c_str());
@@ -196,6 +408,13 @@ void LoadConfigValues() {
     if (g_hwndEdtSgdbKey != nullptr)  SetWindowTextW(g_hwndEdtSgdbKey, s.steamGridDbApiKey.c_str());
     if (g_hwndEdtIgdbClientId != nullptr)     SetWindowTextW(g_hwndEdtIgdbClientId, s.igdbClientId.c_str());
     if (g_hwndEdtIgdbClientSecret != nullptr) SetWindowTextW(g_hwndEdtIgdbClientSecret, s.igdbClientSecret.c_str());
+
+    // Show the effective folder, not an empty box: a blank setting means "use the default".
+    if (g_hwndEdtInstallBase != nullptr) {
+        const std::wstring installBase =
+            s.installBaseFolder.empty() ? DefaultInstallBaseFolder() : s.installBaseFolder;
+        SetWindowTextW(g_hwndEdtInstallBase, installBase.c_str());
+    }
 
     UpdateIntegrationStatusUI();
 }
@@ -245,6 +464,10 @@ void SaveConfigValues(HWND hwndParent) {
 
     s.enableOneDriveBackup = (SendMessageW(g_hwndChkOneDrive, BM_GETCHECK, 0, 0) == BST_CHECKED);
 
+    if (g_hwndChkAutoAchievements != nullptr) {
+        s.autoSyncAchievements = (SendMessageW(g_hwndChkAutoAchievements, BM_GETCHECK, 0, 0) == BST_CHECKED);
+    }
+
     wchar_t buf[512] = { 0 };
     if (g_hwndEdtSteamKey != nullptr) {
         GetWindowTextW(g_hwndEdtSteamKey, buf, 512);
@@ -274,6 +497,10 @@ void SaveConfigValues(HWND hwndParent) {
         GetWindowTextW(g_hwndEdtIgdbClientSecret, buf, 512);
         s.igdbClientSecret = buf;
     }
+    if (g_hwndEdtInstallBase != nullptr) {
+        GetWindowTextW(g_hwndEdtInstallBase, buf, 512);
+        s.installBaseFolder = buf;
+    }
 
     if (SettingsManager::Save(s)) {
         if (s.enableOneDriveBackup) {
@@ -290,6 +517,11 @@ void SaveConfigValues(HWND hwndParent) {
 LRESULT CALLBACK ConfigWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
     switch (uMsg) {
     case WM_CREATE: {
+        if (lParam != 0) {
+            g_pageMode = true;
+            g_titleBarHeight = 0;
+        }
+
         NONCLIENTMETRICSW ncm{};
         ncm.cbSize = sizeof(ncm);
         SystemParametersInfoW(SPI_GETNONCLIENTMETRICS, sizeof(ncm), &ncm, 0);
@@ -298,196 +530,147 @@ LRESULT CALLBACK ConfigWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPara
         ncm.lfMessageFont.lfWeight = FW_BOLD;
         g_hFontBold = CreateFontIndirectW(&ncm.lfMessageFont);
 
+        ThemeControls::SetTheme(g_palette, g_hFont, g_isDarkMode);
+
         g_hAppIcon = static_cast<HICON>(LoadImageW(
             GetModuleHandleW(nullptr), MAKEINTRESOURCEW(100), IMAGE_ICON, 16, 16, LR_DEFAULTCOLOR
         ));
 
-        const wchar_t* themeName = g_isDarkMode ? L"DarkMode_Explorer" : L"Explorer";
+        // Controls are created once then positioned by LayoutConfigControls(), so the initial
+        // layout and every resize share exactly one geometry implementation.
+        auto makeStatic = [&](const wchar_t* text, int id) -> HWND {
+            HWND control = CreateWindowExW(0, L"STATIC", text, WS_CHILD | WS_VISIBLE, 0, 0, 10, 10, hwnd,
+                id != 0 ? reinterpret_cast<HMENU>(static_cast<INT_PTR>(id)) : nullptr, nullptr, nullptr);
+            SendMessageW(control, WM_SETFONT, reinterpret_cast<WPARAM>(g_hFont), TRUE);
+            return control;
+        };
+        auto makeButton = [&](const wchar_t* text, int id, DWORD style, HFONT font) -> HWND {
+            HWND control = CreateWindowExW(0, L"BUTTON", text, WS_CHILD | WS_VISIBLE | style, 0, 0, 10, 10, hwnd,
+                reinterpret_cast<HMENU>(static_cast<INT_PTR>(id)), nullptr, nullptr);
+            SendMessageW(control, WM_SETFONT, reinterpret_cast<WPARAM>(font), TRUE);
+            return control;
+        };
+        auto makeEdit = [&](int id, bool password) -> HWND {
+            HWND control = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", L"",
+                WS_CHILD | WS_VISIBLE | ES_AUTOHSCROLL | (password ? ES_PASSWORD : 0u), 0, 0, 10, 10, hwnd,
+                reinterpret_cast<HMENU>(static_cast<INT_PTR>(id)), nullptr, nullptr);
+            SendMessageW(control, WM_SETFONT, reinterpret_cast<WPARAM>(g_hFont), TRUE);
+            ThemeControls::ApplyFieldFrame(control);
+            return control;
+        };
+        auto makeCheck = [&](const wchar_t* text, int id, DWORD style) -> HWND {
+            HWND control = makeButton(text, id, style | BS_OWNERDRAW, g_hFont);
+            ThemeControls::AttachCheck(control);
+            return control;
+        };
 
         // Card 0: File Explorer Shell Integration
-        constexpr int card0Y = TITLE_BAR_HEIGHT + 12;
-        g_hwndLblIntegrationStatus = CreateWindowExW(0, L"STATIC", L"Integration Status: Checking...",
-            WS_CHILD | WS_VISIBLE,
-            36, card0Y + 34, 540, 20, hwnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_LBL_INTEGRATION_STATUS)), nullptr, nullptr);
-        SendMessageW(g_hwndLblIntegrationStatus, WM_SETFONT, reinterpret_cast<WPARAM>(g_hFont), TRUE);
-
-        HWND hBtnOpen = CreateWindowExW(0, L"BUTTON", L"Open Games in File Explorer",
-            WS_CHILD | WS_VISIBLE | BS_OWNERDRAW,
-            36, card0Y + 58, 260, 32, hwnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_BTN_OPEN_EXPLORER)), nullptr, nullptr);
-        SendMessageW(hBtnOpen, WM_SETFONT, reinterpret_cast<WPARAM>(g_hFont), TRUE);
-
-        g_hwndBtnScanLibrary = CreateWindowExW(0, L"BUTTON", L"Scan & Populate Library",
-            WS_CHILD | WS_VISIBLE | BS_OWNERDRAW,
-            310, card0Y + 58, 260, 32, hwnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_BTN_SCAN_LIBRARY)), nullptr, nullptr);
-        SendMessageW(g_hwndBtnScanLibrary, WM_SETFONT, reinterpret_cast<WPARAM>(g_hFontBold), TRUE);
+        g_hwndLblIntegrationStatus = makeStatic(L"Integration Status: Checking...", IDC_LBL_INTEGRATION_STATUS);
+        g_hwndBtnOpenExplorer = makeButton(L"Open Games in File Explorer", IDC_BTN_OPEN_EXPLORER,
+                                           BS_OWNERDRAW, g_hFont);
+        g_hwndBtnScanLibrary = makeButton(L"Scan & Populate Library", IDC_BTN_SCAN_LIBRARY,
+                                          BS_OWNERDRAW, g_hFontBold);
 
         // Card 1: Default WinUI XAML Viewport Layout & Game Explorer Manager
-        constexpr int card1Y = card0Y + 105 + 12;
-        g_hwndRadLayoutCover = CreateWindowExW(0, L"BUTTON",
+        g_hwndRadLayoutCover = makeButton(
             L"Box Art Grid (~2:3 Vertical Retail Box Art Cards \u2014 Default)",
-            WS_CHILD | WS_VISIBLE | BS_AUTORADIOBUTTON | WS_GROUP,
-            36, card1Y + 32, 540, 22, hwnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_RAD_LAYOUT_COVER)), nullptr, nullptr);
-        SendMessageW(g_hwndRadLayoutCover, WM_SETFONT, reinterpret_cast<WPARAM>(g_hFont), TRUE);
-        SetWindowTheme(g_hwndRadLayoutCover, themeName, nullptr);
-
-        g_hwndRadLayoutHero = CreateWindowExW(0, L"BUTTON",
+            IDC_RAD_LAYOUT_COVER, BS_OWNERDRAW | WS_GROUP, g_hFont);
+        ThemeControls::AttachRadio(g_hwndRadLayoutCover);
+        g_hwndRadLayoutHero = makeButton(
             L"Hero Banner Grid (~16:9 Wide Banner Cards)",
-            WS_CHILD | WS_VISIBLE | BS_AUTORADIOBUTTON,
-            36, card1Y + 56, 540, 22, hwnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_RAD_LAYOUT_HERO)), nullptr, nullptr);
-        SendMessageW(g_hwndRadLayoutHero, WM_SETFONT, reinterpret_cast<WPARAM>(g_hFont), TRUE);
-        SetWindowTheme(g_hwndRadLayoutHero, themeName, nullptr);
-
-        g_hwndRadLayoutDetails = CreateWindowExW(0, L"BUTTON",
+            IDC_RAD_LAYOUT_HERO, BS_OWNERDRAW, g_hFont);
+        ThemeControls::AttachRadio(g_hwndRadLayoutHero);
+        g_hwndRadLayoutDetails = makeButton(
             L"Details List (Structured Table with Icon, Title, Provider, Size && Rating)",
-            WS_CHILD | WS_VISIBLE | BS_AUTORADIOBUTTON,
-            36, card1Y + 80, 540, 22, hwnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_RAD_LAYOUT_DETAILS)), nullptr, nullptr);
-        SendMessageW(g_hwndRadLayoutDetails, WM_SETFONT, reinterpret_cast<WPARAM>(g_hFont), TRUE);
-        SetWindowTheme(g_hwndRadLayoutDetails, themeName, nullptr);
-
-        g_hwndBtnLaunchManager = CreateWindowExW(0, L"BUTTON", Localization::GetStrings().configManageMetadataBtn,
-            WS_CHILD | WS_VISIBLE | BS_OWNERDRAW,
-            36, card1Y + 112, 235, 32, hwnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_BTN_LAUNCH_MANAGER)), nullptr, nullptr);
-        SendMessageW(g_hwndBtnLaunchManager, WM_SETFONT, reinterpret_cast<WPARAM>(g_hFontBold), TRUE);
+            IDC_RAD_LAYOUT_DETAILS, BS_OWNERDRAW, g_hFont);
+        ThemeControls::AttachRadio(g_hwndRadLayoutDetails);
+        g_hwndBtnLaunchManager = makeButton(Localization::GetStrings().configManageMetadataBtn,
+                                            IDC_BTN_LAUNCH_MANAGER, BS_OWNERDRAW, g_hFontBold);
 
         // Card 2: Cloud Sync & Local Metadata Storage
-        constexpr int card2Y = card1Y + 158 + 12;
-        g_hwndChkOneDrive = CreateWindowExW(0, L"BUTTON",
-            L"Synchronize per-game metadata overrides to local OneDrive folder",
-            WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX,
-            36, card2Y + 34, 540, 22, hwnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_CHK_ONEDRIVE)), nullptr, nullptr);
-        SendMessageW(g_hwndChkOneDrive, WM_SETFONT, reinterpret_cast<WPARAM>(g_hFont), TRUE);
-        SetWindowTheme(g_hwndChkOneDrive, themeName, nullptr);
-
-        g_hwndBtnOpenMetadataDir = CreateWindowExW(0, L"BUTTON", L"Open Metadata Folder",
-            WS_CHILD | WS_VISIBLE | BS_OWNERDRAW,
-            36, card2Y + 64, 170, 30, hwnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_BTN_OPEN_METADATA_DIR)), nullptr, nullptr);
-        SendMessageW(g_hwndBtnOpenMetadataDir, WM_SETFONT, reinterpret_cast<WPARAM>(g_hFont), TRUE);
-
-        HWND hBtnOpenOneDrive = CreateWindowExW(0, L"BUTTON", L"Open OneDrive Folder",
-            WS_CHILD | WS_VISIBLE | BS_OWNERDRAW,
-            214, card2Y + 64, 175, 30, hwnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_BTN_OPEN_ONEDRIVE_DIR)), nullptr, nullptr);
-        SendMessageW(hBtnOpenOneDrive, WM_SETFONT, reinterpret_cast<WPARAM>(g_hFont), TRUE);
-
-        HWND hBtnSyncOneDrive = CreateWindowExW(0, L"BUTTON", L"Sync to OneDrive Now",
-            WS_CHILD | WS_VISIBLE | BS_OWNERDRAW,
-            397, card2Y + 64, 180, 30, hwnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_BTN_SYNC_ONEDRIVE)), nullptr, nullptr);
-        SendMessageW(hBtnSyncOneDrive, WM_SETFONT, reinterpret_cast<WPARAM>(g_hFontBold), TRUE);
+        g_hwndChkOneDrive = makeCheck(L"Synchronize per-game metadata overrides to local OneDrive folder",
+                                      IDC_CHK_ONEDRIVE, 0);
+        g_hwndBtnOpenMetadataDir = makeButton(L"Open Metadata Folder", IDC_BTN_OPEN_METADATA_DIR,
+                                              BS_OWNERDRAW, g_hFont);
+        g_hwndBtnOpenOneDriveDir = makeButton(L"Open OneDrive Folder", IDC_BTN_OPEN_ONEDRIVE_DIR,
+                                               BS_OWNERDRAW, g_hFont);
+        g_hwndBtnSyncOneDrive = makeButton(L"Sync to OneDrive Now", IDC_BTN_SYNC_ONEDRIVE,
+                                            BS_OWNERDRAW, g_hFontBold);
+        g_hwndLblInstallBase = makeStatic(L"Install base folder:", 0);
+        g_hwndEdtInstallBase = makeEdit(IDC_EDT_INSTALL_BASE, false);
+        g_hwndBtnBrowseInstallBase = makeButton(L"Browse...", IDC_BTN_BROWSE_INSTALL_BASE,
+                                                BS_OWNERDRAW, g_hFont);
 
         // Card 3: Universal Achievement Credentials & API Keys
-        constexpr int card3Y = card2Y + 106 + 12;
-
-        HWND hLblSteamKey = CreateWindowExW(0, L"STATIC", L"Steam Web API Key:",
-            WS_CHILD | WS_VISIBLE,
-            36, card3Y + 34, 136, 20, hwnd, nullptr, nullptr, nullptr);
-        SendMessageW(hLblSteamKey, WM_SETFONT, reinterpret_cast<WPARAM>(g_hFont), TRUE);
-
-        g_hwndEdtSteamKey = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", L"",
-            WS_CHILD | WS_VISIBLE | ES_AUTOHSCROLL | ES_PASSWORD,
-            176, card3Y + 32, 216, 22, hwnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_EDT_STEAM_KEY)), nullptr, nullptr);
-        SendMessageW(g_hwndEdtSteamKey, WM_SETFONT, reinterpret_cast<WPARAM>(g_hFont), TRUE);
-
-        HWND hLblSteamId = CreateWindowExW(0, L"STATIC", L"SteamID64:",
-            WS_CHILD | WS_VISIBLE,
-            404, card3Y + 34, 76, 20, hwnd, nullptr, nullptr, nullptr);
-        SendMessageW(hLblSteamId, WM_SETFONT, reinterpret_cast<WPARAM>(g_hFont), TRUE);
-
-        g_hwndEdtSteamId = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", L"",
-            WS_CHILD | WS_VISIBLE | ES_AUTOHSCROLL,
-            484, card3Y + 32, 116, 22, hwnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_EDT_STEAM_ID)), nullptr, nullptr);
-        SendMessageW(g_hwndEdtSteamId, WM_SETFONT, reinterpret_cast<WPARAM>(g_hFont), TRUE);
-
-        HWND hLblRaUser = CreateWindowExW(0, L"STATIC", L"RetroAchievements User:",
-            WS_CHILD | WS_VISIBLE,
-            36, card3Y + 66, 148, 20, hwnd, nullptr, nullptr, nullptr);
-        SendMessageW(hLblRaUser, WM_SETFONT, reinterpret_cast<WPARAM>(g_hFont), TRUE);
-
-        g_hwndEdtRaUser = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", L"",
-            WS_CHILD | WS_VISIBLE | ES_AUTOHSCROLL,
-            188, card3Y + 64, 130, 22, hwnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_EDT_RA_USER)), nullptr, nullptr);
-        SendMessageW(g_hwndEdtRaUser, WM_SETFONT, reinterpret_cast<WPARAM>(g_hFont), TRUE);
-
-        HWND hLblRaKey = CreateWindowExW(0, L"STATIC", L"RetroAchievements API Key:",
-            WS_CHILD | WS_VISIBLE,
-            326, card3Y + 66, 166, 20, hwnd, nullptr, nullptr, nullptr);
-        SendMessageW(hLblRaKey, WM_SETFONT, reinterpret_cast<WPARAM>(g_hFont), TRUE);
-
-        g_hwndEdtRaKey = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", L"",
-            WS_CHILD | WS_VISIBLE | ES_AUTOHSCROLL | ES_PASSWORD,
-            496, card3Y + 64, 104, 22, hwnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_EDT_RA_KEY)), nullptr, nullptr);
-        SendMessageW(g_hwndEdtRaKey, WM_SETFONT, reinterpret_cast<WPARAM>(g_hFont), TRUE);
-
-        HWND hLblAchHelp = CreateWindowExW(0, L"STATIC",
-            L"Free API keys unlock global progress, rarity stats, and high-res badges across stores and emulators.",
-            WS_CHILD | WS_VISIBLE,
-            36, card3Y + 96, 560, 20, hwnd, nullptr, nullptr, nullptr);
-        SendMessageW(hLblAchHelp, WM_SETFONT, reinterpret_cast<WPARAM>(g_hFont), TRUE);
+        g_hwndLblSteamKey = makeStatic(L"Steam Web API Key:", 0);
+        g_hwndEdtSteamKey = makeEdit(IDC_EDT_STEAM_KEY, true);
+        g_hwndLblSteamId = makeStatic(L"SteamID64:", 0);
+        g_hwndEdtSteamId = makeEdit(IDC_EDT_STEAM_ID, false);
+        g_hwndLblRaUser = makeStatic(L"RetroAchievements User:", 0);
+        g_hwndEdtRaUser = makeEdit(IDC_EDT_RA_USER, false);
+        g_hwndLblRaKey = makeStatic(L"RetroAchievements API Key:", 0);
+        g_hwndEdtRaKey = makeEdit(IDC_EDT_RA_KEY, true);
+        g_hwndLblAchHelp = makeStatic(
+            L"Free API keys unlock global progress, rarity stats, and high-res badges across stores and emulators.", 0);
+        g_hwndChkAutoAchievements = makeCheck(
+            L"Fetch missing achievements automatically in the background", IDC_CHK_AUTO_ACHIEVEMENTS, 0);
+        g_hwndBtnSyncAchievements = makeButton(L"Sync Achievements for All Games", IDC_BTN_SYNC_ACHIEVEMENTS,
+                                                BS_OWNERDRAW, g_hFontBold);
 
         // Card 4: Fallback Artwork & Metadata Providers (Optional)
-        constexpr int card4Y = card3Y + 126 + 12;
-
-        HWND hLblSgdbKey = CreateWindowExW(0, L"STATIC", L"SteamGridDB API Key:",
-            WS_CHILD | WS_VISIBLE,
-            36, card4Y + 34, 150, 20, hwnd, nullptr, nullptr, nullptr);
-        SendMessageW(hLblSgdbKey, WM_SETFONT, reinterpret_cast<WPARAM>(g_hFont), TRUE);
-
-        g_hwndEdtSgdbKey = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", L"",
-            WS_CHILD | WS_VISIBLE | ES_AUTOHSCROLL | ES_PASSWORD,
-            190, card4Y + 32, 410, 22, hwnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_EDT_SGDB_KEY)), nullptr, nullptr);
-        SendMessageW(g_hwndEdtSgdbKey, WM_SETFONT, reinterpret_cast<WPARAM>(g_hFont), TRUE);
-
-        HWND hLblIgdbId = CreateWindowExW(0, L"STATIC", L"IGDB Client ID:",
-            WS_CHILD | WS_VISIBLE,
-            36, card4Y + 66, 116, 20, hwnd, nullptr, nullptr, nullptr);
-        SendMessageW(hLblIgdbId, WM_SETFONT, reinterpret_cast<WPARAM>(g_hFont), TRUE);
-
-        g_hwndEdtIgdbClientId = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", L"",
-            WS_CHILD | WS_VISIBLE | ES_AUTOHSCROLL,
-            156, card4Y + 64, 160, 22, hwnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_EDT_IGDB_CLIENT_ID)), nullptr, nullptr);
-        SendMessageW(g_hwndEdtIgdbClientId, WM_SETFONT, reinterpret_cast<WPARAM>(g_hFont), TRUE);
-
-        HWND hLblIgdbSecret = CreateWindowExW(0, L"STATIC", L"IGDB Client Secret:",
-            WS_CHILD | WS_VISIBLE,
-            324, card4Y + 66, 130, 20, hwnd, nullptr, nullptr, nullptr);
-        SendMessageW(hLblIgdbSecret, WM_SETFONT, reinterpret_cast<WPARAM>(g_hFont), TRUE);
-
-        g_hwndEdtIgdbClientSecret = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", L"",
-            WS_CHILD | WS_VISIBLE | ES_AUTOHSCROLL | ES_PASSWORD,
-            458, card4Y + 64, 142, 22, hwnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_EDT_IGDB_CLIENT_SECRET)), nullptr, nullptr);
-        SendMessageW(g_hwndEdtIgdbClientSecret, WM_SETFONT, reinterpret_cast<WPARAM>(g_hFont), TRUE);
-
-        HWND hLblFallbackHelp = CreateWindowExW(0, L"STATIC",
-            L"Optional fallbacks when storefronts lack native box art. Keys are stored locally.",
-            WS_CHILD | WS_VISIBLE,
-            36, card4Y + 96, 560, 20, hwnd, nullptr, nullptr, nullptr);
-        SendMessageW(hLblFallbackHelp, WM_SETFONT, reinterpret_cast<WPARAM>(g_hFont), TRUE);
+        g_hwndLblSgdbKey = makeStatic(L"SteamGridDB API Key:", 0);
+        g_hwndEdtSgdbKey = makeEdit(IDC_EDT_SGDB_KEY, true);
+        g_hwndLblIgdbId = makeStatic(L"IGDB Client ID:", 0);
+        g_hwndEdtIgdbClientId = makeEdit(IDC_EDT_IGDB_CLIENT_ID, false);
+        g_hwndLblIgdbSecret = makeStatic(L"IGDB Client Secret:", 0);
+        g_hwndEdtIgdbClientSecret = makeEdit(IDC_EDT_IGDB_CLIENT_SECRET, true);
+        g_hwndLblFallbackHelp = makeStatic(
+            L"Optional fallbacks when storefronts lack native box art. Keys are stored locally.", 0);
 
         // Save Button & Reset Cache Button
-        constexpr int saveY = card4Y + 126 + 14;
-        HWND hBtnSave = CreateWindowExW(0, L"BUTTON", Localization::GetStrings().configSaveAndRefreshBtn,
-            WS_CHILD | WS_VISIBLE | BS_OWNERDRAW,
-            20, saveY, 190, 38, hwnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_BTN_SAVE)), nullptr, nullptr);
-        SendMessageW(hBtnSave, WM_SETFONT, reinterpret_cast<WPARAM>(g_hFontBold), TRUE);
+        g_hwndBtnSave = makeButton(Localization::GetStrings().configSaveAndRefreshBtn, IDC_BTN_SAVE,
+                                    BS_OWNERDRAW, g_hFontBold);
+        g_hwndBtnResetCache = makeButton(L"\U0001F9F9 Reset Cache", IDC_BTN_RESET_CACHE,
+                                          BS_OWNERDRAW, g_hFont);
 
-        HWND hBtnResetCache = CreateWindowExW(0, L"BUTTON", L"\U0001F9F9 Reset Cache",
-            WS_CHILD | WS_VISIBLE | BS_OWNERDRAW,
-            220, saveY, 190, 38, hwnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_BTN_RESET_CACHE)), nullptr, nullptr);
-        SendMessageW(hBtnResetCache, WM_SETFONT, reinterpret_cast<WPARAM>(g_hFont), TRUE);
-
+        LayoutConfigControls(hwnd);
         LoadConfigValues();
         return 0;
     }
 
+    case WM_SIZE:
+        if (wParam != SIZE_MINIMIZED) {
+            LayoutConfigControls(hwnd);
+            InvalidateRect(hwnd, nullptr, TRUE);
+        }
+        return 0;
+
+    case WM_GETMINMAXINFO: {
+        if (g_pageMode) break;
+        // The fluid card layout keeps every control inside its card down to this size; below it
+        // the fixed label/field offsets in the credential rows would start to collide.
+        auto* info = reinterpret_cast<MINMAXINFO*>(lParam);
+        if (info == nullptr) break;
+        info->ptMinTrackSize.x = 640;
+        info->ptMinTrackSize.y = 880;
+        return 0;
+    }
+
     case WM_NCACTIVATE:
+        if (g_pageMode) break;
         return DefWindowProcW(hwnd, WM_NCACTIVATE, wParam, -1);
 
     case WM_NCPAINT:
+        if (g_pageMode) break;
         return 0;
 
     case WM_NCCALCSIZE:
+        if (g_pageMode) break;
         if (wParam == TRUE) return 0;
         break;
 
     case WM_NCHITTEST: {
+        if (g_pageMode) break;
         POINT pt = { GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam) };
         ScreenToClient(hwnd, &pt);
 
@@ -515,6 +698,7 @@ LRESULT CALLBACK ConfigWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPara
     }
 
     case WM_MOUSEMOVE: {
+        if (g_pageMode) break;
         const int x = GET_X_LPARAM(lParam);
         const int y = GET_Y_LPARAM(lParam);
 
@@ -541,6 +725,7 @@ LRESULT CALLBACK ConfigWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPara
     }
 
     case WM_MOUSELEAVE: {
+        if (g_pageMode) break;
         g_trackingMouse = false;
         if (g_hoverBtn != TitleButton::None) {
             g_hoverBtn = TitleButton::None;
@@ -553,6 +738,7 @@ LRESULT CALLBACK ConfigWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPara
     }
 
     case WM_LBUTTONDOWN: {
+        if (g_pageMode) break;
         const int x = GET_X_LPARAM(lParam);
         const int y = GET_Y_LPARAM(lParam);
 
@@ -572,6 +758,7 @@ LRESULT CALLBACK ConfigWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPara
     }
 
     case WM_LBUTTONUP: {
+        if (g_pageMode) break;
         if (g_pressedBtn != TitleButton::None) {
             ReleaseCapture();
             const TitleButton clicked = g_pressedBtn;
@@ -619,6 +806,7 @@ LRESULT CALLBACK ConfigWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPara
 
         FillRect(memDC, &rcClient, g_hBgBrush);
 
+        if (!g_pageMode) {
         RECT rcTitleBar = { 0, 0, w, TITLE_BAR_HEIGHT };
         HBRUSH titleBrush = CreateSolidBrush(g_palette.drawerBg);
         FillRect(memDC, &rcTitleBar, titleBrush);
@@ -642,7 +830,7 @@ LRESULT CALLBACK ConfigWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPara
         DrawTextW(memDC, L"Windows Game Explorer \u2014 Integration Settings", -1, &rcText, DT_LEFT | DT_SINGLELINE | DT_END_ELLIPSIS);
 
         RECT rcPill = GetPillRect(w);
-        HBRUSH pillBg = CreateSolidBrush(g_isDarkMode ? RGB(32, 32, 32) : RGB(236, 236, 236));
+        HBRUSH pillBg = CreateSolidBrush(g_palette.chromePillBg);
         HPEN pillPen = CreatePen(PS_SOLID, 1, g_palette.divider);
         HGDIOBJ prevBr = SelectObject(memDC, pillBg);
         HGDIOBJ prevPen = SelectObject(memDC, pillPen);
@@ -657,7 +845,7 @@ LRESULT CALLBACK ConfigWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPara
         const RECT rClose = GetCloseButtonRect(w);
 
         if (g_hoverBtn == TitleButton::Min || g_pressedBtn == TitleButton::Min) {
-            HBRUSH hBr = CreateSolidBrush(g_isDarkMode ? RGB(52, 52, 52) : RGB(220, 220, 220));
+            HBRUSH hBr = CreateSolidBrush(g_palette.chromeHoverBg);
             HPEN hP = CreatePen(PS_NULL, 0, 0);
             HGDIOBJ oB = SelectObject(memDC, hBr);
             HGDIOBJ oP = SelectObject(memDC, hP);
@@ -679,7 +867,7 @@ LRESULT CALLBACK ConfigWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPara
         }
 
         if (g_hoverBtn == TitleButton::Max || g_pressedBtn == TitleButton::Max) {
-            HBRUSH hBr = CreateSolidBrush(g_isDarkMode ? RGB(52, 52, 52) : RGB(220, 220, 220));
+            HBRUSH hBr = CreateSolidBrush(g_palette.chromeHoverBg);
             HPEN hP = CreatePen(PS_NULL, 0, 0);
             HGDIOBJ oB = SelectObject(memDC, hBr);
             HGDIOBJ oP = SelectObject(memDC, hP);
@@ -704,7 +892,7 @@ LRESULT CALLBACK ConfigWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPara
         const bool closeHover = (g_hoverBtn == TitleButton::Close);
         const bool closePressed = (g_pressedBtn == TitleButton::Close);
         if (closeHover || closePressed) {
-            HBRUSH hBr = CreateSolidBrush(closePressed ? RGB(158, 33, 21) : RGB(196, 43, 28));
+            HBRUSH hBr = CreateSolidBrush(closePressed ? g_palette.chromeClosePressedBg : g_palette.chromeCloseHoverBg);
             HPEN hP = CreatePen(PS_NULL, 0, 0);
             HGDIOBJ oB = SelectObject(memDC, hBr);
             HGDIOBJ oP = SelectObject(memDC, hP);
@@ -717,7 +905,7 @@ LRESULT CALLBACK ConfigWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPara
         {
             const int cx = (rClose.left + rClose.right) / 2;
             const int cy = (rClose.top + rClose.bottom) / 2;
-            COLORREF cColor = (closeHover || closePressed) ? RGB(255, 255, 255) : g_palette.textPrimary;
+            COLORREF cColor = (closeHover || closePressed) ? g_palette.chromeOnCloseText : g_palette.textPrimary;
             HPEN glyphPen = CreatePen(PS_SOLID, 1, cColor);
             HGDIOBJ oP = SelectObject(memDC, glyphPen);
             MoveToEx(memDC, cx - 4, cy - 4, nullptr);
@@ -727,27 +915,24 @@ LRESULT CALLBACK ConfigWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPara
             SelectObject(memDC, oP);
             DeleteObject(glyphPen);
         }
+        } // !g_pageMode
 
         // Section Cards (No Storefront Provider Section — Auto Storefront Discovery)
-        constexpr int card0Y = TITLE_BAR_HEIGHT + 12;
-        constexpr int card1Y = card0Y + 105 + 12;
-        constexpr int card2Y = card1Y + 158 + 12;
-        constexpr int card3Y = card2Y + 106 + 12;
-        constexpr int card4Y = card3Y + 126 + 12;
+        ComputeConfigLayout(w);
 
         const struct CardSpec {
-            int y, h;
+            const RECT* rect;
             const wchar_t* title;
-        } cards[] = {
-            { card0Y, 105, L"File Explorer Shell Integration" },
-            { card1Y, 158, L"Default WinUI XAML Viewport Layout & Game Explorer Manager" },
-            { card2Y, 106, L"Cloud Sync & Per-Game Metadata Storage" },
-            { card3Y, 126, L"Universal Multi-Source Achievement Credentials & API Keys" },
-            { card4Y, 126, L"Fallback Artwork & Metadata Providers (Optional)" }
+        } cards[CARD_COUNT] = {
+            { &g_cardRects[0], L"File Explorer Shell Integration" },
+            { &g_cardRects[1], L"Default WinUI XAML Viewport Layout & Game Explorer Manager" },
+            { &g_cardRects[2], L"Cloud Sync, Game Installs & Local Storage" },
+            { &g_cardRects[3], L"Universal Multi-Source Achievement Credentials & API Keys" },
+            { &g_cardRects[4], L"Fallback Artwork & Metadata Providers (Optional)" }
         };
 
         for (const auto& c : cards) {
-            RECT rcCard = { 20, c.y, w - 20, c.y + c.h };
+            RECT rcCard = *c.rect;
             HBRUSH cardBrush = CreateSolidBrush(g_palette.cardBg);
             HPEN cardPen = CreatePen(PS_SOLID, 1, g_palette.cardBorder);
             HGDIOBJ oB = SelectObject(memDC, cardBrush);
@@ -763,8 +948,10 @@ LRESULT CALLBACK ConfigWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPara
             SetBkMode(memDC, TRANSPARENT);
             SetTextColor(memDC, g_palette.textPrimary);
             SelectObject(memDC, g_hFontBold);
-            RECT rcCardTitle = { 36, c.y + 10, w - 40, c.y + 28 };
-            DrawTextW(memDC, c.title, -1, &rcCardTitle, DT_LEFT | DT_SINGLELINE | DT_NOPREFIX);
+            RECT rcCardTitle = { rcCard.left + CARD_PADDING, rcCard.top + 10,
+                                 rcCard.right - CARD_PADDING, rcCard.top + 28 };
+            DrawTextW(memDC, c.title, -1, &rcCardTitle,
+                      DT_LEFT | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX);
         }
 
         BitBlt(hdc, 0, 0, w, rcClient.bottom, memDC, 0, 0, SRCCOPY);
@@ -780,6 +967,15 @@ LRESULT CALLBACK ConfigWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPara
     case WM_DRAWITEM: {
         auto* pDis = reinterpret_cast<DRAWITEMSTRUCT*>(lParam);
         if (pDis == nullptr) break;
+
+        if (ThemeControls::IsThemedCheck(pDis->hwndItem)) {
+            ThemeControls::DrawCheck(*pDis);
+            return TRUE;
+        }
+        if (ThemeControls::IsThemedRadio(pDis->hwndItem)) {
+            ThemeControls::DrawRadio(*pDis);
+            return TRUE;
+        }
 
         HDC hdcBtn = pDis->hDC;
         RECT rcBtn = pDis->rcItem;
@@ -840,6 +1036,16 @@ LRESULT CALLBACK ConfigWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPara
             drawStyledButton(L"Sync to OneDrive Now", true, true);
             return TRUE;
         }
+        if (pDis->CtlID == IDC_BTN_SYNC_ACHIEVEMENTS) {
+            std::wstring label = L"Sync Achievements for All Games";
+            const bool syncing = g_isSyncingAchievements.load();
+            if (syncing) {
+                label = L"Syncing achievements " + std::to_wstring(g_achSyncCompleted.load()) +
+                        L"/" + std::to_wstring(g_achSyncTotal.load()) + L"...";
+            }
+            drawStyledButton(label.c_str(), syncing, true);
+            return TRUE;
+        }
         if (pDis->CtlID == IDC_BTN_SAVE) {
             drawStyledButton(L"Save Configuration", true, true);
             return TRUE;
@@ -853,6 +1059,27 @@ LRESULT CALLBACK ConfigWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPara
 
     case WM_COMMAND: {
         const int id = LOWORD(wParam);
+        const int code = HIWORD(wParam);
+        auto control = reinterpret_cast<HWND>(lParam);
+
+        // Custom-drawn toggles do not update themselves; radios also clear the rest of the group.
+        if (code == BN_CLICKED) {
+            if (ThemeControls::IsThemedRadio(control)) {
+                ThemeControls::SelectRadio(control);
+            } else if (ThemeControls::IsThemedCheck(control)) {
+                ThemeControls::ToggleCheck(control);
+            }
+        }
+
+        if (id == IDC_BTN_BROWSE_INSTALL_BASE) {
+            std::wstring folder;
+            if (PickFolderDialog(hwnd, L"Choose the base folder for game installs", folder) &&
+                g_hwndEdtInstallBase != nullptr) {
+                SetWindowTextW(g_hwndEdtInstallBase, folder.c_str());
+            }
+            return 0;
+        }
+
         if (id == IDC_BTN_RESET_CACHE) {
             const int ret = MessageBoxW(hwnd,
                 L"Are you sure you want to completely reset and repopulate the library?\n\n"
@@ -869,6 +1096,41 @@ LRESULT CALLBACK ConfigWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPara
             return 0;
         }
 
+        if (id == IDC_BTN_SYNC_ACHIEVEMENTS) {
+            if (g_isSyncingAchievements.exchange(true)) {
+                return 0;
+            }
+            g_achSyncCompleted.store(0);
+            g_achSyncTotal.store(0);
+            EnableWindow(g_hwndBtnSyncAchievements, FALSE);
+            InvalidateRect(g_hwndBtnSyncAchievements, nullptr, TRUE);
+
+            const HWND hwndNotify = hwnd;
+            std::thread([hwndNotify]() {
+                auto& db = Database::Instance();
+                if (!db.IsOpen()) {
+                    db.Open(Storage::GetDatabasePath());
+                }
+                const std::vector<GameItem> games = db.GetAllGames();
+                g_achSyncTotal.store(games.size());
+
+                if (games.empty()) {
+                    PostMessageW(hwndNotify, WM_APP_ACHIEVEMENT_SYNC_COMPLETE, 0, 0);
+                    return;
+                }
+
+                AchievementEngine::Instance().RefreshAllAsync(games, [hwndNotify](size_t completed, size_t total) {
+                    g_achSyncCompleted.store(completed);
+                    g_achSyncTotal.store(total);
+                    if (IsWindow(hwndNotify)) {
+                        const UINT msg = (completed >= total) ? static_cast<UINT>(WM_APP_ACHIEVEMENT_SYNC_COMPLETE)
+                                                              : static_cast<UINT>(WM_APP_ACHIEVEMENT_SYNC_PROGRESS);
+                        PostMessageW(hwndNotify, msg, completed, total);
+                    }
+                });
+            }).detach();
+            return 0;
+        }
         if (id == IDC_BTN_SAVE) {
             SaveConfigValues(hwnd);
             return 0;
@@ -913,6 +1175,26 @@ LRESULT CALLBACK ConfigWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPara
         break;
     }
 
+    case WM_APP_ACHIEVEMENT_SYNC_PROGRESS: {
+        InvalidateRect(g_hwndBtnSyncAchievements, nullptr, TRUE);
+        return 0;
+    }
+
+    case WM_APP_ACHIEVEMENT_SYNC_COMPLETE: {
+        g_isSyncingAchievements.store(false);
+        EnableWindow(g_hwndBtnSyncAchievements, TRUE);
+        InvalidateRect(g_hwndBtnSyncAchievements, nullptr, TRUE);
+        const size_t count = static_cast<size_t>(wParam);
+        if (count == 0) {
+            MessageBoxW(hwnd, L"No games are available to sync yet. Scan and populate the library first.",
+                L"Achievement Sync", MB_OK | MB_ICONINFORMATION);
+        } else {
+            std::wstring msg = L"Achievement sync complete for " + std::to_wstring(count) + L" game(s).";
+            MessageBoxW(hwnd, msg.c_str(), L"Achievement Sync", MB_OK | MB_ICONINFORMATION);
+        }
+        return 0;
+    }
+
     case WM_APP_SCAN_COMPLETE: {
         g_isScanning.store(false);
         EnableWindow(g_hwndBtnScanLibrary, TRUE);
@@ -934,7 +1216,7 @@ LRESULT CALLBACK ConfigWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPara
 
     case WM_CTLCOLOREDIT: {
         auto hdc = reinterpret_cast<HDC>(wParam);
-        SetBkColor(hdc, g_isDarkMode ? RGB(32, 32, 32) : RGB(255, 255, 255));
+        SetBkColor(hdc, ThemeControls::FieldSurfaceColor());
         SetTextColor(hdc, g_palette.textPrimary);
         return reinterpret_cast<LRESULT>(g_hEditBrush);
     }
@@ -946,178 +1228,37 @@ LRESULT CALLBACK ConfigWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPara
         if (g_hCardBrush != nullptr) DeleteObject(g_hCardBrush);
         if (g_hEditBrush != nullptr) DeleteObject(g_hEditBrush);
         if (g_hAppIcon != nullptr) DestroyIcon(g_hAppIcon);
-        PostQuitMessage(0);
+        if (!g_pageMode) PostQuitMessage(0);
         return 0;
     }
 
     return DefWindowProcW(hwnd, uMsg, wParam, lParam);
 }
 
-bool IsRunningElevated() {
-    BOOL isElevated = FALSE;
-    HANDLE hToken = nullptr;
-    if (OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &hToken)) {
-        TOKEN_ELEVATION elevation{};
-        DWORD cbSize = sizeof(elevation);
-        if (GetTokenInformation(hToken, TokenElevation, &elevation, sizeof(elevation), &cbSize)) {
-            isElevated = elevation.TokenIsElevated != 0;
-        }
-        CloseHandle(hToken);
+} // namespace
+
+namespace GameExplorer::Studio {
+
+HWND CreateConfigPage(HWND parent) noexcept {
+    EnsureConfigResources();
+    EnsureConfigWindowClass(GetModuleHandleW(nullptr));
+
+    // The non-null creation parameter switches the window procedure into page mode: no title bar,
+    // cards laid out from the top edge, and no standalone message-loop ownership.
+    g_pageMode = true;
+    g_titleBarHeight = 0;
+
+    HWND page = CreateWindowExW(
+        WS_EX_CONTROLPARENT, CONFIG_WINDOW_CLASS, L"",
+        WS_CHILD | WS_VISIBLE | WS_CLIPCHILDREN | WS_CLIPSIBLINGS,
+        0, 0, 640, 760, parent, nullptr, GetModuleHandleW(nullptr),
+        reinterpret_cast<LPVOID>(static_cast<INT_PTR>(1)));
+
+    if (page == nullptr) {
+        g_pageMode = false;
+        g_titleBarHeight = TITLE_BAR_HEIGHT;
     }
-    return isElevated != FALSE;
+    return page;
 }
 
-bool ElevateSelf(const wchar_t* argument) {
-    wchar_t exePath[MAX_PATH];
-    GetModuleFileNameW(nullptr, exePath, MAX_PATH);
-
-    SHELLEXECUTEINFOW sei{};
-    sei.cbSize = sizeof(sei);
-    sei.lpVerb = L"runas";
-    sei.lpFile = exePath;
-    sei.lpParameters = argument;
-    sei.nShow = SW_HIDE;
-    sei.fMask = SEE_MASK_NOCLOSEPROCESS;
-    if (ShellExecuteExW(&sei)) {
-        if (sei.hProcess != nullptr) {
-            WaitForSingleObject(sei.hProcess, INFINITE);
-            CloseHandle(sei.hProcess);
-        }
-        return true;
-    }
-    return false;
-}
-
-fs::path FindShellDllPath() {
-    wchar_t exePath[MAX_PATH];
-    GetModuleFileNameW(nullptr, exePath, MAX_PATH);
-    const fs::path dir = fs::path(exePath).parent_path();
-    if (fs::exists(dir / L"GameExplorerShell.dll")) {
-        return dir / L"GameExplorerShell.dll";
-    }
-    if (fs::exists(dir / L"build" / L"Release" / L"GameExplorerShell.dll")) {
-        return dir / L"build" / L"Release" / L"GameExplorerShell.dll";
-    }
-    if (fs::exists(dir / L"Release" / L"GameExplorerShell.dll")) {
-        return dir / L"Release" / L"GameExplorerShell.dll";
-    }
-    return {};
-}
-
-int HandleShellRegistrationCLI(bool doRegister) {
-    if (!IsRunningElevated()) {
-        const wchar_t* arg = doRegister ? L"--register" : L"--unregister";
-        return ElevateSelf(arg) ? 0 : 1;
-    }
-
-    const fs::path dllPath = FindShellDllPath();
-    if (dllPath.empty()) {
-        return 2;
-    }
-
-    std::wstring params = doRegister ? L"/s \"" : L"/u /s \"";
-    params += dllPath.wstring() + L"\"";
-
-    SHELLEXECUTEINFOW sei{};
-    sei.cbSize = sizeof(sei);
-    sei.lpVerb = L"open";
-    sei.lpFile = L"regsvr32.exe";
-    sei.lpParameters = params.c_str();
-    sei.nShow = SW_HIDE;
-    sei.fMask = SEE_MASK_NOCLOSEPROCESS;
-    if (ShellExecuteExW(&sei)) {
-        if (sei.hProcess != nullptr) {
-            WaitForSingleObject(sei.hProcess, INFINITE);
-            CloseHandle(sei.hProcess);
-        }
-    }
-
-    SHChangeNotify(SHCNE_ASSOCCHANGED, SHCNF_IDLIST, nullptr, nullptr);
-    return 0;
-}
-
-int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE /*hPrevInstance*/, PWSTR /*lpCmdLine*/, int nCmdShow) {
-    CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
-
-    int argc = 0;
-    PWSTR* argv = CommandLineToArgvW(GetCommandLineW(), &argc);
-    if (argv != nullptr) {
-        for (int i = 1; i < argc; ++i) {
-            const std::wstring_view arg = argv[i];
-            if (arg == L"--register" || arg == L"/register" || arg == L"-register") {
-                LocalFree(argv);
-                const int ret = HandleShellRegistrationCLI(true);
-                CoUninitialize();
-                return ret;
-            }
-            if (arg == L"--unregister" || arg == L"/unregister" || arg == L"-unregister") {
-                LocalFree(argv);
-                const int ret = HandleShellRegistrationCLI(false);
-                CoUninitialize();
-                return ret;
-            }
-            if (arg == L"--reset-cache" || arg == L"/reset-cache" || arg == L"-reset-cache") {
-                LocalFree(argv);
-                const int ret = StorefrontScanner::ResetArtworkCache() ? 0 : 1;
-                CoUninitialize();
-                return ret;
-            }
-        }
-        LocalFree(argv);
-    }
-    INITCOMMONCONTROLSEX icex{};
-    icex.dwSize = sizeof(icex);
-    icex.dwICC = ICC_STANDARD_CLASSES | ICC_WIN95_CLASSES;
-    InitCommonControlsEx(&icex);
-
-    DarkMode::Initialize();
-    g_isDarkMode = DarkMode::IsSystemDarkMode();
-    g_palette = DarkMode::GetPalette(g_isDarkMode);
-    g_hBgBrush = CreateSolidBrush(g_palette.canvasBg);
-    g_hCardBrush = CreateSolidBrush(g_palette.cardBg);
-    g_hEditBrush = CreateSolidBrush(g_isDarkMode ? RGB(32, 32, 32) : RGB(255, 255, 255));
-
-    const wchar_t* CLASS_NAME = L"GameExplorerConfigWnd";
-    WNDCLASSEXW wc{};
-    wc.cbSize = sizeof(wc);
-    wc.style = CS_HREDRAW | CS_VREDRAW;
-    wc.lpfnWndProc = ConfigWndProc;
-    wc.hInstance = hInstance;
-    wc.hCursor = LoadCursorW(nullptr, IDC_ARROW);
-    wc.hbrBackground = g_hBgBrush;
-    wc.lpszClassName = CLASS_NAME;
-    RegisterClassExW(&wc);
-
-    HWND hwnd = CreateWindowExW(
-        0, CLASS_NAME, Localization::GetStrings().configWindowTitle,
-        WS_POPUP | WS_THICKFRAME | WS_MINIMIZEBOX | WS_MAXIMIZEBOX | WS_CLIPCHILDREN | WS_CLIPSIBLINGS,
-        CW_USEDEFAULT, CW_USEDEFAULT, 640, 820,
-        nullptr, nullptr, hInstance, nullptr
-    );
-
-    if (hwnd == nullptr) return 1;
-
-    const int roundPreference = DWMWCP_ROUND;
-    DwmSetWindowAttribute(hwnd, DWMWA_WINDOW_CORNER_PREFERENCE, &roundPreference, sizeof(roundPreference));
-
-    BOOL isDark = g_isDarkMode ? TRUE : FALSE;
-    DwmSetWindowAttribute(hwnd, DWMWA_USE_IMMERSIVE_DARK_MODE, &isDark, sizeof(isDark));
-
-    const COLORREF noneBorder = DWMWA_COLOR_NONE;
-    DwmSetWindowAttribute(hwnd, DWMWA_BORDER_COLOR, &noneBorder, sizeof(noneBorder));
-
-    MARGINS margins = { 0, 0, 1, 0 };
-    DwmExtendFrameIntoClientArea(hwnd, &margins);
-
-    DarkMode::ApplyWindowTheme(hwnd, g_isDarkMode);
-    ShowWindow(hwnd, nCmdShow);
-    UpdateWindow(hwnd);
-
-    MSG msg{};
-    while (GetMessageW(&msg, nullptr, 0, 0)) {
-        TranslateMessage(&msg);
-        DispatchMessageW(&msg);
-    }
-
-    return static_cast<int>(msg.wParam);
-}
+} // namespace GameExplorer::Studio

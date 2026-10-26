@@ -123,6 +123,9 @@ HRESULT RegisterServer(HMODULE hModule) {
         return HRESULT_FROM_WIN32(GetLastError());
     }
 
+    // Clean up any stale shadow registry value if previously set
+    DeleteRegistryValue(HKEY_CURRENT_USER, L"Software\\HELIX-Origin\\WindowsGameExplorer", L"ShadowDllPath");
+
     const std::wstring clsidKey = std::wstring(L"Software\\Classes\\CLSID\\") + SZ_CLSID_GAME_EXPLORER;
     // Canonical Windows 11 icon: Embedded resource ID 100 inside GameExplorerShell.dll
     const std::wstring iconPath = std::wstring(modulePath) + L",-100";
@@ -311,6 +314,9 @@ HRESULT UnregisterServer() {
     if (hwndAgent != nullptr) {
         PostMessageW(hwndAgent, WM_CLOSE, 0, 0);
     }
+
+    // Clean up any stale shadow registry value
+    DeleteRegistryValue(HKEY_CURRENT_USER, L"Software\\HELIX-Origin\\WindowsGameExplorer", L"ShadowDllPath");
 
     // Delete HKCU registrations
     DeleteRegistryKeyRecursive(HKEY_CURRENT_USER, clsidKey);

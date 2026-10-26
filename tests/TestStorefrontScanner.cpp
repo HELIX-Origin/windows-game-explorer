@@ -65,6 +65,59 @@ TEST_CASE(PerGameMetadataSerializationAndPriority) {
     }
 }
 
+TEST_CASE(LaunchMethodMetadataRoundTrip) {
+    const fs::path metaDir = GameExplorer::Storage::GetMetadataPath();
+    fs::create_directories(metaDir);
+
+    const std::wstring testAppId = L"test_launch_methods_9999";
+    const fs::path jsonPath = metaDir / (testAppId + L".json");
+
+    GameExplorer::GameItem original;
+    original.appId = testAppId;
+    original.title = L"Launch Method Test";
+
+    GameExplorer::LaunchMethod custom;
+    custom.name = L"Custom Launcher";
+    custom.executablePath = L"C:\\Tools\\launcher.exe";
+    custom.arguments = L"--profile \"{exe}\"";
+    custom.workingDirectory = L"C:\\Tools";
+    original.launchMethods.push_back(custom);
+
+    GameExplorer::LaunchMethod autoDetected;
+    autoDetected.name = L"Auto Launcher";
+    autoDetected.executablePath = L"C:\\Tools\\missing-auto.exe";
+    autoDetected.isAutoDetected = true;
+    original.launchMethods.push_back(autoDetected);
+
+    ASSERT_TRUE(GameExplorer::StorefrontScanner::SavePerGameMetadata(original));
+    ASSERT_TRUE(fs::exists(jsonPath));
+
+    // User-added methods survive even if the executable is currently unavailable; auto-detected
+    // methods whose executable disappeared are pruned.
+    GameExplorer::GameItem loaded;
+    loaded.appId = testAppId;
+    ASSERT_TRUE(GameExplorer::StorefrontScanner::LoadPerGameMetadata(loaded));
+    ASSERT_EQ(loaded.launchMethods.size(), static_cast<size_t>(1));
+    ASSERT_EQ(loaded.launchMethods[0].name, L"Custom Launcher");
+    ASSERT_EQ(loaded.launchMethods[0].executablePath, L"C:\\Tools\\launcher.exe");
+    ASSERT_EQ(loaded.launchMethods[0].arguments, L"--profile \"{exe}\"");
+    ASSERT_EQ(loaded.launchMethods[0].workingDirectory, L"C:\\Tools");
+    ASSERT_FALSE(loaded.launchMethods[0].isAutoDetected);
+
+    // An explicitly saved empty list is authoritative, so user removals persist.
+    loaded.launchMethods.clear();
+    ASSERT_TRUE(GameExplorer::StorefrontScanner::SavePerGameMetadata(loaded));
+
+    GameExplorer::GameItem cleared;
+    cleared.appId = testAppId;
+    ASSERT_TRUE(GameExplorer::StorefrontScanner::LoadPerGameMetadata(cleared));
+    ASSERT_TRUE(cleared.launchMethods.empty());
+
+    if (fs::exists(jsonPath)) {
+        fs::remove(jsonPath);
+    }
+}
+
 TEST_CASE(CustomLocalGameLifecycle) {
     const fs::path tempExe = fs::temp_directory_path() / L"GameExplorer_CustomTestGame.exe";
     {
@@ -243,4 +296,48 @@ TEST_CASE(ItchArtworkProtectionAndStrictTitleMatching) {
     // Verify authentic storefront art was strictly preserved
     ASSERT_EQ(item.coverArtPath, L"C:\\Users\\Mock\\cache\\art\\itch_test_123_static_cover.png");
     ASSERT_EQ(item.heroArtPath, L"C:\\Users\\Mock\\cache\\art\\itch_test_123_static_cover.png");
+}
+
+TEST_CASE(ArtworkSourcingPolicyForStoreVersusLocalGames) {
+    using GameExplorer::PlatformType;
+    using GameExplorer::StorefrontScanner;
+
+    // Store-discovered games keep their storefront-provided artwork: metadata providers never auto-fill.
+    ASSERT_FALSE(StorefrontScanner::AllowsAutoArtFromMetadataProviders(PlatformType::Steam));
+    ASSERT_FALSE(StorefrontScanner::AllowsAutoArtFromMetadataProviders(PlatformType::Epic));
+    ASSERT_FALSE(StorefrontScanner::AllowsAutoArtFromMetadataProviders(PlatformType::GOG));
+    ASSERT_FALSE(StorefrontScanner::AllowsAutoArtFromMetadataProviders(PlatformType::BattleNet));
+    ASSERT_FALSE(StorefrontScanner::AllowsAutoArtFromMetadataProviders(PlatformType::EAApp));
+    ASSERT_FALSE(StorefrontScanner::AllowsAutoArtFromMetadataProviders(PlatformType::Xbox));
+    ASSERT_FALSE(StorefrontScanner::AllowsAutoArtFromMetadataProviders(PlatformType::Itch));
+    ASSERT_FALSE(StorefrontScanner::AllowsAutoArtFromMetadataProviders(PlatformType::SquareEnix));
+    ASSERT_FALSE(StorefrontScanner::AllowsAutoArtFromMetadataProviders(PlatformType::Ubisoft));
+    ASSERT_FALSE(StorefrontScanner::AllowsAutoArtFromMetadataProviders(PlatformType::Rockstar));
+    ASSERT_FALSE(StorefrontScanner::AllowsAutoArtFromMetadataProviders(PlatformType::Amazon));
+    ASSERT_FALSE(StorefrontScanner::AllowsAutoArtFromMetadataProviders(PlatformType::LegacyGames));
+    ASSERT_FALSE(StorefrontScanner::AllowsAutoArtFromMetadataProviders(PlatformType::Jagex));
+    ASSERT_FALSE(StorefrontScanner::AllowsAutoArtFromMetadataProviders(PlatformType::XIVLauncher));
+    ASSERT_FALSE(StorefrontScanner::AllowsAutoArtFromMetadataProviders(PlatformType::GuildWars2));
+    ASSERT_FALSE(StorefrontScanner::AllowsAutoArtFromMetadataProviders(PlatformType::Riot));
+    ASSERT_FALSE(StorefrontScanner::AllowsAutoArtFromMetadataProviders(PlatformType::HoYoPlay));
+    ASSERT_FALSE(StorefrontScanner::AllowsAutoArtFromMetadataProviders(PlatformType::Paradox));
+
+    // Locally added and emulated games may auto-source artwork from metadata providers.
+    ASSERT_TRUE(StorefrontScanner::AllowsAutoArtFromMetadataProviders(PlatformType::Unknown));
+    ASSERT_TRUE(StorefrontScanner::AllowsAutoArtFromMetadataProviders(PlatformType::CustomExecutable));
+    ASSERT_TRUE(StorefrontScanner::AllowsAutoArtFromMetadataProviders(PlatformType::RetroArch));
+    ASSERT_TRUE(StorefrontScanner::AllowsAutoArtFromMetadataProviders(PlatformType::Dolphin));
+    ASSERT_TRUE(StorefrontScanner::AllowsAutoArtFromMetadataProviders(PlatformType::ESDE));
+    ASSERT_TRUE(StorefrontScanner::AllowsAutoArtFromMetadataProviders(PlatformType::Project64));
+    ASSERT_TRUE(StorefrontScanner::AllowsAutoArtFromMetadataProviders(PlatformType::PCSX2));
+    ASSERT_TRUE(StorefrontScanner::AllowsAutoArtFromMetadataProviders(PlatformType::DuckStation));
+    ASSERT_TRUE(StorefrontScanner::AllowsAutoArtFromMetadataProviders(PlatformType::PPSSPP));
+    ASSERT_TRUE(StorefrontScanner::AllowsAutoArtFromMetadataProviders(PlatformType::mGBA));
+    ASSERT_TRUE(StorefrontScanner::AllowsAutoArtFromMetadataProviders(PlatformType::Snes9x));
+    ASSERT_TRUE(StorefrontScanner::AllowsAutoArtFromMetadataProviders(PlatformType::melonDS));
+    ASSERT_TRUE(StorefrontScanner::AllowsAutoArtFromMetadataProviders(PlatformType::Citra));
+    ASSERT_TRUE(StorefrontScanner::AllowsAutoArtFromMetadataProviders(PlatformType::Flycast));
+    ASSERT_TRUE(StorefrontScanner::AllowsAutoArtFromMetadataProviders(PlatformType::RPCS3));
+    ASSERT_TRUE(StorefrontScanner::AllowsAutoArtFromMetadataProviders(PlatformType::Xemu));
+    ASSERT_TRUE(StorefrontScanner::AllowsAutoArtFromMetadataProviders(PlatformType::Vice));
 }

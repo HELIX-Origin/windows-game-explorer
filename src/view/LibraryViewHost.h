@@ -12,6 +12,7 @@ namespace GameExplorer {
 
 constexpr UINT WM_APP_LIBRARY_LOADED = WM_APP + 44;
 constexpr UINT WM_APP_ACHIEVEMENTS_UPDATED = WM_APP + 45;
+constexpr UINT WM_APP_LIBRARY_STATS_UPDATED = WM_APP + 46;
 
 struct ProviderViewModel {
     PlatformType platform{ PlatformType::Unknown };
@@ -40,6 +41,9 @@ public:
     void LaunchCompanionExe(const wchar_t* exeName, const std::wstring& args = L"");
     void OnLibraryLoaded();
     void OnAchievementsUpdated();
+    void FetchMissingAchievementsAsync(HWND hwndNotify);
+    void MeasureMissingFootprintsAsync(HWND hwndNotify);
+    void OnLibraryStatsUpdated();
     void Cleanup();
 
     HWND GetXamlIslandHwnd() const { return m_hwndXamlIsland; }
@@ -48,6 +52,8 @@ public:
     const std::vector<GameItem>& GetGames() const { return m_games; }
 
 private:
+    [[nodiscard]] std::wstring BuildOverviewStatsText() const;
+
     struct XamlState;
     std::shared_ptr<XamlState> m_xaml;
 

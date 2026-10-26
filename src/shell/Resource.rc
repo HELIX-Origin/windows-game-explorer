@@ -1,3 +1,14 @@
 #define IDI_GAME_EXPLORER 100
 
+// rc.exe does not predefine RT_MANIFEST unless windows.h is included; without the numeric type
+// the resource is stored under the literal type name "RT_MANIFEST" and the loader never finds it.
+#ifndef RT_MANIFEST
+#define RT_MANIFEST 24
+#endif
+
 IDI_GAME_EXPLORER ICON "Resource.ico"
+
+// Visual styles live in an embedded manifest instead of the linker-generated one (see
+// /MANIFEST:NO on the executable targets). Common Controls v6 is what gives native controls the
+// Fluent scrollbars and borders in both light and dark mode.
+1 RT_MANIFEST "../resources/app.manifest"

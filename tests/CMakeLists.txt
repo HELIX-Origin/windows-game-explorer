@@ -2,10 +2,14 @@ add_executable(GameExplorerTests
     TestMain.cpp
     TestDatabase.cpp
     TestStorefrontScanner.cpp
+    TestOwnedGames.cpp
+    TestInstallTargets.cpp
     TestPlatformLauncher.cpp
     TestSettings.cpp
     TestAchievementEngine.cpp
     TestImageValidator.cpp
+    TestSynopsisFormatter.cpp
+    TestThemeScroll.cpp
 )
 
 target_include_directories(GameExplorerTests PRIVATE

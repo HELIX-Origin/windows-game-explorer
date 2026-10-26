@@ -1,7 +1,7 @@
 # HANDOFF.md — Windows Game Explorer Session Handoff
 
-**Last updated:** 2026-10-24
-**Current session status:** Emulation Support for Xemu & VICE Added · Platform & Provider Icon 32-bit ARGB Transparency Restored (BUG-14 Resolved) · Release v2.2.0 Published · BUG-10, BUG-11, BUG-12, BUG-13 Resolved · All 21/21 unit tests passing under zero-warning gate (/W4 /WX).
+**Last updated:** 2026-10-26
+**Current session status:** Direct In-Memory Storefront Owned Games Loading, `GameExplorerService.exe` Background Service (LocalSystem + Task Scheduler bootstrap), Xbox AsyncCache Ingestion, Multi-Storefront Deduplication & Install Popup Menu, Canonical PowerShell Registration (`register.ps1` / `unregister.ps1` with batch entry points and ASCII banners), and Windows 10/11 Platform Guardrails **delivered in the working tree (uncommitted)** · SQLite strictly limited to persistence/cache layer · Shadow-copy staging abandoned in favour of direct `regsvr32` registration · Uninstaller service teardown resolved · 0 errors / 0 warnings under `/W4 /WX` · 55/55 unit tests passing · Complete distribution packaging verified (`dist/windows-game-explorer-v2.4.0-setup.exe`).
 **Project:** windows-game-explorer (Windows Game Explorer)
 **Root:** projects/windows-game-explorer
 
@@ -9,6 +9,161 @@
 > workstream state change, fully rewrite at session end. New session: read this file right after `AGENTS.md`,
 > migrate every item into `ROADMAP.md` / `PLAN.md` / `TODO.md` / `BUGS.md`, then **refresh this file**.
 > **Never delete it.**
+
+---
+
+## 0) [windows-game-explorer] SVC-01, CAT-02 & Registration Alignment (delivered — uncommitted)
+
+### Delivered in this workstream (working tree)
+- **SQLite Architectural Boundary & Direct Storefront Loading**:
+  - Removed `owned_games` table and related CRUD from `Database.h` / `Database.cpp`. SQLite strictly limited to persistence/cache layer (API keys, settings, achievement progress).
+  - Added direct in-memory storefront scanners: `ScanGogOwnedGamesGalaxy()` (`galaxy-2.0.db`), `ScanItchOwnedGamesButler()` (`butler.db`), `ScanXboxOwnedGamesAsyncCache()` (`AsyncCache.db` `product_summary` scope), and `ScanAllOwnedGamesDirect()`.
+- **Xbox PC App AsyncCache Integration**:
+  - `ScanXboxOwnedGamesAsyncCache()` reads `%LOCALAPPDATA%\Packages\Microsoft.GamingApp_*\LocalState\AsyncCache.db`, populating uninstalled Game Pass and purchased Xbox games with artwork, categories, and store IDs.
+- **Multi-Storefront Deduplication & Install Selection**:
+  - Implemented `NormalizeTitleKey()` with word-boundary article stripping (`OwnedGamesSortTitle`) to merge identical games owned across multiple storefronts into one catalogue entry with composite storefront labels ("Steam, Xbox").
+  - Multi-source install selection: clicking "Install" or "Store page" shows a popup context menu (`TrackPopupMenuEx`) for games with multiple storefront sources, letting the user choose which client to invoke.
+  - Multi-source filtering: `OwnedGameMatchesStore()` and `CataloguePage.cpp` filter combo check both primary and individual source keys.
+- **Canonical Registration & PowerShell Script Migration**:
+  - Shadow-copy staging was abandoned due to chicken-and-egg service dependencies and stale registry targets. `Registration.cpp` uses canonical `regsvr32` registration pointing directly to the real DLL.
+  - Implemented `scripts/register.ps1` and `scripts/unregister.ps1` with graceful elevation fallbacks, stylized ASCII banners, and clean desktop/start menu shortcut management.
+  - Converted `register.bat` and `unregister.bat` into clean launcher entry points.
+- **Uninstaller Service Teardown Fix**:
+  - `UninstallService()` queries SCM for `SERVICE_STOPPED`, deletes schtask, kills process tree with `taskkill /F /T /IM GameExplorerService.exe`.
+  - NSIS uninstaller executes `net stop`, `sc delete`, `schtasks /delete /f`, and terminates companion processes before deleting files.
+- **Windows 10/11 Platform Guardrails**:
+  - Removed Windows 7, 8, 8.1 supportedOS GUIDs from `resources/app.manifest`.
+  - Added `WinVer.nsh` check in NSIS `.onInit` blocking installation on pre-Windows 10/11 operating systems.
+  - Documented `ARCH-01` in TODO and BUGS for research on Windows 10 vs Windows 11 build compatibility.
+- **Verification**:
+  - Build: **0 errors, 0 warnings** under MSVC `/W4 /WX`.
+  - Unit tests: **55/55 unit tests pass** (all passing).
+  - Packaging: **Portable ZIP, ROMs Template ZIP, and NSIS Setup Installer compile cleanly** into `dist/`.
+
+### State
+- All changes are **uncommitted** (`HEAD` = `f82f4b9`, v2.3.0). No git mutation authorized yet.
+- Version in `CHANGELOG.md` is `2.4.0` [Unreleased].
+
+---
+
+## 0a) [windows-game-explorer] CAT-01 slice 2a: Owned-Games Catalogue UI, Steam Sync & Per-Store Install Targets (delivered — uncommitted)
+
+### Delivered in this workstream (working tree)
+- **Catalogue engine**: `OwnedGames` model plus `OwnedGamesQuery` / `OwnedGamesPage` with filtering
+  (search, storefront, installed state, genre, tag, release year, rating, minimum playtime, family
+  sharing), sorting (title with article normalization, release date, playtime, last played,
+  storefront, install size) and paging (12/24/48/96 rows, page index clamped). `owned_games` table
+  and CRUD in `Database`, covered by `tests/TestOwnedGames.cpp`.
+- **Catalogue page**: the placeholder is gone. `CataloguePage.cpp` paints a custom list with a sticky
+  column header and the shared `ThemeScroll` gutter, a toolbar card with all filters/sorts, an empty
+  state, a status line, footer pagination and action buttons, and reads the install base folder from
+  settings. Combos are forced to the 28 px field height (`CB_SETITEMHEIGHT -1` = 22) so they line up
+  with text fields.
+- **Steam sync**: `IPlayerService/GetOwnedGames` on a worker thread with the stored Web API key;
+  SteamID64 falls back to the most-recent account in `<Steam>/config/loginusers.vdf`. A private
+  "Game details" profile that returns `game_count: 0` is reported as no owned games, never filled in.
+  Results replace the `steam` rows and installed titles are badged from the library scan.
+- **Install targets**: `InstallTargets` implements one Config-owned base folder plus per-store
+  subfolders. Steam gets a real library (`steamapps/{common,downloading,temp}` +
+  `libraryfolder.vdf` with a random 64-bit `contentid`, written once); Epic/GOG/itch get only the
+  folder plus a note because their clients own install registration; Xbox/MSIX refuses a custom
+  folder. Evidence: [`docs/research/install-library-folders.md`](./docs/research/install-library-folders.md).
+- **Configuration**: new "Install base folder" row with a Browse button on card 2, persisted as
+  `install_base_folder`, card heights retuned so everything fits 1200×920.
+- **Verification**: `/W4 /WX` build 0 errors / 0 warnings; 53/53 tests; catalogue and Configuration
+  captured only after `capture-verified.ps1` reported `foreground=True uncovered=True`; pixel probes
+  show every field at `#2B2B2B`, canvas `#202020`, cards `#2D2D2D`, and 0 pure-black pixels; overlap
+  probe reports no sibling overlaps and no out-of-bounds controls at 1360×920.
+
+### Known remaining
+- Populated-list rendering has not been captured with a live owned library yet (the engine paths are
+  unit-tested; the chrome/empty state are pixel-verified).
+- GOG, Epic, Xbox, Ubisoft Connect, EA App and itch.io ownership sync still pending; genre/tag/rating/
+  family-sharing columns stay empty until those sources (or Steam metadata for genres/tags) land.
+- Catalogue detail pane, install progress tracking, library relocation and `catalogue\` cache
+  persistence remain open in `TODO.md` (CAT-01).
+
+### State
+- All of the above is **uncommitted** (`HEAD` = `f82f4b9`, v2.3.0). No git mutation has been authorized.
+- Project version remains 2.4.0 with new work under `CHANGELOG.md` `[Unreleased]`.
+
+### Next
+- Remaining storefront syncs, then catalogue detail pane and install progress.
+- **SVC-01**: `LocalService` service skeleton, Task Scheduler bootstrap, per-session path routing, named-pipe IPC.
+
+---
+
+## 0a) [windows-game-explorer] W.62: Field Surface & Edge-Repaint Defects (delivered — uncommitted)
+
+### Delivered in this workstream (working tree)
+- **Black field backgrounds (BUG-15)**: `g_hEditBrush` was created from `ThemeControls::FieldSurfaceColor()` before `ThemeControls::SetTheme()` published the palette, so the brush was built from a zero-initialised palette and came out `RGB(0,0,0)`. Both `EnsureManagerResources()` and `EnsureConfigResources()` now call `SetTheme()` before deriving the brush. The synopsis editor's interior histogram is uniformly `#2B2B2B` (was 36 765 black pixels); a sweep of all 59 Manager and 32 Configuration control rects reports zero black interior patches.
+- **Edge repaint debris (BUG-16)**: `PaintCombo()` and `PaintFieldBorder()` fill their whole window rectangle with `cardBg` before drawing the rounded surface, so the 1 px ring and the four corners can never retain an older frame. Proven behaviourally: soil a control's client with magenta, invalidate only that control, read the screen back — `0` magenta pixels remain and every edge row reads `45,45,45`.
+- **Shared field tokens**: new `fieldBg` / `fieldBorder` in `ThemePalette`; `ThemeControls::FieldSurfaceColor()` is the single accessor used by the `WM_CTLCOLOREDIT` handlers and brush creation, so text boxes and combo boxes cannot drift apart again.
+- **GFM synopsis editor**: created as a true multi-line editor (`ES_MULTILINE | ES_AUTOVSCROLL | ES_WANTRETURN | WS_VSCROLL | ES_NOHIDESEL`); the in-editor formatting hint label is gone (the guide lives in `docs/metadata-customization.md`).
+- **Verification**: `/W4 /WX` build 0 errors / 0 warnings; 39/39 unit tests; captures taken only after `capture-verified.ps1` reports `foreground=True uncovered=True`.
+
+### Known remaining polish
+- Synopsis in-field scrollbar (`QUIRK-01`) is resolved: `ThemeFieldScroll` paints the shared
+  `ThemeScroll` bar inside the rounded frame (gutter 22 px, no native `WS_VSCROLL`).
+- Manager combo text buffers now allocate `length + 1` before `CB_GETLBTEXT` (fixed).
+- CAT-01 slice 2a is delivered; see section 0 above.
+
+### State
+- All of the above is **uncommitted** (`HEAD` = `f82f4b9`, v2.3.0). No git mutation has been authorized.
+- Project version remains 2.4.0 with new work under `CHANGELOG.md` `[Unreleased]`.
+
+### Next
+- **CAT-01 slice 2**: replace the Catalogue placeholder (owned-games model, filter/sort engine, `owned_games` table, Steam `GetOwnedGames` sync, real list UI).
+- **SVC-01**: `LocalService` service skeleton, Task Scheduler bootstrap, per-session path routing, named-pipe IPC.
+
+---
+
+## 1) [windows-game-explorer] W.61: Game Explorer Studio Unified GUI, Fluent Controls & Standalone-App Retirement (delivered — uncommitted)
+
+### Delivered in this workstream (working tree)
+- **Single companion GUI**: `GameExplorerStudio.exe` hosts **Library Manager**, **Game Catalogue** (explicit placeholder) and **Configuration** as child pages in one Fluent tabbed window; Studio minimum size 1200×920, initial 1360×920. Every page fit verified at 1200×920, 1360×940, 1600×1000, 1920×1040 and maximised (zero controls outside the page rect).
+- **Standalone apps retired**: `GameExplorerConfig.exe` and `GameExplorerManager.exe` are no longer built, packaged, signed or installed. `CMakeLists.txt` produces `GameExplorerShell.dll` + `GameExplorerStudio.exe`; `src/config/ConfigMain.cpp` and `src/manager/ManagerMain.cpp` compile only as pages (no `wWinMain`, no `GAME_EXPLORER_STUDIO_PAGE` switch).
+- **CLI moved into Studio**: `--tab=manager|catalogue|config`, `--game=<appId>` (pre-selects a game in the Library Manager, used by the shell context menu), `--register` / `--unregister` (self-elevating `regsvr32`) and `--reset-cache` (now also available at the Studio level instead of only the old Config exe).
+- **Shell delegation**: `ShellFolder.cpp` context menu launches `GameExplorerStudio.exe --tab=manager --game=<appId>`; `LibraryViewHost` opens `--tab=manager` / `--tab=config`; companion-directory discovery looks for `GameExplorerStudio.exe`.
+- **Installer/packaging/CI**: NSIS ships one Studio shortcut (Settings/Manager shortcuts removed, old exes deleted on upgrade), package/sign scripts and `release.yml` target Studio, `build.ps1` stops Studio, `unregister.bat` closes Studio.
+- **Fluent controls**: `ThemeControls` (rounded combo frames, accent dropdown pill, ownerdraw check/radio, rounded field frames with focus accent) shared by both pages; single-line field text vertically centred via a `WM_NCCALCSIZE` client inset plus `WM_NCPAINT` frame painting; multi-line editors use `EM_SETRECT` padding and keep their scrollbar.
+- **Dark-mode scrollbars**: Common Controls v6 manifest activates visual styles; custom-painted surfaces use `ThemeScroll`; multi-line editors use the `DarkMode_Explorer` window theme so the native scrollbar trough/thumb are dark instead of white.
+- **Config page**: fluid card layout (`ComputeConfigLayout` / `LayoutConfigControls`) replaces the fixed 640 px column; "Open Game Explorer Manager…" is a tab switch; themed radios/checks.
+- **Verification**: `/W4 /WX` build 0 errors / 0 warnings; 39/39 unit tests; CLI smoke tests (`--tab=config`, `--tab=catalogue`, `--game=steam:440`) show a visible, responsive window.
+
+### Known remaining polish
+- Synopsis multi-line scrollbar is dark-themed but still a native 17 px bar; replacing it with `ThemeScroll` is tracked in `TODO.md`.
+- Some Manager combo text buffers still allocate `length` instead of `length + 1` before `CB_GETLBTEXT` (pre-existing).
+
+### State
+- All of the above is **uncommitted** (`HEAD` = `f82f4b9`, v2.3.0). No git mutation has been authorized.
+- Project version remains 2.4.0 with new work under `CHANGELOG.md` `[Unreleased]`.
+
+### Next
+- Remaining storefront syncs, catalogue detail pane, install progress.
+- **SVC-01**: `LocalService` service skeleton, Task Scheduler bootstrap, per-session path routing, named-pipe IPC.
+
+---
+
+## 0b) [windows-game-explorer] W.60: FFXIV Official Source, Secondary Launchers, Store-Artwork Exclusivity, Rich Synopsis, Background Achievement Sync & Footprint Fix (Delivered, v2.4.0 — uncommitted)
+
+### Delivered in this workstream (working tree, version manifests at 2.4.0)
+- **FFXIV official-source rework**: `StorefrontScanner` now discovers the official Square Enix installation (`sqex_ffxiv`, `PlatformType::SquareEnix`). `PlatformType::XIVLauncher` is retained only for backward-compatible JSON reads and is never emitted. When the XIVLauncher executable exists it is auto-attached as an alternate launch method (`PlatformLauncher`).
+- **Secondary launch methods**: persisted per game in `%USERPROFILE%\Game Explorer\metadata\<appId>.json` with `{exe}` / `{dir}` token expansion; manual methods always persist, auto ones are pruned, a saved empty array is authoritative. The Manager adds methods through a modal popup.
+- **Launch button dropdown**: shell UI uses a system XAML `Button` plus a chevron `MenuFlyout` (no `SplitButton` in the XAML Island host).
+- **Store-artwork exclusivity**: storefront art is authoritative; metadata providers no longer fill artwork gaps. Only a genuinely empty slot may fall back to another cached local image. Covered by `tests/TestStorefrontScanner.cpp`.
+- **`SynopsisFormatter`**: shared markup parser (`#`/`##`/`###`, `-`/`*`, `**bold**`, `*italic*`, `_italic_`, `__underline__`, backslash escapes, unbalanced markers to end of line). Rendered as rich `Run`s in the details pane; multiline editor + formatting hint in the Manager. `tests/TestSynopsisFormatter.cpp`.
+- **Achievement auto-sync**: background fetch on selection, `AppSettings::autoSyncAchievements` (default `true`) in the SQLite settings table, Config GUI checkbox, ownerdraw "Sync Achievements for All Games" button with `WM_APP_ACHIEVEMENT_SYNC_PROGRESS` (+51) / `_COMPLETE` (+52) counters. Per-game sync buttons removed; the details pane keeps its scroll position.
+- **Footprint measurement**: games without a store-reported size are measured in the background (enumeration only, 150,000-entry cap), signalled via `WM_APP_LIBRARY_STATS_UPDATED`; the placeholder resolves to a measured value, an approximate `≈` value, or explicit `Unknown`.
+- **Fixes**: `ScannerScanAllPrunesObsoleteGames` crash; level-1 synopsis heading `substr(4)` → `substr(2)`; Config GUI layout re-flow (640×900, cards 105/158/106/194/126, save row shifted).
+- **Verification**: `scripts/build.ps1` → 0 errors / 0 warnings (`/W4 /WX`); `scripts/test.ps1` → 28 passed / 0 failed.
+
+### State
+- All of the above is **uncommitted** (`HEAD` = `f82f4b9`, v2.3.0). No git mutation has been authorized.
+- `CMakeLists.txt` and `installer/windows-game-explorer.nsi` already carry 2.4.0.
+
+### Next
+- Superseded by **W.61 (section 0)**: the M17/CAT-01 shell and SVC-01 decisions were resolved by the user on 2026-10-25; slice 1 shipped in the working tree and slice 2 (catalogue data/UI) plus SVC-01 are next.
 
 ---
 

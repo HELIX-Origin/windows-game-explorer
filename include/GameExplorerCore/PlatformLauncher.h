@@ -11,6 +11,11 @@ public:
     // Launches the given game enforcing platform-specific DRM client executable rules
     static bool Launch(HWND hwndOwner, const GameItem& game);
 
+    // Launches a user-selected secondary method (custom launcher/wrapper) for the given game.
+    // Arguments may contain {exe} and {dir} tokens, replaced with the game's quoted executable
+    // and working-directory paths respectively.
+    static bool LaunchWith(HWND hwndOwner, const GameItem& game, const LaunchMethod& method);
+
     // Platform launcher executable discovery
     static std::wstring GetSteamExecutablePath();
     static std::wstring GetEpicExecutablePath();

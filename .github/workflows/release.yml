@@ -42,8 +42,7 @@ jobs:
           }
           New-Item -ItemType Directory -Force -Path dist | Out-Null
           Copy-Item "build/Release/GameExplorerShell.dll" -Destination dist/ -ErrorAction Stop
-          Copy-Item "build/Release/GameExplorerConfig.exe" -Destination dist/ -ErrorAction Stop
-          Copy-Item "build/Release/GameExplorerManager.exe" -Destination dist/ -ErrorAction Stop
+          Copy-Item "build/Release/GameExplorerStudio.exe" -Destination dist/ -ErrorAction Stop
           Compress-Archive -Path "dist/*" -DestinationPath "windows-game-explorer-$tag-win64.zip" -Force
           echo "ARCHIVE=windows-game-explorer-$tag-win64.zip" >> $env:GITHUB_ENV
           echo "RELEASE_TAG=$tag" >> $env:GITHUB_ENV

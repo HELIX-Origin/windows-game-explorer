@@ -16,7 +16,7 @@ In modern Windows versions, Game Explorer was deprecated and eventually removed,
 
 ## 🏛️ System Architecture
 
-The project consists of three primary layers: the Shell Extension (`GameExplorerShell.dll`), the Core Engine (`GameExplorerCore.lib`), and the Companion Win32 Utilities (`GameExplorerManager.exe` and `GameExplorerConfig.exe`).
+The project consists of three primary layers: the Shell Extension (`GameExplorerShell.dll`), the Core Engine (`GameExplorerCore.lib`), and Game Explorer Studio (`GameExplorerStudio.exe`), the single companion GUI that hosts the Library Manager, Game Catalogue, and Configuration pages.
 
 ```mermaid
 flowchart TD
@@ -28,9 +28,14 @@ flowchart TD
         ShellView --> XamlIsland
     end
 
-    subgraph CompanionApps["Companion Win32 Applications"]
-        ConfigApp["GameExplorerConfig.exe<br/>(Settings & Storefront Scans)"]
-        ManagerApp["GameExplorerManager.exe<br/>(Artwork Discovery & Editor)"]
+    subgraph CompanionApps["Game Explorer Studio (GameExplorerStudio.exe)"]
+        TabStrip["Fluent Tab Strip<br/>(one window, one message loop)"]
+        ManagerApp["Library Manager Page<br/>(Artwork Discovery & Editor)"]
+        CatalogueApp["Game Catalogue Page<br/>(Placeholder)"]
+        ConfigApp["Configuration Page<br/>(Settings & Storefront Scans)"]
+        TabStrip --> ManagerApp
+        TabStrip --> CatalogueApp
+        TabStrip --> ConfigApp
     end
 
     subgraph CoreEngine["GameExplorerCore Engine"]

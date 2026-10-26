@@ -1,6 +1,6 @@
 # Security Policy
 
-We take the security of **Windows Game Explorer** seriously — for the shell extension and companion utilities, and for the integrity of your Windows environment.
+We take the security of **Windows Game Explorer** seriously — for the shell extension and the Game Explorer Studio GUI, and for the integrity of your Windows environment.
 
 ## 🛡️ Supported Versions
 
@@ -32,7 +32,7 @@ We aim to acknowledge reports within **5 business days** and to ship a fix for c
 ## 🎯 Scope
 
 In scope:
-- Buffer overflows, memory corruption, or unhandled exceptions inside `GameExplorerShell.dll`, `GameExplorerConfig.exe`, or `GameExplorerManager.exe`.
+- Buffer overflows, memory corruption, or unhandled exceptions inside `GameExplorerShell.dll` or `GameExplorerStudio.exe`.
 - Code execution, path traversal, or arbitrary file writes via manifest parsing or metadata JSON loading.
 - Privilege escalation via COM registration (`HKCU` registry keys).
 

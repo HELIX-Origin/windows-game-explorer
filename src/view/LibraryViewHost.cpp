@@ -8,6 +8,7 @@
 #include "GameExplorerCore/Localization.h"
 #include "GameExplorerCore/AchievementEngine.h"
 #include "GameExplorerCore/ImageValidator.h"
+#include "GameExplorerCore/SynopsisFormatter.h"
 
 #ifdef GetCurrentTime
 #undef GetCurrentTime
@@ -21,6 +22,7 @@
 #include <winrt/Windows.UI.Xaml.Hosting.h>
 #include <winrt/Windows.UI.Xaml.Controls.h>
 #include <winrt/Windows.UI.Xaml.Controls.Primitives.h>
+#include <winrt/Windows.UI.Xaml.Documents.h>
 #include <winrt/Windows.UI.Xaml.Media.h>
 #include <winrt/Windows.UI.Xaml.Media.Imaging.h>
 #include <winrt/Windows.UI.Xaml.Input.h>
@@ -46,6 +48,7 @@ namespace fs = std::filesystem;
 
 namespace wux = winrt::Windows::UI::Xaml;
 namespace wuxc = winrt::Windows::UI::Xaml::Controls;
+namespace wuxd = winrt::Windows::UI::Xaml::Documents;
 namespace wuxm = winrt::Windows::UI::Xaml::Media;
 namespace wuxmi = winrt::Windows::UI::Xaml::Media::Imaging;
 namespace wuxi = winrt::Windows::UI::Xaml::Input;
@@ -67,6 +70,31 @@ std::wstring FormatDiskSize(uint64_t bytes) {
     wchar_t buf[32];
     swprintf_s(buf, L"%.1f GB", gb);
     return std::wstring(buf);
+}
+
+// Measures the on-disk footprint of an install directory. Enumeration only (no file reads) and
+// capped so a pathological folder can never stall the background worker.
+uint64_t MeasureDirectoryBytes(const std::wstring& dirPath) {
+    if (dirPath.empty()) return 0;
+    std::error_code ec;
+    const fs::path root(dirPath);
+    if (!fs::is_directory(root, ec)) return 0;
+
+    constexpr size_t kMaxEntries = 150000;
+    uint64_t total = 0;
+    size_t entries = 0;
+    fs::recursive_directory_iterator it(root, fs::directory_options::skip_permission_denied, ec);
+    const fs::recursive_directory_iterator end;
+    while (!ec && it != end && entries < kMaxEntries) {
+        std::error_code entryEc;
+        if (it->is_regular_file(entryEc) && !entryEc) {
+            const auto size = it->file_size(entryEc);
+            if (!entryEc) total += size;
+        }
+        it.increment(ec);
+        ++entries;
+    }
+    return total;
 }
 
 void EnsureGdiplusInitialized() {
@@ -264,7 +292,7 @@ fs::path GetApplicationDirectory() {
         if (GetModuleFileNameW(hThisMod, path, MAX_PATH) > 0) {
             fs::path p(path);
             fs::path dir = p.parent_path();
-            if (fs::exists(dir / L"GameExplorerManager.exe") || fs::exists(dir / L"GameExplorerConfig.exe")) {
+            if (fs::exists(dir / L"GameExplorerStudio.exe")) {
                 return dir;
             }
         }
@@ -277,7 +305,7 @@ fs::path GetApplicationDirectory() {
         std::transform(filename.begin(), filename.end(), filename.begin(), ::towlower);
         if (filename != L"explorer.exe" && filename != L"rundll32.exe") {
             fs::path dir = p.parent_path();
-            if (fs::exists(dir / L"GameExplorerManager.exe") || fs::exists(dir / L"GameExplorerConfig.exe")) {
+            if (fs::exists(dir / L"GameExplorerStudio.exe")) {
                 return dir;
             }
         }
@@ -293,7 +321,7 @@ fs::path GetApplicationDirectory() {
         if (RegQueryValueExW(hKey, nullptr, nullptr, nullptr, reinterpret_cast<LPBYTE>(dllPath), &cbData) == ERROR_SUCCESS) {
             fs::path p(dllPath);
             fs::path dir = p.parent_path();
-            if (fs::exists(dir / L"GameExplorerManager.exe") || fs::exists(dir / L"GameExplorerConfig.exe")) {
+            if (fs::exists(dir / L"GameExplorerStudio.exe")) {
                 RegCloseKey(hKey);
                 return dir;
             }
@@ -303,7 +331,7 @@ fs::path GetApplicationDirectory() {
 
     // 4. Fallback to current working directory
     fs::path cur = fs::current_path();
-    if (fs::exists(cur / L"GameExplorerManager.exe") || fs::exists(cur / L"GameExplorerConfig.exe")) {
+    if (fs::exists(cur / L"GameExplorerStudio.exe")) {
         return cur;
     }
 
@@ -314,6 +342,10 @@ static std::vector<ProviderViewModel> s_cachedProviders;
 static std::vector<GameItem> s_cachedGames;
 static bool s_cacheValid = false;
 static std::atomic<bool> s_isLoadingData{ false };
+static std::atomic<bool> s_isFetchingAchievements{ false };
+static std::atomic<bool> s_isMeasuringFootprints{ false };
+static std::mutex s_measuredSizesMutex;
+static std::vector<std::pair<std::wstring, uint64_t>> s_measuredSizes;
 static wux::Hosting::WindowsXamlManager s_xamlManager{ nullptr };
 
 } // namespace
@@ -323,6 +355,8 @@ struct LibraryViewHost::XamlState {
     wuxc::Grid rootGrid{ nullptr };
     wuxc::Border sidepaneHost{ nullptr };
     wuxc::ScrollViewer mainScroll{ nullptr };
+    wuxc::ScrollViewer sidepaneScroll{ nullptr };
+    wuxc::TextBlock statsText{ nullptr };
     std::vector<wuxc::Border> providerCards;
     std::vector<wuxc::Border> gameCards;
 };
@@ -480,6 +514,8 @@ void LibraryViewHost::LoadDataAsync(HWND hwndNotify) {
         m_providers = s_cachedProviders;
         m_games = s_cachedGames;
         BuildXamlViewport();
+        FetchMissingAchievementsAsync(hwndNotify);
+        MeasureMissingFootprintsAsync(hwndNotify);
         return;
     }
 
@@ -515,7 +551,6 @@ void LibraryViewHost::LoadDataAsync(HWND hwndNotify) {
         addProviderIfInstalled(PlatformType::Amazon,      L"Amazon Games",    L"Amazon.com, Inc.",       PlatformLauncher::GetAmazonExecutablePath());
         addProviderIfInstalled(PlatformType::LegacyGames, L"Legacy Games",    L"Legacy Games, Inc.",     PlatformLauncher::GetLegacyGamesExecutablePath());
         addProviderIfInstalled(PlatformType::Jagex,       L"Jagex Launcher",  L"Jagex Ltd",              PlatformLauncher::GetJagexExecutablePath());
-        addProviderIfInstalled(PlatformType::XIVLauncher, L"XIVLauncher",     L"Goatcorp / FFXIV",       PlatformLauncher::GetXIVLauncherExecutablePath());
         addProviderIfInstalled(PlatformType::GuildWars2,  L"Guild Wars 2",    L"ArenaNet",               PlatformLauncher::GetGuildWars2ExecutablePath());
         addProviderIfInstalled(PlatformType::Rockstar,    L"Rockstar Games",  L"Rockstar Games",         PlatformLauncher::GetRockstarExecutablePath());
         addProviderIfInstalled(PlatformType::Riot,        L"Riot Client",     L"Riot Games",             PlatformLauncher::GetRiotExecutablePath());
@@ -571,10 +606,125 @@ void LibraryViewHost::OnLibraryLoaded() {
     m_providers = s_cachedProviders;
     m_games = s_cachedGames;
     BuildXamlViewport();
+    // Achievements are fetched in the background so users never have to sync manually.
+    FetchMissingAchievementsAsync(m_hwndContainer);
+    MeasureMissingFootprintsAsync(m_hwndContainer);
 }
 
 void LibraryViewHost::OnAchievementsUpdated() {
     RebuildSidepane();
+}
+
+std::wstring LibraryViewHost::BuildOverviewStatsText() const {
+    uint64_t totalBytes = 0;
+    size_t knownFootprints = 0;
+    for (const auto& game : m_games) {
+        totalBytes += game.diskSizeBytes;
+        if (game.diskSizeBytes > 0) ++knownFootprints;
+    }
+
+    std::wstring footprint;
+    if (totalBytes == 0) {
+        footprint = m_games.empty() ? L"0 MB" : L"Calculating...";
+    } else {
+        footprint = FormatDiskSize(totalBytes);
+        if (knownFootprints < m_games.size()) {
+            footprint = L"\u2248 " + footprint;
+        }
+    }
+
+    return L"\u2022 Installed Providers: " + std::to_wstring(m_providers.size()) + L"\n" +
+           L"\u2022 Installed Games: " + std::to_wstring(m_games.size()) + L"\n" +
+           L"\u2022 Total Disk Footprint: " + footprint;
+}
+
+void LibraryViewHost::FetchMissingAchievementsAsync(HWND hwndNotify) {
+    const auto settings = SettingsManager::Load();
+    if (!settings.autoSyncAchievements) return;
+    if (s_isFetchingAchievements.exchange(true)) return;
+
+    std::thread([hwndNotify]() {
+        std::vector<GameItem> pending;
+        {
+            auto& db = Database::Instance();
+            if (!db.IsOpen()) {
+                db.Open(Storage::GetDatabasePath());
+            }
+            for (const auto& game : s_cachedGames) {
+                if (db.GetAchievementsForGame(game.appId).empty()) {
+                    pending.push_back(game);
+                }
+            }
+        }
+
+        bool updated = false;
+        for (const auto& game : pending) {
+            const auto fetched = AchievementEngine::Instance().GetAchievements(game, true);
+            if (!fetched.empty()) updated = true;
+        }
+
+        s_isFetchingAchievements.store(false);
+        if (updated && hwndNotify != nullptr && IsWindow(hwndNotify)) {
+            PostMessageW(hwndNotify, WM_APP_ACHIEVEMENTS_UPDATED, 0, 0);
+        }
+    }).detach();
+}
+
+void LibraryViewHost::MeasureMissingFootprintsAsync(HWND hwndNotify) {
+    if (s_isMeasuringFootprints.exchange(true)) return;
+
+    std::vector<GameItem> targets;
+    for (const auto& game : m_games) {
+        if (game.diskSizeBytes == 0) targets.push_back(game);
+    }
+    if (targets.empty()) {
+        s_isMeasuringFootprints.store(false);
+        return;
+    }
+
+    std::thread([hwndNotify, targets]() {
+        std::vector<std::pair<std::wstring, uint64_t>> results;
+        results.reserve(targets.size());
+        for (const auto& game : targets) {
+            std::wstring dir = game.installPath;
+            if (dir.empty() && !game.executablePath.empty()) {
+                dir = fs::path(game.executablePath).parent_path().wstring();
+            }
+            const uint64_t bytes = MeasureDirectoryBytes(dir);
+            if (bytes > 0) {
+                results.emplace_back(game.appId, bytes);
+            }
+        }
+
+        {
+            std::lock_guard<std::mutex> lock(s_measuredSizesMutex);
+            s_measuredSizes = std::move(results);
+        }
+        s_isMeasuringFootprints.store(false);
+
+        if (hwndNotify != nullptr && IsWindow(hwndNotify)) {
+            PostMessageW(hwndNotify, WM_APP_LIBRARY_STATS_UPDATED, 0, 0);
+        }
+    }).detach();
+}
+
+void LibraryViewHost::OnLibraryStatsUpdated() {
+    {
+        std::lock_guard<std::mutex> lock(s_measuredSizesMutex);
+        for (auto& game : m_games) {
+            for (const auto& [appId, bytes] : s_measuredSizes) {
+                if (game.appId == appId) {
+                    game.diskSizeBytes = bytes;
+                    break;
+                }
+            }
+        }
+        s_measuredSizes.clear();
+    }
+
+    if (m_xaml && m_xaml->statsText) {
+        m_xaml->statsText.Text(BuildOverviewStatsText());
+    }
 }
 
 void LibraryViewHost::LaunchCompanionExe(const wchar_t* exeName, const std::wstring& args) {
@@ -688,6 +838,12 @@ void LibraryViewHost::SelectProvider(int index) {
 
 void LibraryViewHost::RebuildSidepane() {
     if (!m_xaml || !m_xaml->sidepaneHost) return;
+
+    // Preserve the reader's scroll position across in-place refreshes (for example when
+    // achievements finish syncing in the background and the side pane is rebuilt).
+    const double savedScrollOffset = m_xaml->sidepaneScroll ? m_xaml->sidepaneScroll.VerticalOffset() : 0.0;
+    m_xaml->sidepaneScroll = nullptr;
+    m_xaml->statsText = nullptr;
 
     const auto bgDrawer    = m_isDarkMode ? MakeBrush(255, 28, 28, 28)   : MakeBrush(255, 246, 246, 246);
     const auto bgCard      = m_isDarkMode ? MakeBrush(255, 38, 38, 38)   : MakeBrush(255, 255, 255, 255);
@@ -832,25 +988,186 @@ void LibraryViewHost::RebuildSidepane() {
 
         if (!game.synopsis.empty()) {
             wuxc::StackPanel synPanel;
-            synPanel.Spacing(4);
+            synPanel.Spacing(6);
 
             wuxc::TextBlock synLbl;
             synLbl.Text(L"Synopsis");
             synLbl.FontSize(11);
             synLbl.FontWeight(winrt::Windows::UI::Text::FontWeights::SemiBold());
             synLbl.Foreground(textSec);
-
-            wuxc::TextBlock synTb;
-            synTb.Text(game.synopsis);
-            synTb.FontSize(12);
-            synTb.Foreground(textPrimary);
-            synTb.TextWrapping(wux::TextWrapping::Wrap);
-            synTb.LineHeight(18);
-
             synPanel.Children().Append(synLbl);
-            synPanel.Children().Append(synTb);
+
+            // Synopses support GitHub Flavored Markdown so imported text can carry headings, lists,
+            // quotes, rules, tables, code and bold/italic/underline/strikethrough emphasis.
+            for (const auto& block : ParseSynopsis(game.synopsis)) {
+                if (block.kind == SynopsisBlockKind::Separator) {
+                    wuxc::Border rule;
+                    rule.Height(1);
+                    rule.Margin(wux::ThicknessHelper::FromLengths(0, 6, 0, 6));
+                    rule.Background(borderBrush);
+                    synPanel.Children().Append(rule);
+                    continue;
+                }
+
+                if (block.kind == SynopsisBlockKind::Table) {
+                    size_t columns = 0;
+                    for (const auto& row : block.rows) columns = (std::max)(columns, row.size());
+                    if (columns == 0) continue;
+
+                    wuxc::Grid grid;
+                    grid.Margin(wux::ThicknessHelper::FromLengths(0, 4, 0, 4));
+                    for (size_t c = 0; c < columns; ++c) {
+                        wuxc::ColumnDefinition column;
+                        column.Width(wux::GridLengthHelper::FromValueAndType(1, wux::GridUnitType::Star));
+                        grid.ColumnDefinitions().Append(column);
+                    }
+                    for (size_t r = 0; r < block.rows.size(); ++r) {
+                        wuxc::RowDefinition rowDef;
+                        rowDef.Height(wux::GridLengthHelper::Auto());
+                        grid.RowDefinitions().Append(rowDef);
+
+                        const auto& row = block.rows[r];
+                        for (size_t c = 0; c < row.size(); ++c) {
+                            wuxc::TextBlock cell;
+                            cell.TextWrapping(wux::TextWrapping::Wrap);
+                            cell.FontSize(12);
+                            cell.Foreground(r == 0 ? textPrimary : textSec);
+                            if (r == 0) {
+                                cell.FontWeight(winrt::Windows::UI::Text::FontWeights::SemiBold());
+                            }
+                            cell.Padding(wux::ThicknessHelper::FromLengths(4, 2, 4, 2));
+                            for (const auto& cellRun : row[c]) {
+                                wuxd::Run run;
+                                run.Text(cellRun.text);
+                                if (cellRun.bold) {
+                                    run.FontWeight(winrt::Windows::UI::Text::FontWeights::Bold());
+                                }
+                                if (cellRun.italic) {
+                                    run.FontStyle(winrt::Windows::UI::Text::FontStyle::Italic);
+                                }
+                                if (cellRun.underline) {
+                                    run.TextDecorations(winrt::Windows::UI::Text::TextDecorations::Underline);
+                                }
+                                if (cellRun.strike) {
+                                    run.TextDecorations(winrt::Windows::UI::Text::TextDecorations::Strikethrough);
+                                }
+                                if (cellRun.code) {
+                                    run.FontFamily(wuxm::FontFamily(L"Consolas"));
+                                }
+                                cell.Inlines().Append(run);
+                            }
+                            wuxc::Grid::SetRow(cell, static_cast<int>(r));
+                            wuxc::Grid::SetColumn(cell, static_cast<int>(c));
+                            grid.Children().Append(cell);
+                        }
+                    }
+                    synPanel.Children().Append(grid);
+                    continue;
+                }
+
+                if (block.kind == SynopsisBlockKind::CodeBlock) {
+                    wuxc::Border frame;
+                    frame.Background(bgDrawer);
+                    frame.Padding(wux::ThicknessHelper::FromLengths(8, 6, 8, 6));
+                    frame.Margin(wux::ThicknessHelper::FromLengths(0, 4, 0, 4));
+                    frame.CornerRadius(wux::CornerRadiusHelper::FromUniformRadius(4));
+
+                    wuxc::TextBlock codeTb;
+                    codeTb.TextWrapping(wux::TextWrapping::Wrap);
+                    codeTb.FontFamily(wuxm::FontFamily(L"Consolas"));
+                    codeTb.FontSize(11);
+                    codeTb.Foreground(textPrimary);
+                    for (const auto& codeRun : block.runs) {
+                        wuxd::Run run;
+                        run.Text(codeRun.text);
+                        codeTb.Inlines().Append(run);
+                    }
+                    frame.Child(codeTb);
+                    synPanel.Children().Append(frame);
+                    continue;
+                }
+
+                wuxc::TextBlock blockTb;
+                blockTb.TextWrapping(wux::TextWrapping::Wrap);
+                blockTb.TextTrimming(wux::TextTrimming::None);
+                blockTb.Foreground(textPrimary);
+
+                switch (block.kind) {
+                case SynopsisBlockKind::Heading1:
+                    blockTb.FontSize(15);
+                    blockTb.FontWeight(winrt::Windows::UI::Text::FontWeights::Bold());
+                    blockTb.Margin(wux::ThicknessHelper::FromLengths(0, 6, 0, 0));
+                    break;
+                case SynopsisBlockKind::Heading2:
+                    blockTb.FontSize(13);
+                    blockTb.FontWeight(winrt::Windows::UI::Text::FontWeights::SemiBold());
+                    blockTb.Margin(wux::ThicknessHelper::FromLengths(0, 4, 0, 0));
+                    break;
+                case SynopsisBlockKind::Heading3:
+                    blockTb.FontSize(12);
+                    blockTb.FontWeight(winrt::Windows::UI::Text::FontWeights::SemiBold());
+                    blockTb.Margin(wux::ThicknessHelper::FromLengths(0, 2, 0, 0));
+                    break;
+                case SynopsisBlockKind::Bullet:
+                case SynopsisBlockKind::Numbered:
+                    blockTb.FontSize(12);
+                    blockTb.Margin(wux::ThicknessHelper::FromLengths(10, 0, 0, 0));
+                    break;
+                case SynopsisBlockKind::Quote:
+                    blockTb.FontSize(12);
+                    blockTb.FontStyle(winrt::Windows::UI::Text::FontStyle::Italic);
+                    blockTb.Foreground(textSec);
+                    blockTb.Margin(wux::ThicknessHelper::FromLengths(8, 0, 0, 0));
+                    break;
+                case SynopsisBlockKind::CodeBlock:
+                case SynopsisBlockKind::Paragraph:
+                case SynopsisBlockKind::Separator:
+                case SynopsisBlockKind::Table:
+                default:
+                    blockTb.FontSize(12);
+                    break;
+                }
+                blockTb.LineHeight(18);
+
+                if (!block.marker.empty()) {
+                    wuxd::Run markerRun;
+                    markerRun.Text(block.marker + L"  ");
+                    blockTb.Inlines().Append(markerRun);
+                }
+
+                for (const auto& synRun : block.runs) {
+                    wuxd::Run run;
+                    run.Text(synRun.text);
+                    if (synRun.bold) {
+                        run.FontWeight(winrt::Windows::UI::Text::FontWeights::Bold());
+                    }
+                    if (synRun.italic) {
+                        run.FontStyle(winrt::Windows::UI::Text::FontStyle::Italic);
+                    }
+                    if (synRun.underline) {
+                        run.TextDecorations(winrt::Windows::UI::Text::TextDecorations::Underline);
+                    }
+                    if (synRun.strike) {
+                        run.TextDecorations(winrt::Windows::UI::Text::TextDecorations::Strikethrough);
+                    }
+                    if (synRun.code) {
+                        run.FontFamily(wuxm::FontFamily(L"Consolas"));
+                    }
+                    blockTb.Inlines().Append(run);
+                }
+                synPanel.Children().Append(blockTb);
+            }
+
             stack.Children().Append(synPanel);
         }
+
+        const GameItem gToLaunch = game;
+        HWND hwndContainer = m_hwndContainer;
+
+        wuxc::Grid playRow;
+        wuxc::ColumnDefinition playCol;
+        playCol.Width(wux::GridLengthHelper::FromValueAndType(1, wux::GridUnitType::Star));
+        playRow.ColumnDefinitions().Append(playCol);
 
         wuxc::Button playBtn;
         playBtn.Content(winrt::box_value(L"\u25B6  Play Game"));
@@ -860,12 +1177,52 @@ void LibraryViewHost::RebuildSidepane() {
         playBtn.CornerRadius(wux::CornerRadiusHelper::FromUniformRadius(6));
         playBtn.Padding(wux::ThicknessHelper::FromLengths(16, 10, 16, 10));
         playBtn.FontWeight(winrt::Windows::UI::Text::FontWeights::SemiBold());
-        const GameItem gToLaunch = game;
-        HWND hwndContainer = m_hwndContainer;
         playBtn.Click([hwndContainer, gToLaunch](wf::IInspectable const&, wux::RoutedEventArgs const&) {
             PlatformLauncher::Launch(hwndContainer, gToLaunch);
         });
-        stack.Children().Append(playBtn);
+        wuxc::Grid::SetColumn(playBtn, 0);
+        playRow.Children().Append(playBtn);
+
+        // Games with secondary launch methods (custom launchers) expose a dropdown next to Play.
+        if (!game.launchMethods.empty()) {
+            wuxc::ColumnDefinition dropCol;
+            dropCol.Width(wux::GridLengthHelper::Auto());
+            playRow.ColumnDefinitions().Append(dropCol);
+
+            wuxc::MenuFlyout methodFlyout;
+            auto addMethodItem = [&](const std::wstring& label, const LaunchMethod& method, bool isDefault) {
+                wuxc::MenuFlyoutItem item;
+                item.Text(label);
+                item.Click([hwndContainer, gToLaunch, method, isDefault](wf::IInspectable const&, wux::RoutedEventArgs const&) {
+                    if (isDefault) {
+                        PlatformLauncher::Launch(hwndContainer, gToLaunch);
+                    } else {
+                        PlatformLauncher::LaunchWith(hwndContainer, gToLaunch, method);
+                    }
+                });
+                methodFlyout.Items().Append(item);
+            };
+
+            LaunchMethod noMethod{};
+            addMethodItem(L"Default launch", noMethod, true);
+            for (const auto& method : game.launchMethods) {
+                addMethodItem(method.name.empty() ? method.executablePath : method.name, method, false);
+            }
+
+            wuxc::Button dropBtn;
+            dropBtn.Content(winrt::box_value(L"\u25BC"));
+            dropBtn.Flyout(methodFlyout);
+            dropBtn.Background(accentBrush);
+            dropBtn.Foreground(whiteBrush);
+            dropBtn.CornerRadius(wux::CornerRadiusHelper::FromUniformRadius(6));
+            dropBtn.Padding(wux::ThicknessHelper::FromLengths(12, 10, 12, 10));
+            dropBtn.Margin(wux::ThicknessHelper::FromLengths(6, 0, 0, 0));
+            wuxc::ToolTipService::SetToolTip(dropBtn, winrt::box_value(L"Choose launch method"));
+            wuxc::Grid::SetColumn(dropBtn, 1);
+            playRow.Children().Append(dropBtn);
+        }
+
+        stack.Children().Append(playRow);
 
         if (!game.installPath.empty()) {
             wuxc::Button folderBtn;
@@ -973,59 +1330,23 @@ void LibraryViewHost::RebuildSidepane() {
                 badgeCount++;
             }
             achStack.Children().Append(badgeList);
-
-            wuxc::Button resyncBtn;
-            resyncBtn.Content(winrt::box_value(L"\u21BB  Refresh Achievements"));
-            resyncBtn.HorizontalAlignment(wux::HorizontalAlignment::Stretch);
-            resyncBtn.Background(MakeBrush(0, 0, 0, 0));
-            resyncBtn.BorderBrush(borderBrush);
-            resyncBtn.BorderThickness(wux::ThicknessHelper::FromUniformLength(1));
-            resyncBtn.Foreground(textSec);
-            resyncBtn.CornerRadius(wux::CornerRadiusHelper::FromUniformRadius(4));
-            resyncBtn.Padding(wux::ThicknessHelper::FromLengths(8, 4, 8, 4));
-            resyncBtn.FontSize(11);
-            const GameItem gToSync = game;
-            resyncBtn.Click([hwndContainer, gToSync, resyncBtn](wf::IInspectable const&, wux::RoutedEventArgs const&) {
-                resyncBtn.IsEnabled(false);
-                resyncBtn.Content(winrt::box_value(L"Syncing Achievements..."));
-                std::thread([hwndContainer, gToSync]() {
-                    static_cast<void>(AchievementEngine::Instance().GetAchievements(gToSync, true));
-                    if (hwndContainer != nullptr && IsWindow(hwndContainer)) {
-                        PostMessageW(hwndContainer, WM_APP_ACHIEVEMENTS_UPDATED, 0, 0);
-                    }
-                }).detach();
-            });
-            achStack.Children().Append(resyncBtn);
         } else {
             wuxc::TextBlock noAchTb;
-            noAchTb.Text(L"No synced achievements found.");
+            noAchTb.Text(L"Achievements for this game have not been synced yet.");
             noAchTb.FontSize(12);
             noAchTb.Foreground(textSec);
+            noAchTb.TextWrapping(wux::TextWrapping::Wrap);
             achStack.Children().Append(noAchTb);
-
-            wuxc::Button syncBtn;
-            syncBtn.Content(winrt::box_value(L"\u21BB  Sync Achievements"));
-            syncBtn.HorizontalAlignment(wux::HorizontalAlignment::Stretch);
-            syncBtn.Background(bgCard);
-            syncBtn.BorderBrush(borderBrush);
-            syncBtn.BorderThickness(wux::ThicknessHelper::FromUniformLength(1));
-            syncBtn.Foreground(textPrimary);
-            syncBtn.CornerRadius(wux::CornerRadiusHelper::FromUniformRadius(4));
-            syncBtn.Padding(wux::ThicknessHelper::FromLengths(8, 4, 8, 4));
-            syncBtn.FontSize(11);
-            const GameItem gToSync = game;
-            syncBtn.Click([hwndContainer, gToSync, syncBtn](wf::IInspectable const&, wux::RoutedEventArgs const&) {
-                syncBtn.IsEnabled(false);
-                syncBtn.Content(winrt::box_value(L"Syncing Achievements..."));
-                std::thread([hwndContainer, gToSync]() {
-                    static_cast<void>(AchievementEngine::Instance().GetAchievements(gToSync, true));
-                    if (hwndContainer != nullptr && IsWindow(hwndContainer)) {
-                        PostMessageW(hwndContainer, WM_APP_ACHIEVEMENTS_UPDATED, 0, 0);
-                    }
-                }).detach();
-            });
-            achStack.Children().Append(syncBtn);
         }
+
+        // Achievements refresh automatically in the background. A manual, library-wide sync lives
+        // in the Configuration GUI so the details pane stays purely informational.
+        wuxc::TextBlock achNote;
+        achNote.Text(L"Synced automatically in the background.");
+        achNote.FontSize(10);
+        achNote.Foreground(textSec);
+        achStack.Children().Append(achNote);
+
         achCard.Child(achStack);
         stack.Children().Append(achCard);
 
@@ -1100,9 +1421,6 @@ void LibraryViewHost::RebuildSidepane() {
         stack.Children().Append(launchBtn);
 
     } else {
-        uint64_t totalBytes = 0;
-        for (const auto& g : m_games) totalBytes += g.diskSizeBytes;
-
         wuxc::TextBlock summaryHdr;
         summaryHdr.Text(L"Library Overview");
         summaryHdr.FontSize(18);
@@ -1111,15 +1429,12 @@ void LibraryViewHost::RebuildSidepane() {
         stack.Children().Append(summaryHdr);
 
         wuxc::TextBlock statsTb;
-        statsTb.Text(
-            L"\u2022 Installed Providers: " + std::to_wstring(m_providers.size()) + L"\n" +
-            L"\u2022 Installed Games: " + std::to_wstring(m_games.size()) + L"\n" +
-            L"\u2022 Total Disk Footprint: " + (totalBytes > 0 ? FormatDiskSize(totalBytes) : L"Calculating...")
-        );
+        statsTb.Text(BuildOverviewStatsText());
         statsTb.FontSize(13);
         statsTb.Foreground(textSec);
         statsTb.LineHeight(22);
         stack.Children().Append(statsTb);
+        m_xaml->statsText = statsTb;
 
         wuxc::Button gemBtn;
         gemBtn.Content(winrt::box_value(L"\u2795  Open Game Explorer Manager"));
@@ -1129,7 +1444,7 @@ void LibraryViewHost::RebuildSidepane() {
         gemBtn.CornerRadius(wux::CornerRadiusHelper::FromUniformRadius(6));
         gemBtn.Padding(wux::ThicknessHelper::FromLengths(12, 9, 12, 9));
         gemBtn.Click([this](wf::IInspectable const&, wux::RoutedEventArgs const&) {
-            LaunchCompanionExe(L"GameExplorerManager.exe");
+            LaunchCompanionExe(L"GameExplorerStudio.exe", L"--tab=manager");
         });
         stack.Children().Append(gemBtn);
 
@@ -1143,13 +1458,18 @@ void LibraryViewHost::RebuildSidepane() {
         cfgBtn.CornerRadius(wux::CornerRadiusHelper::FromUniformRadius(6));
         cfgBtn.Padding(wux::ThicknessHelper::FromLengths(12, 8, 12, 8));
         cfgBtn.Click([this](wf::IInspectable const&, wux::RoutedEventArgs const&) {
-            LaunchCompanionExe(L"GameExplorerConfig.exe");
+            LaunchCompanionExe(L"GameExplorerStudio.exe", L"--tab=config");
         });
         stack.Children().Append(cfgBtn);
     }
 
     scroll.Content(stack);
     m_xaml->sidepaneHost.Child(scroll);
+    m_xaml->sidepaneScroll = scroll;
+    if (savedScrollOffset > 0.0) {
+        scroll.UpdateLayout();
+        scroll.ChangeView(nullptr, savedScrollOffset, nullptr, true);
+    }
 }
 
 void LibraryViewHost::BuildXamlViewport() {
@@ -1370,7 +1690,7 @@ void LibraryViewHost::BuildXamlViewport() {
     btnManager.CornerRadius(wux::CornerRadiusHelper::FromUniformRadius(6));
     btnManager.Padding(wux::ThicknessHelper::FromLengths(12, 5, 12, 5));
     btnManager.Click([this](wf::IInspectable const&, wux::RoutedEventArgs const&) {
-        LaunchCompanionExe(L"GameExplorerManager.exe");
+        LaunchCompanionExe(L"GameExplorerStudio.exe", L"--tab=manager");
     });
     rightToolbar.Children().Append(btnManager);
 
@@ -1383,7 +1703,7 @@ void LibraryViewHost::BuildXamlViewport() {
     btnSettings.CornerRadius(wux::CornerRadiusHelper::FromUniformRadius(6));
     btnSettings.Padding(wux::ThicknessHelper::FromLengths(12, 5, 12, 5));
     btnSettings.Click([this](wf::IInspectable const&, wux::RoutedEventArgs const&) {
-        LaunchCompanionExe(L"GameExplorerConfig.exe");
+        LaunchCompanionExe(L"GameExplorerStudio.exe", L"--tab=config");
     });
     rightToolbar.Children().Append(btnSettings);
 
@@ -1603,7 +1923,7 @@ void LibraryViewHost::BuildXamlViewport() {
             btnScanNow.CornerRadius(wux::CornerRadiusHelper::FromUniformRadius(6));
             btnScanNow.Padding(wux::ThicknessHelper::FromLengths(14, 6, 14, 6));
             btnScanNow.Click([this](wf::IInspectable const&, wux::RoutedEventArgs const&) {
-                LaunchCompanionExe(L"GameExplorerConfig.exe");
+                LaunchCompanionExe(L"GameExplorerStudio.exe", L"--tab=config");
             });
 
             wuxc::Button btnAddCustom;
@@ -1615,7 +1935,7 @@ void LibraryViewHost::BuildXamlViewport() {
             btnAddCustom.CornerRadius(wux::CornerRadiusHelper::FromUniformRadius(6));
             btnAddCustom.Padding(wux::ThicknessHelper::FromLengths(14, 6, 14, 6));
             btnAddCustom.Click([this](wf::IInspectable const&, wux::RoutedEventArgs const&) {
-                LaunchCompanionExe(L"GameExplorerManager.exe");
+                LaunchCompanionExe(L"GameExplorerStudio.exe", L"--tab=manager");
             });
 
             btnStack.Children().Append(btnScanNow);

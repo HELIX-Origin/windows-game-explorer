@@ -25,7 +25,7 @@ if ((-not (Test-Path -LiteralPath $SidebarBmp)) -or (-not (Test-Path -LiteralPat
         & $artScript
     }
 }
-$RequiredFiles = @("GameExplorerShell.dll", "GameExplorerConfig.exe", "GameExplorerManager.exe")
+$RequiredFiles = @("GameExplorerShell.dll", "GameExplorerStudio.exe", "GameExplorerService.exe")
 foreach ($file in $RequiredFiles) {
     $fullPath = Join-Path $BinDir $file
     if (-not (Test-Path -LiteralPath $fullPath)) {
@@ -70,8 +70,8 @@ if (Test-Path -LiteralPath $ZipPath) {
 Write-Host "[Windows Game Explorer] Creating portable distribution ZIP..." -ForegroundColor Cyan
 $FilesToZip = @(
     (Join-Path $BinDir "GameExplorerShell.dll"),
-    (Join-Path $BinDir "GameExplorerConfig.exe"),
-    (Join-Path $BinDir "GameExplorerManager.exe"),
+    (Join-Path $BinDir "GameExplorerStudio.exe"),
+    (Join-Path $BinDir "GameExplorerService.exe"),
     (Join-Path $RepoRoot "LICENSE"),
     (Join-Path $RepoRoot "assets\game-explorer-icon.ico"),
     (Join-Path $RepoRoot "register.bat"),

@@ -27,9 +27,9 @@
 
 ---
 
-## 3. Managing Local Games & Metadata Overrides (`GameExplorerManager.exe`)
+## 3. Managing Local Games & Metadata Overrides (Library Manager Page)
 
-1. `GameExplorerManager.exe` reads the live discovered game list via `StorefrontScanner::ScanAllInstalledGames()` and merges user overrides from `%USERPROFILE%\Game Explorer\metadata\<appId>.json`.
+1. The Library Manager page of Game Explorer Studio (`GameExplorerStudio.exe`, `src/manager/`) reads the live discovered game list via `StorefrontScanner::ScanAllInstalledGames()` and merges user overrides from `%USERPROFILE%\Game Explorer\metadata\<appId>.json`.
 2. Adding a local game creates a `custom_<timestamp>.json` definition in `%USERPROFILE%\Game Explorer\metadata\`.
 3. Editing an existing storefront or custom game writes the updated fields (`title`, `developer`, `publisher`, `releaseDate`, `score`, `genres`, `description`, `coverArtPath`, `iconPath`, `launchString`) to `%USERPROFILE%\Game Explorer\metadata\<appId>.json` and signals File Explorer via `SHChangeNotify`.
 

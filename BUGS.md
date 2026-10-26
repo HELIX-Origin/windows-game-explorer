@@ -19,16 +19,47 @@
 - 🔒 **[windows-game-explorer] Zero External File Writes (Native Isolation Invariant)**: Windows Game Explorer never writes to, modifies, or backs up external launcher files (`shortcuts.vdf`, `cloud-storage-namespace-1.json`, or `appmanifest.acf`). Game records, metadata, and user overrides persist exclusively in `%USERPROFILE%\Game Explorer\`.
 - 🔒 **[windows-game-explorer] Native Launcher Delegation**: Game launches always delegate strictly through official platform clients (`steam.exe -applaunch <appId>`, etc.) to ensure DRM validation, user profiles, and overlays remain intact.
 - 🔒 **[windows-game-explorer] Storefront-First Discovery (No External Scrapers)**: Unlike Microsoft's legacy Game Explorer that required manual Game Definition Files (GDF XML) and defunct online servers, Windows Game Explorer automatically discovers installed titles and harvests metadata/artwork directly from installed storefronts on disk without third-party scrapers.
+- 🔒 **[windows-game-explorer] Modern Windows Architecture Constraint (No Windows 7/8/8.1 Support)**: Windows Game Explorer integrates directly into File Explorer using modern in-process XAML Island hosting, modern DWM visual composition, and Windows 10/11 shell contracts. Legacy Windows (Windows 7, 8, 8.1) use an entirely different legacy shell architecture and do not support XAML Islands or modern shell namespace tabs. Application manifest `resources/app.manifest` and installer `.onInit` explicitly enforce this requirement. Compatibility across older Windows 10 releases is subject to dedicated research due to evolving XAML Island and File Explorer tab hosting constraints.
 
 ---
 
 ## ⚠️ Active & Open Bugs
 
-(No open bugs currently tracked.)
+- (none)
 
 ---
 
 ## ✅ Resolved Bugs & Historical Fixes
+
+- ✅ **[windows-game-explorer] BUG-20 — Multi-Storefront Titles Displayed as Duplicate Rows in Catalogue**:
+  - **Root Cause**: Titles owned across multiple storefronts (e.g. Steam and Xbox Game Pass) produced independent rows in the owned games catalogue.
+  - **Resolution**: Implemented title-key normalization (`NormalizeTitleKey`) with word-boundary article stripping (`OwnedGamesSortTitle`) and storefront source merging (`StorefrontSource`) in `ScanAllOwnedGamesDirect()`. Multi-source titles are presented as a single catalogue row with composite storefront labels ("Steam, Xbox"). When clicking "Install" or "Store page", a popup context menu lets the user choose which storefront client to target.
+  - **Verified**: 55/55 unit tests passing including `NormalizeTitleKey` and `OwnedGameMatchesStore`.
+
+- ✅ **[windows-game-explorer] BUG-19 — Xbox Storefront Only Showed Installed Games in Catalogue**:
+  - **Root Cause**: Xbox scanning relied strictly on installed AppX manifests and drive `.GamingRoot` folders, omitting owned but uninstalled Game Pass and Microsoft Store PC library titles.
+  - **Resolution**: Implemented `ScanXboxOwnedGamesAsyncCache()` reading the official Xbox PC App's SQLite cache at `%LOCALAPPDATA%\Packages\Microsoft.GamingApp_*\LocalState\AsyncCache.db` (`product_summary` scope), extracting title, store ID, artwork URI, release date, and categories.
+  - **Verified**: Confirmed extraction of all PC Game Pass and owned Xbox games directly in-memory.
+
+- ✅ **[windows-game-explorer] BUG-18 — Uninstaller Did Not Terminate or Remove GameExplorerService**:
+  - **Root Cause**: `UninstallService()` did not wait for process termination before deleting the service, leaving ghost processes running, and the NSIS uninstaller lacked aggressive service/schtask teardown.
+  - **Resolution**: `UninstallService()` now deletes the scheduled task, waits up to 3 seconds for `SERVICE_STOPPED`, and forcibly kills the process tree via `taskkill /F /T /IM GameExplorerService.exe`. NSIS uninstaller issues `net stop GameExplorerService`, `sc delete GameExplorerService`, `schtasks /delete /tn "GameExplorerService" /f`, and terminates any running Studio/Service processes.
+
+- ✅ **[windows-game-explorer] BUG-17 — Shell Extension Not Appearing in File Explorer (Shadow-Copy Staging Abandoned)**:
+  - **Root Cause**: Shadow-copy staging attempted to copy `GameExplorerShell.dll` to `%LOCALAPPDATA%\GameExplorer\bin\` and register that path in `InProcServer32`, creating chicken-and-egg dependency on the service and pointing Explorer to a missing DLL when the service hadn't run.
+  - **Resolution**: Shadow-copy shell staging was abandoned. `InProcServer32` registers the DLL directly from the installation/build folder via standard `regsvr32`. Elevated and non-elevated registration is handled by `scripts/register.ps1` and `scripts/unregister.ps1`, accompanied by batch entry points `register.bat` and `unregister.bat`.
+
+- ✅ **[windows-game-explorer] QUIRK-01 — Multi-line synopsis editor showed a native scroll bar outside its rounded frame**:
+  - **Root Cause**: the multi-line `EDIT` control kept its `WS_VSCROLL` bar, which Windows paints in the non-client strip at the right edge. That strip is square, 16–17 px wide and outside the rounded frame drawn inside the client rect, so the synopsis looked like it had a foreign bar bolted onto an otherwise Fluent field.
+  - **Resolution**: `ThemeFieldScroll` now removes `WS_VSCROLL` at attach time, reserves `ThemeScroll::kBarWidth` in the editor's formatting rect and paints the shared rail/thumb into that gutter from the field's own `WM_PAINT`, so there is no extra window and no second surface. The field subclass routes gutter hover, wheel, drag and page clicks to the bar before the editor sees them, and repaints the gutter whenever the editor scrolls itself. The inset is applied after `DefSubclassProc` handles `WM_SIZE`, because the editor's own handler recomputes the formatting rect.
+  - **Verified**: `WS_VSCROLL` absent; `client 306x207`, formatting rect `10,6,284,201` (22 px gutter); frame border still `#484848` at the right edge; rail `#262626` at x = right−8…right−4; thumb `#707070` at rest, `#949494` and 2 px wider on hover; thumb moved `5..65` → `105..165` after `EM_LINESCROLL 20`; a gutter click paged the view.
+- ✅ **[windows-game-explorer] BUG-16 — Painted Debris Around Combo Box and Text Field Edges**:
+  - **Root Cause**: `ThemeControls` painted a rounded surface inset by one pixel inside controls whose window is a square, opaque rectangle, and the controls suppressed `WM_ERASEBKGND`. The 1 px ring between the window edge and the rounded outline (plus all four corners) was never painted, so it retained whatever an earlier frame had left there — fragments of a card border, earlier glyphs, or the control that previously occupied the slot. Resizing exposed more of it at once, which is why the artefacts appeared "around and behind the edges of the combo boxes and text boxes".
+  - **Resolution**: `PaintCombo()` and `PaintFieldBorder()` now fill their entire window rectangle with `cardBg` before drawing the rounded surface, so no pixel inside the control can keep an older frame. Proven by soiling a control's client with magenta, repainting only that control, and reading the screen back: `0` magenta pixels remain and every edge row reads the card colour.
+
+- ✅ **[windows-game-explorer] BUG-15 — Editable Fields Erased Their Background to Solid Black**:
+  - **Root Cause**: `EnsureManagerResources()` / `EnsureConfigResources()` created `g_hEditBrush` from `ThemeControls::FieldSurfaceColor()` before `ThemeControls::SetTheme()` had been called, so the brush was built from a zero-initialised palette and came out `RGB(0,0,0)`. `WM_CTLCOLOREDIT` returned that black brush, so each field erased its background to black while the surrounding card stayed `#2D2D2D`; the synopsis editor showed a large black block below its text.
+  - **Resolution**: the palette is now published to `ThemeControls` before the brush is derived, and `fieldBg` / `fieldBorder` are shared palette tokens used by both text boxes and combo boxes. Verified by pixel histogram of the synopsis interior: uniformly `#2B2B2B`, zero black pixels, and a sweep of all 59 Manager and 32 Configuration control rects reports no black interior patch.
 
 - ✅ **[windows-game-explorer] BUG-14 — Platform & Provider Icons Solid Black Background Transparency Degradation**:
   - **Root Cause**: `EnsureExtractedIconPng()` allocated a 32-bit DIB section with `CreateDIBSection` (which initializes pixel bytes to zero: `0x00000000`) and drew the icon onto it via standard Win32 GDI `DrawIconEx(hdcMem, ..., DI_NORMAL)`. GDI does not write to the alpha channel of 32-bit DIBs. The DIB handle was then passed to `Gdiplus::Bitmap(hDib, nullptr)`, which treated the DIB as opaque RGB (`0xFF000000`), turning all transparent pixels into solid opaque black squares upon saving to PNG.
@@ -40,7 +71,7 @@
   - **Strict Candidate Title Verification**: Implemented `AreTitlesMatching()`, `NormalizeTitleForMatch()`, and `CleanTitleFromBracketTags()` across SteamGridDB and IGDB, preventing false-positive fuzzy substring matches on obscure or adult titles (e.g. *That New Teacher* &ne; *That Old Time Religion*, *The Proteus Effect* &ne; *'the*, *Loverse* &ne; *Dot Kareshi*). Authentic itch.io storefront assets are never overwritten.
   - **Loose Aspect Ratio Enforcement**: Relaxed `ImageValidator::IsValidCover` to 0.25f–2.50f and `IsValidHero` to 0.80f–4.50f, natively accommodating itch.io 315×250 cards and diverse non-standard box art without artificial rejection.
   - **Cache Reset & Rebuild Engine**: Clarified button label to `Reset Cache` in `GameExplorerConfig.exe` and `GameExplorerManager.exe`, with `--reset-cache` CLI switch. Ensured complete atomic directory deletion and fresh library rebuild (`ScanAll`) without leaving corrupted metadata.
-  - **Dropped "All Owned Games" Milestone**: Dropped all owned games backlog/planning per user directive to keep library focused strictly on installed games.
+  - **Owned Games Scope (Reinstated 2026-10-25)**: The earlier decision to drop all owned-games planning is superseded. Owned games are supported through a separate Game Catalogue GUI (`CAT-01` in `TODO.md`), keeping the shell library strictly installed-games-only.
 
 - ✅ **[windows-game-explorer] BUG-12 — Companion App Launch from Portable Distribution in File Explorer Shell Extension**:
   - In `src/view/LibraryViewHost.cpp`, implemented module-address resolution via `GetModuleHandleExW` with `GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS` anchored to `&GetApplicationDirectory`. This guarantees retrieving the actual disk directory of `GameExplorerShell.dll` even when hosted inside `explorer.exe` or `rundll32.exe`.

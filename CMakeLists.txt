@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.20)
 
 project(WindowsGameExplorer
-    VERSION 2.3.0
+    VERSION 2.4.0
     DESCRIPTION "Native Windows Game Explorer and Shell Extension"
     LANGUAGES C CXX RC
 )
@@ -42,10 +42,16 @@ add_library(GameExplorerCore STATIC
     src/core/Settings.cpp
     src/core/DarkMode.cpp
     src/core/StorefrontScanner.cpp
+    src/core/OwnedGames.cpp
+    src/core/InstallTargets.cpp
     src/core/PlatformLauncher.cpp
     src/core/Localization.cpp
     src/core/AchievementEngine.cpp
     src/core/ImageValidator.cpp
+    src/core/SynopsisFormatter.cpp
+    src/core/ThemeScroll.cpp
+    src/core/ThemeFieldScroll.cpp
+    src/core/ThemeControls.cpp
 )
 target_include_directories(GameExplorerCore PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include
@@ -98,36 +104,25 @@ target_link_libraries(GameExplorerShell PRIVATE
     WindowsApp
 )
 
-# Standalone Configuration Utility
-add_executable(GameExplorerConfig WIN32
+# Unified Game Explorer Studio (Library Manager + Game Catalogue + Configuration in one shell).
+# This is the single companion GUI: the Configuration and Manager sources are compiled as pages,
+# not as separate executables, so there is exactly one window, one message loop and one Start menu
+# entry. Each page source exposes a page factory instead of a wWinMain entry point.
+add_executable(GameExplorerStudio WIN32
+    src/studio/StudioMain.cpp
+    src/studio/CataloguePage.cpp
     src/config/ConfigMain.cpp
-    src/shell/Resource.rc
-)
-target_include_directories(GameExplorerConfig PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/include
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/config
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/shell
-)
-target_link_libraries(GameExplorerConfig PRIVATE
-    GameExplorerCore
-    Comctl32
-    Shell32
-    Advapi32
-    Dwmapi
-    Uxtheme
-)
-
-# Standalone Game Explorer Manager (GEM) Utility
-add_executable(GameExplorerManager WIN32
     src/manager/ManagerMain.cpp
     src/shell/Resource.rc
 )
-target_include_directories(GameExplorerManager PRIVATE
+target_include_directories(GameExplorerStudio PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/config
     ${CMAKE_CURRENT_SOURCE_DIR}/src/manager
     ${CMAKE_CURRENT_SOURCE_DIR}/src/shell
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/studio
 )
-target_link_libraries(GameExplorerManager PRIVATE
+target_link_libraries(GameExplorerStudio PRIVATE
     GameExplorerCore
     Comctl32
     Comdlg32
@@ -137,6 +132,36 @@ target_link_libraries(GameExplorerManager PRIVATE
     Uxtheme
     Gdiplus
 )
+
+# Windows Game Explorer Background Service (Preloading, directory monitoring, warm caching)
+add_executable(GameExplorerService WIN32
+    src/service/ServiceMain.cpp
+    src/shell/Resource.rc
+)
+target_include_directories(GameExplorerService PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/shell
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/service
+)
+target_link_libraries(GameExplorerService PRIVATE
+    GameExplorerCore
+    Advapi32
+    Shell32
+    Ole32
+)
+
+# ==============================================================================
+# Visual styles
+# ==============================================================================
+# The manifest is embedded through Resource.rc (RT_MANIFEST) so the path never has to survive
+# linker-option quoting, and the linker's own manifest is disabled to avoid a duplicate resource.
+# Active visual styles are what give the native list box, editor and combo box the Fluent thin
+# scrollbars instead of the classic chunky ones.
+if(MSVC)
+    foreach(target GameExplorerShell GameExplorerStudio GameExplorerService)
+        target_link_options(${target} PRIVATE /MANIFEST:NO)
+    endforeach()
+endif()
 
 # ==============================================================================
 # Dedicated C++ Test Suite

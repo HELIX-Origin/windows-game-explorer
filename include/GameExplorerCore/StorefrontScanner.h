@@ -54,7 +54,6 @@ public:
     static std::vector<GameItem> ScanBattleNet();
     static std::vector<GameItem> ScanLegacyGames();
     static std::vector<GameItem> ScanJagex();
-    static std::vector<GameItem> ScanXIVLauncher();
     static std::vector<GameItem> ScanGuildWars2();
     static std::vector<GameItem> ScanRiot();
     static std::vector<GameItem> ScanHoYoPlay();
@@ -88,6 +87,12 @@ public:
     // Keyless Steam Store search and local storefronts act as fallbacks.
     static void EnrichGameMetadata(GameItem& item);
     static void EnrichNonSteamGameMetadata(GameItem& item);
+
+    // Artwork sourcing policy: store-discovered games keep the artwork supplied by their own
+    // storefront. Metadata providers (SteamGridDB, IGDB, VNDB, Steam Store Search) only auto-source
+    // artwork for locally added and emulated games; for store games they remain user-driven choices
+    // in the Game Explorer Manager artwork search.
+    static bool AllowsAutoArtFromMetadataProviders(PlatformType platform);
 
     // ROM scanning & utility helpers
     static std::wstring CleanRomTitle(const std::wstring& rawName);

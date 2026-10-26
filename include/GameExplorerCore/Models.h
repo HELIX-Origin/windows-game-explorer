@@ -3,8 +3,20 @@
 #include "Types.h"
 #include <string>
 #include <cstdint>
+#include <vector>
 
 namespace GameExplorer {
+
+// Optional secondary launch method for a game (custom launcher, wrapper, alternative client).
+// The primary launch behavior always uses the storefront/official executable fields on GameItem;
+// alternates are user-selectable from the launch button dropdown in the shell view and Manager.
+struct LaunchMethod {
+    std::wstring name;              // Display label, e.g. "XIVLauncher"
+    std::wstring executablePath;    // Launcher / wrapper executable
+    std::wstring arguments;         // Optional command-line arguments, passed verbatim
+    std::wstring workingDirectory;  // Optional working directory
+    bool isAutoDetected{ false };   // true when attached automatically by a scanner
+};
 
 struct GameItem {
     int64_t id{ 0 };
@@ -20,6 +32,9 @@ struct GameItem {
     std::wstring installPath;
     std::wstring launchUri;         // e.g. "steam://rungameid/730"
     std::wstring launchCommand;     // e.g. custom command line or executable with arguments
+
+    // Optional secondary launch methods (e.g. custom launchers) exposed in the launch dropdown
+    std::vector<LaunchMethod> launchMethods;
     
     // Artwork & Assets (paths in %USERPROFILE%\Game Explorer\cache\art\)
     std::wstring coverArtPath;      // Tall box art (~2:3 or ~3:4)

@@ -5,7 +5,7 @@ Thanks for your interest in improving **Windows Game Explorer**! This guide cove
 > By participating you agree to our [Code of Conduct](./CODE_OF_CONDUCT.md). For security issues,
 > follow [SECURITY.md](./SECURITY.md) — **do not** open a public issue.
 
-Windows Game Explorer is a native C++20 Win32 application suite and Windows File Explorer Shell Namespace Extension (`GameExplorerShell.dll`, `GameExplorerConfig.exe`, `GameExplorerManager.exe`). It revives the classic Windows 7/Vista Game Explorer directly inside Windows 11 File Explorer with two collapsible sections (`▾ Game Providers` and `▾ Games`), high-resolution vertical box art, rich properties, and automated storefront discovery.
+Windows Game Explorer is a native C++20 Win32 application and Windows File Explorer Shell Namespace Extension (`GameExplorerShell.dll`, `GameExplorerStudio.exe`). It revives the classic Windows 7/Vista Game Explorer directly inside Windows 11 File Explorer with two collapsible sections (`▾ Game Providers` and `▾ Games`), high-resolution vertical box art, rich properties, and automated storefront discovery.
 
 ---
 
@@ -52,10 +52,9 @@ cmake --build build --config Release
 
 - **Native App Isolation**: Windows Game Explorer never writes to, modifies, or backs up external launcher files (`shortcuts.vdf`, `cloud-storage-namespace-1.json`, or `appmanifest.acf`). User custom metadata overrides and settings persist exclusively in `%USERPROFILE%\Game Explorer\`.
 - **Storefront-First Discovery (No External Scrapers)**: Installed storefront providers (Steam, Epic Games, GOG Galaxy, Battle.net, Ubisoft Connect, EA App, itch.io) are used directly as the sole source of truth for their games' metadata and box art.
-- **Triple-Component Architecture**:
+- **Shell Extension & Studio Architecture**:
   - `GameExplorerShell.dll`: In-process File Explorer shell extension (`IShellFolder2`, `ICategoryProvider`, `IThumbnailProvider`, `IPropertyStore`).
-  - `GameExplorerConfig.exe`: Integration configuration utility.
-  - `GameExplorerManager.exe`: Game Explorer Manager GUI for managing games and adding local games.
+  - `GameExplorerStudio.exe`: Single-window GUI hosting the Library Manager page (`src/manager/`), the Game Catalogue page (`src/studio/`), and the Configuration page (`src/config/`).
 
 ---
 

@@ -19,5 +19,5 @@ Windows Game Explorer operates as a non-invasive local shell integration:
 ## 🗑️ Data Retention & Deletion
 
 Because all data lives on your device:
-- You can unregister the shell integration at any time via `GameExplorerConfig.exe` or `regsvr32 /u GameExplorerShell.dll`.
+- You can unregister the shell integration at any time from the Configuration page of Game Explorer Studio (`GameExplorerStudio.exe --unregister`) or with `regsvr32 /u GameExplorerShell.dll`.
 - Uninstalling the application or deleting `%USERPROFILE%\Game Explorer` completely removes all stored user overrides and settings.

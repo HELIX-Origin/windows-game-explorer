@@ -2,10 +2,12 @@
 
 > An in-depth guide to customizing games, managing artwork, configuring achievement tracking, and using emulation with **Windows Game Explorer**.
 
+Game Explorer Studio (`GameExplorerStudio.exe`) is the single companion GUI: one window whose Fluent tab strip hosts the **Library Manager** page (library curation, metadata editing, artwork discovery), the **Game Catalogue** page (owned-games catalogue, currently a placeholder), and the **Configuration** page (shell integration, scanning, credentials, and cloud sync). The shell extension opens the Studio directly on the relevant page.
+
 ---
 
 ## 📑 Table of Contents
-1. [Game Explorer Manager (`GameExplorerManager.exe`)](#1-game-explorer-manager-gameexplorermanagerexe)
+1. [Library Manager Page (`GameExplorerStudio.exe`)](#1-library-manager-page)
    - [Three-Column Interface Overview](#three-column-interface-overview)
    - [Adding Standalone Games](#adding-standalone-games)
    - [Editing Metadata](#editing-metadata)
@@ -14,7 +16,7 @@
    - [SafeSearch / NSFW Toggle](#safesearch--nsfw-toggle)
    - [Applying Artwork to Slots](#applying-artwork-to-slots)
    - [Resetting the Artwork Cache](#resetting-the-artwork-cache)
-2. [Game Explorer Configuration (`GameExplorerConfig.exe`)](#2-game-explorer-configuration-gameexplorerconfigexe)
+2. [Configuration Page (`GameExplorerStudio.exe`)](#2-configuration-page)
    - [View & Layout Customization](#view--layout-customization)
    - [Storefront Scans](#storefront-scans)
    - [Universal Achievement Credentials](#universal-achievement-credentials)
@@ -27,13 +29,13 @@
 
 ---
 
-## 1. Game Explorer Manager (`GameExplorerManager.exe`)
+## 1. Library Manager Page (`GameExplorerStudio.exe`)
 
-The **Game Explorer Manager** is a dedicated managerial companion designed for fine-grained library curation, metadata editing, and artwork discovery.
+The **Library Manager** page of Game Explorer Studio is dedicated to fine-grained library curation, metadata editing, and artwork discovery.
 
 ```
 +---------------------------------------------------------------------------------------------------------+
-| Game Explorer Manager                                                                        [-] [o] [x]|
+| Game Explorer Studio — Library Manager                                                     [-] [o] [x]|
 +---------------------------------------------------------------------------------------------------------+
 | [ Col 1: Library ]         | [ Col 2: Properties & Live Preview ]   | [ Col 3: Artwork Discovery Gallery ]     |
 | [ 📁 Browse... ]           | Title:        [ Final Fantasy VII Remake ] | Query: [ Final Fantasy VII Remake ]     |
@@ -66,7 +68,7 @@ The **Game Explorer Manager** is a dedicated managerial companion designed for f
 To add non-storefront games (indie visual novels, standalone itch.io titles, legacy CD-ROM installations, fan games, or portable builds):
 1. In Column 1, click **`[ 📁 Browse... ]`** (or click **`[ ➕ Add Game ]`** at the bottom).
 2. Select any `.exe`, `.bat`, `.cmd`, or `.lnk` shortcut.
-3. The Manager automatically extracts the game's executable name, working directory, and embedded high-resolution `.ico` icon.
+3. The Library Manager automatically extracts the game's executable name, working directory, and embedded high-resolution `.ico` icon.
 4. Customize the title and metadata, then click **`[ 💾 Save Metadata ]`**. The game is immediately registered and synced to File Explorer.
 
 ---
@@ -80,7 +82,12 @@ Every field in Column 2 is directly editable:
 - **Rating**: User score, Metacritic score, or age classification.
 - **Executable Path & Working Directory**: The exact executable and execution folder passed at startup.
 - **Launch Arguments**: Optional command line flags (e.g. `-fullscreen -skipintro`).
-- **Synopsis**: Description or plot summary displayed in the Details pane.
+- **Synopsis**: Description or plot summary displayed in the Details pane. The editor wraps at the
+  field width and supports GitHub Flavored Markdown (`**bold**`, `*italic*`, `~~strike~~`,
+  headings, lists, task lists, quotes, rules, `code`, links and tables; underline uses inline
+  `<u>` HTML). See the
+  [Metadata & Customization Guide](metadata-customization.md#synopsis-formatting-github-flavored-markdown)
+  for the full syntax reference.
 
 Click **`[ 💾 Save Metadata ]`** to persist your changes directly to SQLite and per-game JSON overrides (`%USERPROFILE%\Game Explorer\metadata\<appId>.json`).
 
@@ -134,18 +141,18 @@ Under the web search bar, check **"Disable SafeSearch (Unblock NSFW)"**:
 ### Resetting the Artwork Cache
 If you ever encounter corrupt image files or want to force a clean redownload of all assets:
 1. Click **`[ 🧹 Reset Cache ]`** in Column 2.
-2. The Manager utilizes in-memory stream loading (`LoadImageFromFileUnlocked`), which prevents GDI+ from locking files on disk.
+2. The Library Manager page utilizes in-memory stream loading (`LoadImageFromFileUnlocked`), which prevents GDI+ from locking files on disk.
 3. The cache folder (`%USERPROFILE%\Game Explorer\cache\art\`) is cleanly purged without Windows file sharing violations (`ERROR_SHARING_VIOLATION`), and thumbnail downloads re-trigger automatically.
 
 ---
 
-## 2. Game Explorer Configuration (`GameExplorerConfig.exe`)
+## 2. Configuration Page (`GameExplorerStudio.exe`)
 
-`GameExplorerConfig.exe` manages system-level integration, storefront scanning preferences, cloud backups, and API credentials.
+The **Configuration** page of Game Explorer Studio manages system-level integration, storefront scanning preferences, cloud backups, and API credentials.
 
 ```
 +-----------------------------------------------------------------------------------+
-| Game Explorer Settings                                                 [-] [o] [x]|
+| Game Explorer Studio — Configuration                                 [-] [o] [x]|
 +-----------------------------------------------------------------------------------+
 | [ Card 1: View & Presentation Layout ]                                             |
 |  Presentation Mode:  (*) Cover Art (2:3)   ( ) Hero Banner (3.1:1)   ( ) Details  |

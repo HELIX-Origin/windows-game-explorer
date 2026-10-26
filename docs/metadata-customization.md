@@ -13,7 +13,7 @@ Windows Game Explorer uses a decentralized, transparent, and user-centric archit
    ```text
    %USERPROFILE%\Game Explorer\metadata\<appId>.json
    ```
-   External metadata overrides and manual user edits via `GameExplorerManager.exe` strictly **enrich or override fields** without modifying storefront files on disk.
+   External metadata overrides and manual user edits via the Library Manager page of Game Explorer Studio strictly **enrich or override fields** without modifying storefront files on disk.
 
 ---
 
@@ -68,7 +68,45 @@ Each `<appId>.json` contains the following structured attributes:
 | `detailsArtPath` / `detailsArtUrl` | String | Local file path and remote CDN link for Details sidepane presentation art or animated preview GIF. |
 
 > [!NOTE]
-> All four image types (Icon, Cover, Hero, Details) are maintained in the JSON. When you switch presentation view modes in the configuration app or view game properties, your images render instantly from cache without re-querying external APIs.
+> All four image types (Icon, Cover, Hero, Details) are maintained in the JSON. When you switch presentation view modes in the Configuration page or view game properties, your images render instantly from cache without re-querying external APIs.
+
+### Synopsis formatting (GitHub Flavored Markdown)
+
+The `description` field (and the **Synopsis** box in the Library Manager page) accepts GitHub
+Flavored Markdown. The Library Manager editor wraps at the field width and `Enter` inserts a line
+break, so the text you type is laid out exactly as it is stored. The Explorer details pane renders
+the formatting:
+
+| Markup | Result |
+| :--- | :--- |
+| `**text**` or `__text__` | **Bold** |
+| `*text*` or `_text_` | *Italic* |
+| `~~text~~` | ~~Strikethrough~~ |
+| `<u>text</u>` | Underline (inline HTML, since Markdown has no underline) |
+| `# Heading` … `###### Heading` | Heading levels 1-6 (levels 4-6 render at the level-3 size) |
+| `- item`, `* item`, `+ item` | Bullet list item |
+| `- [ ] item`, `- [x] item` | Task list item (unchecked / checked) |
+| `1. item`, `1) item` | Ordered list item |
+| `> text` | Block quote |
+| `---`, `***`, `___` | Horizontal rule |
+| `` `code` `` | Inline code span |
+| ```` ``` ```` … ```` ``` ```` | Fenced code block (contents are not formatted) |
+| `[label](https://example.com)` | Link label, rendered underlined |
+| `<https://example.com>`, bare `https://example.com` | Autolink, rendered underlined |
+| `\|` inside a table row | Escaped cell separator |
+| `\*` | Escapes the next markup character |
+
+Tables use the standard GFM pipe syntax: a header row, a delimiter row, then body rows.
+
+```text
+| Setting | Default |
+| :--- | ---: |
+| theme | dark |
+```
+
+Every non-blank line is its own line in the details pane, so new lines and blank-line separated
+paragraphs both survive. Unbalanced markers are applied to the rest of the line, which means a
+storefront-supplied synopsis containing a stray asterisk still renders as readable plain text.
 
 ---
 
@@ -76,7 +114,7 @@ Each `<appId>.json` contains the following structured attributes:
 
 For games installed outside supported storefronts (indie visual novels, standalone itch.io downloads, legacy CD-ROM installations, fan games, or portable executables):
 
-1. Launch **Windows Game Explorer Settings** (`GameExplorerConfig.exe`).
+1. Open Game Explorer Studio on the **Configuration** page (`GameExplorerStudio.exe --tab=config`).
 2. In the **Storefront Discovery & Manual Local Games** card, click **"➕ Add Local Game..."**.
 3. In the file dialog, select any `.exe`, `.bat`, `.cmd`, or `.lnk` shortcut.
 4. The system automatically creates a dedicated `custom_<timestamp>.json` file in your metadata folder.
@@ -88,7 +126,7 @@ For games installed outside supported storefronts (indie visual novels, standalo
 
 To customize or correct any game's display information or box art:
 
-1. Open the configuration utility (`GameExplorerConfig.exe`) and click **"Open Metadata Folder"** (or press `Win + R` and navigate to `%USERPROFILE%\Game Explorer\metadata`).
+1. Open the **Configuration** page of Game Explorer Studio and click **"Open Metadata Folder"** (or press `Win + R` and navigate to `%USERPROFILE%\Game Explorer\metadata`).
 2. Open the target `<appId>.json` file in any text editor (Notepad, VS Code, etc.).
 3. Edit the fields you wish to customize (e.g. change `title`, `developer`, `score`, or update `coverArtPath` to a custom image on your disk).
 4. Save the file.

@@ -15,6 +15,7 @@
 #include <mutex>
 #include <set>
 #include "GameExplorerCore/DarkMode.h"
+#include "GameExplorerCore/ThemeControls.h"
 #include "GameExplorerCore/Settings.h"
 #include "GameExplorerCore/Storage.h"
 #include "GameExplorerCore/Database.h"
@@ -23,6 +24,9 @@
 #include "GameExplorerCore/PlatformLauncher.h"
 #include "GameExplorerCore/Localization.h"
 #include "GameExplorerCore/ImageValidator.h"
+#include "GameExplorerCore/StudioPages.h"
+#include "GameExplorerCore/ThemeScroll.h"
+#include "GameExplorerCore/ThemeFieldScroll.h"
 
 #pragma comment(lib, "dwmapi.lib")
 #pragma comment(lib, "comdlg32.lib")
@@ -47,7 +51,24 @@
 namespace fs = std::filesystem;
 using namespace GameExplorer;
 
+// The Library Manager page of GameExplorerStudio.exe. The anonymous namespace keeps every symbol
+// TU-local so this page and the Configuration page can be linked into the same executable without
+// collisions.
+namespace {
+
+constexpr const wchar_t* MANAGER_WINDOW_CLASS = L"GameExplorerManagerWnd";
+constexpr const wchar_t* GALLERY_CANVAS_CLASS = L"GameExplorerGalleryCanvas";
+
 constexpr int TITLE_BAR_HEIGHT = 38;
+
+// Page mode: the Studio frame owns the title bar and message loop, so the page has no title bar
+// band and lays every column out from y = 48 instead of y = TITLE_BAR_HEIGHT + 48.
+bool g_pageMode = false;
+int g_titleBarHeight = TITLE_BAR_HEIGHT;
+bool g_resourcesReady = false;
+
+void EnsureManagerResources();
+void EnsureManagerWindowClasses(HINSTANCE instance);
 
 enum class TitleButton { None, Min, Max, Close };
 TitleButton g_hoverBtn = TitleButton::None;
@@ -130,6 +151,10 @@ constexpr int IDC_EDIT_WEB_QUERY        = 3048;
 constexpr int IDC_COMBO_WEB_FILTER      = 3049;
 constexpr int IDC_CHK_SAFE_SEARCH       = 3050;
 
+constexpr int IDC_COMBO_LAUNCH_METHOD     = 3060;
+constexpr int IDC_BTN_ADD_LAUNCH_METHOD   = 3061;
+constexpr int IDC_BTN_REMOVE_LAUNCH_METHOD = 3062;
+
 constexpr int IDM_APPLY_COVER   = 5001;
 constexpr int IDM_APPLY_HERO    = 5002;
 constexpr int IDM_APPLY_DETAILS = 5003;
@@ -191,6 +216,10 @@ HWND g_hwndBtnBrowseDetails    = nullptr;
 HWND g_hwndLblIcon             = nullptr;
 HWND g_hwndBtnBrowseIcon       = nullptr;
 HWND g_hwndLblSynopsis         = nullptr;
+HWND g_hwndLblLaunchMethod     = nullptr;
+HWND g_hwndComboLaunchMethod   = nullptr;
+HWND g_hwndBtnAddLaunchMethod  = nullptr;
+HWND g_hwndBtnRemoveLaunchMethod = nullptr;
 
 HWND g_hwndBtnSave             = nullptr;
 HWND g_hwndBtnLaunch           = nullptr;
@@ -209,6 +238,10 @@ std::wstring g_initialSelectAppId;
 std::vector<OnlineArtworkCandidate> g_galleryCandidates;
 int g_selectedCandidateIdx = -1;
 int g_galleryScrollY = 0;
+bool g_galleryScrollHovered = false;
+bool g_galleryScrollDragging = false;
+int g_galleryScrollGrabOffset = 0;
+bool g_galleryTrackingMouse = false;
 bool g_isSearchingArt = false;
 std::wstring g_lastSearchedTitle;
 std::wstring g_activeArtworkType = L"All";
@@ -223,7 +256,7 @@ HBRUSH g_hCardBrush = nullptr;
 HBRUSH g_hEditBrush = nullptr;
 
 constexpr int PREVIEW_BOX_X = 286;
-constexpr int PREVIEW_BOX_Y = TITLE_BAR_HEIGHT + 44;
+int g_previewBoxY = TITLE_BAR_HEIGHT + 44;
 constexpr int PREVIEW_BOX_W = 126;
 constexpr int PREVIEW_BOX_H = 189;
 
@@ -265,8 +298,10 @@ std::wstring ReadEditString(HWND hEdit) {
     if (hEdit == nullptr) return L"";
     const int len = GetWindowTextLengthW(hEdit);
     if (len <= 0) return L"";
-    std::wstring str(static_cast<size_t>(len), L'\0');
+    // The Win32 call writes len characters plus a terminator, so the buffer must be len + 1 wide.
+    std::wstring str(static_cast<size_t>(len) + 1, L'\0');
     GetWindowTextW(hEdit, str.data(), len + 1);
+    str.resize(static_cast<size_t>(len));
     return str;
 }
 
@@ -276,9 +311,41 @@ std::wstring GetComboSelectedText(HWND hCombo) {
     if (sel == CB_ERR) return L"";
     const int len = static_cast<int>(SendMessageW(hCombo, CB_GETLBTEXTLEN, sel, 0));
     if (len <= 0) return L"";
-    std::wstring text(static_cast<size_t>(len), L'\0');
+    // CB_GETLBTEXT writes len characters plus a terminator; size the buffer for both.
+    std::wstring text(static_cast<size_t>(len) + 1, L'\0');
     SendMessageW(hCombo, CB_GETLBTEXT, sel, reinterpret_cast<LPARAM>(text.data()));
+    text.resize(static_cast<size_t>(len));
     return text;
+}
+
+constexpr int kManagerGameItemHeight = 26;
+
+void DrawManagerGameListItem(const DRAWITEMSTRUCT& item) {
+    if (item.itemID == static_cast<UINT>(-1)) return;
+
+    const bool selected = (item.itemState & ODS_SELECTED) != 0;
+    const COLORREF background = selected ? g_palette.accent : g_palette.cardBg;
+    const COLORREF foreground = selected ? g_palette.accentText : g_palette.textPrimary;
+
+    HBRUSH brush = CreateSolidBrush(background);
+    FillRect(item.hDC, &item.rcItem, brush);
+    DeleteObject(brush);
+
+    wchar_t text[512]{};
+    const int length = static_cast<int>(SendMessageW(item.hwndItem, LB_GETTEXT, item.itemID,
+                                                     reinterpret_cast<LPARAM>(text)));
+    if (length <= 0) return;
+
+    RECT textRect = item.rcItem;
+    textRect.left += 8;
+    textRect.right -= 6;
+
+    SetBkMode(item.hDC, TRANSPARENT);
+    SetTextColor(item.hDC, foreground);
+    HGDIOBJ oldFont = SelectObject(item.hDC, g_hFont != nullptr ? g_hFont : GetStockObject(DEFAULT_GUI_FONT));
+    DrawTextW(item.hDC, text, length, &textRect,
+              DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX);
+    SelectObject(item.hDC, oldFont);
 }
 
 void SetActiveArtworkType(const std::wstring& typeName) {
@@ -290,8 +357,9 @@ void SetActiveArtworkType(const std::wstring& typeName) {
         for (int i = 0; i < count; ++i) {
             const int len = static_cast<int>(SendMessageW(hCombo, CB_GETLBTEXTLEN, i, 0));
             if (len > 0) {
-                std::wstring text(static_cast<size_t>(len), L'\0');
+                std::wstring text(static_cast<size_t>(len) + 1, L'\0');
                 SendMessageW(hCombo, CB_GETLBTEXT, i, reinterpret_cast<LPARAM>(text.data()));
+                text.resize(static_cast<size_t>(len));
                 if (text.find(keyword) != std::wstring::npos) {
                     SendMessageW(hCombo, CB_SETCURSEL, i, 0);
                     return;
@@ -336,6 +404,26 @@ std::wstring GetThumbnailCachePath(const std::wstring& url) {
 
 void TriggerArtworkSearch(HWND hwnd, bool includeWebSearch, const std::wstring& explicitQuery = L"", const std::wstring& explicitType = L"", const std::wstring& explicitRes = L"", bool disableSafeSearch = false);
 
+void PopulateLaunchMethodCombo() {
+    if (g_hwndComboLaunchMethod == nullptr) return;
+
+    SendMessageW(g_hwndComboLaunchMethod, CB_RESETCONTENT, 0, 0);
+    SendMessageW(g_hwndComboLaunchMethod, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"Default launch (primary)"));
+
+    if (g_selectedIndex >= 0 && static_cast<size_t>(g_selectedIndex) < g_games.size()) {
+        for (const auto& method : g_games[static_cast<size_t>(g_selectedIndex)].launchMethods) {
+            std::wstring label = method.name.empty() ? method.executablePath : method.name;
+            if (method.isAutoDetected) label += L" (auto)";
+            SendMessageW(g_hwndComboLaunchMethod, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(label.c_str()));
+        }
+    }
+
+    SendMessageW(g_hwndComboLaunchMethod, CB_SETCURSEL, 0, 0);
+    if (g_hwndBtnRemoveLaunchMethod != nullptr) {
+        EnableWindow(g_hwndBtnRemoveLaunchMethod, FALSE);
+    }
+}
+
 void PopulateEditorFromSelected(HWND hwnd) {
     if (g_selectedIndex < 0 || static_cast<size_t>(g_selectedIndex) >= g_games.size()) {
         SetWindowTextW(g_hwndEditTitle, L"");
@@ -377,6 +465,7 @@ void PopulateEditorFromSelected(HWND hwnd) {
         const bool isNsfw = StorefrontScanner::IsNsfwGame(g);
         if (g_hwndChkSafeSearch != nullptr) {
             SendMessageW(g_hwndChkSafeSearch, BM_SETCHECK, isNsfw ? BST_CHECKED : BST_UNCHECKED, 0);
+            InvalidateRect(g_hwndChkSafeSearch, nullptr, TRUE);
         }
 
         // Automatically load metadata provider artwork candidates for selected title
@@ -386,7 +475,9 @@ void PopulateEditorFromSelected(HWND hwnd) {
         }
     }
 
-    RECT rcPreview = { PREVIEW_BOX_X - 4, PREVIEW_BOX_Y - 4, PREVIEW_BOX_X + PREVIEW_BOX_W + 4, PREVIEW_BOX_Y + PREVIEW_BOX_H + 4 };
+    PopulateLaunchMethodCombo();
+
+    RECT rcPreview = { PREVIEW_BOX_X - 4, g_previewBoxY - 4, PREVIEW_BOX_X + PREVIEW_BOX_W + 4, g_previewBoxY + PREVIEW_BOX_H + 4 };
     InvalidateRect(hwnd, &rcPreview, FALSE);
 }
 
@@ -493,6 +584,242 @@ bool BrowseForFile(HWND hwnd, const wchar_t* title, const wchar_t* filter, std::
         return true;
     }
     return false;
+}
+
+bool BrowseForFolder(HWND hwnd, const wchar_t* title, std::wstring& outPath) {
+    wchar_t displayName[MAX_PATH] = { 0 };
+    BROWSEINFOW bi{};
+    bi.hwndOwner = hwnd;
+    bi.pszDisplayName = displayName;
+    bi.lpszTitle = title;
+    bi.ulFlags = BIF_RETURNONLYFSDIRS | BIF_NEWDIALOGSTYLE;
+
+    PIDLIST_ABSOLUTE pidl = SHBrowseForFolderW(&bi);
+    if (pidl == nullptr) return false;
+
+    wchar_t path[MAX_PATH] = { 0 };
+    const bool ok = SHGetPathFromIDListW(pidl, path) != FALSE;
+    CoTaskMemFree(pidl);
+    if (ok) outPath = path;
+    return ok;
+}
+
+// ---------------------------------------------------------------------------
+// Secondary launch method editor (modal popup)
+// ---------------------------------------------------------------------------
+
+constexpr int IDC_LM_NAME       = 4101;
+constexpr int IDC_LM_EXE        = 4102;
+constexpr int IDC_LM_BROWSE_EXE = 4103;
+constexpr int IDC_LM_ARGS       = 4104;
+constexpr int IDC_LM_WORKDIR    = 4105;
+constexpr int IDC_LM_BROWSE_DIR = 4106;
+
+struct LaunchMethodDialogState {
+    LaunchMethod method;
+    bool accepted{ false };
+};
+
+LRESULT CALLBACK LaunchMethodDialogProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
+    auto* state = reinterpret_cast<LaunchMethodDialogState*>(GetWindowLongPtrW(hwnd, GWLP_USERDATA));
+
+    switch (uMsg) {
+    case WM_CREATE: {
+        auto* cs = reinterpret_cast<CREATESTRUCTW*>(lParam);
+        state = reinterpret_cast<LaunchMethodDialogState*>(cs->lpCreateParams);
+        SetWindowLongPtrW(hwnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(state));
+
+        auto addLabel = [&](const wchar_t* text, int x, int y, int w) {
+            HWND label = CreateWindowExW(0, L"STATIC", text, WS_CHILD | WS_VISIBLE,
+                x, y + 3, w, 20, hwnd, nullptr, nullptr, nullptr);
+            SendMessageW(label, WM_SETFONT, reinterpret_cast<WPARAM>(g_hFont), TRUE);
+        };
+        auto addEdit = [&](int id, int x, int y, int w, const std::wstring& value) {
+            HWND edit = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", value.c_str(),
+                WS_CHILD | WS_VISIBLE | ES_AUTOHSCROLL,
+                x, y, w, 24, hwnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(id)), nullptr, nullptr);
+            SendMessageW(edit, WM_SETFONT, reinterpret_cast<WPARAM>(g_hFont), TRUE);
+            return edit;
+        };
+
+        addLabel(L"Name:", 16, 18, 70);
+        addEdit(IDC_LM_NAME, 92, 16, 352, state ? state->method.name : L"");
+
+        addLabel(L"Executable:", 16, 52, 70);
+        addEdit(IDC_LM_EXE, 92, 50, 280, state ? state->method.executablePath : L"");
+        HWND browseExe = CreateWindowExW(0, L"BUTTON", L"Browse...", WS_CHILD | WS_VISIBLE | WS_TABSTOP,
+            378, 49, 66, 26, hwnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_LM_BROWSE_EXE)), nullptr, nullptr);
+        SendMessageW(browseExe, WM_SETFONT, reinterpret_cast<WPARAM>(g_hFont), TRUE);
+
+        addLabel(L"Arguments:", 16, 86, 70);
+        addEdit(IDC_LM_ARGS, 92, 84, 352, state ? state->method.arguments : L"");
+
+        addLabel(L"Working dir:", 16, 120, 70);
+        addEdit(IDC_LM_WORKDIR, 92, 118, 280, state ? state->method.workingDirectory : L"");
+        HWND browseDir = CreateWindowExW(0, L"BUTTON", L"Browse...", WS_CHILD | WS_VISIBLE | WS_TABSTOP,
+            378, 117, 66, 26, hwnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_LM_BROWSE_DIR)), nullptr, nullptr);
+        SendMessageW(browseDir, WM_SETFONT, reinterpret_cast<WPARAM>(g_hFont), TRUE);
+
+        HWND hint = CreateWindowExW(0, L"STATIC",
+            L"Optional arguments are passed verbatim. Use {exe} for the game executable and {dir} for its working directory.",
+            WS_CHILD | WS_VISIBLE, 16, 152, 428, 34, hwnd, nullptr, nullptr, nullptr);
+        SendMessageW(hint, WM_SETFONT, reinterpret_cast<WPARAM>(g_hFontSmall), TRUE);
+
+        HWND okBtn = CreateWindowExW(0, L"BUTTON", L"Add Method", WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_DEFPUSHBUTTON,
+            270, 194, 100, 28, hwnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDOK)), nullptr, nullptr);
+        SendMessageW(okBtn, WM_SETFONT, reinterpret_cast<WPARAM>(g_hFontBold), TRUE);
+
+        HWND cancelBtn = CreateWindowExW(0, L"BUTTON", L"Cancel", WS_CHILD | WS_VISIBLE | WS_TABSTOP,
+            376, 194, 68, 28, hwnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDCANCEL)), nullptr, nullptr);
+        SendMessageW(cancelBtn, WM_SETFONT, reinterpret_cast<WPARAM>(g_hFont), TRUE);
+
+        SetFocus(GetDlgItem(hwnd, IDC_LM_NAME));
+        return 0;
+    }
+
+    case WM_COMMAND: {
+        const int id = LOWORD(wParam);
+
+        if (id == IDC_LM_BROWSE_EXE) {
+            std::wstring path;
+            if (BrowseForFile(hwnd, L"Select Custom Launcher Executable",
+                    L"Executables (*.exe;*.bat;*.cmd;*.lnk)\0*.exe;*.bat;*.cmd;*.lnk\0All Files (*.*)\0*.*\0", path)) {
+                SetDlgItemTextW(hwnd, IDC_LM_EXE, path.c_str());
+                if (ReadEditString(GetDlgItem(hwnd, IDC_LM_NAME)).empty()) {
+                    SetDlgItemTextW(hwnd, IDC_LM_NAME, fs::path(path).stem().wstring().c_str());
+                }
+                if (ReadEditString(GetDlgItem(hwnd, IDC_LM_WORKDIR)).empty()) {
+                    SetDlgItemTextW(hwnd, IDC_LM_WORKDIR, fs::path(path).parent_path().wstring().c_str());
+                }
+            }
+            return 0;
+        }
+
+        if (id == IDC_LM_BROWSE_DIR) {
+            std::wstring path;
+            if (BrowseForFolder(hwnd, L"Select Working Directory", path)) {
+                SetDlgItemTextW(hwnd, IDC_LM_WORKDIR, path.c_str());
+            }
+            return 0;
+        }
+
+        if (id == IDOK) {
+            if (state == nullptr) return 0;
+
+            const std::wstring exe = ReadEditString(GetDlgItem(hwnd, IDC_LM_EXE));
+            if (exe.empty()) {
+                MessageBoxW(hwnd, L"Please choose the launcher executable.", L"Secondary Launch Method", MB_OK | MB_ICONWARNING);
+                return 0;
+            }
+
+            state->method.name = ReadEditString(GetDlgItem(hwnd, IDC_LM_NAME));
+            if (state->method.name.empty()) state->method.name = fs::path(exe).stem().wstring();
+            state->method.executablePath = exe;
+            state->method.arguments = ReadEditString(GetDlgItem(hwnd, IDC_LM_ARGS));
+            state->method.workingDirectory = ReadEditString(GetDlgItem(hwnd, IDC_LM_WORKDIR));
+            if (state->method.workingDirectory.empty()) {
+                state->method.workingDirectory = fs::path(exe).parent_path().wstring();
+            }
+            state->method.isAutoDetected = false;
+            state->accepted = true;
+            DestroyWindow(hwnd);
+            return 0;
+        }
+
+        if (id == IDCANCEL) {
+            DestroyWindow(hwnd);
+            return 0;
+        }
+        break;
+    }
+
+    case WM_CTLCOLORSTATIC:
+    case WM_CTLCOLORBTN: {
+        auto hdc = reinterpret_cast<HDC>(wParam);
+        SetBkColor(hdc, g_palette.cardBg);
+        SetTextColor(hdc, g_palette.textPrimary);
+        return reinterpret_cast<LRESULT>(g_hCardBrush);
+    }
+
+    case WM_CTLCOLOREDIT: {
+        auto hdc = reinterpret_cast<HDC>(wParam);
+        const COLORREF editBg = ThemeControls::FieldSurfaceColor();
+        SetBkColor(hdc, editBg);
+        SetTextColor(hdc, g_palette.textPrimary);
+        return reinterpret_cast<LRESULT>(g_hEditBrush);
+    }
+
+    case WM_ERASEBKGND: {
+        RECT rc{};
+        GetClientRect(hwnd, &rc);
+        FillRect(reinterpret_cast<HDC>(wParam), &rc, g_hCardBrush);
+        return 1;
+    }
+
+    case WM_CLOSE:
+        DestroyWindow(hwnd);
+        return 0;
+    }
+
+    return DefWindowProcW(hwnd, uMsg, wParam, lParam);
+}
+
+bool ShowLaunchMethodDialog(HWND owner, LaunchMethod& method) {
+    static bool classRegistered = false;
+    if (!classRegistered) {
+        WNDCLASSEXW wc{};
+        wc.cbSize = sizeof(wc);
+        wc.lpfnWndProc = LaunchMethodDialogProc;
+        wc.hInstance = GetModuleHandleW(nullptr);
+        wc.hCursor = LoadCursorW(nullptr, IDC_ARROW);
+        wc.lpszClassName = L"GameExplorerLaunchMethodDialog";
+        if (RegisterClassExW(&wc) == 0) return false;
+        classRegistered = true;
+    }
+
+    LaunchMethodDialogState state{};
+    state.method = method;
+
+    constexpr int dlgW = 474;
+    constexpr int dlgH = 240;
+    RECT ownerRect{};
+    GetWindowRect(owner, &ownerRect);
+    const int x = ownerRect.left + ((ownerRect.right - ownerRect.left) - dlgW) / 2;
+    const int y = ownerRect.top + ((ownerRect.bottom - ownerRect.top) - dlgH) / 2;
+
+    HWND dlg = CreateWindowExW(
+        WS_EX_DLGMODALFRAME,
+        L"GameExplorerLaunchMethodDialog",
+        L"Secondary Launch Method",
+        WS_POPUP | WS_CAPTION | WS_SYSMENU,
+        x, y, dlgW, dlgH,
+        owner, nullptr, GetModuleHandleW(nullptr), &state
+    );
+    if (dlg == nullptr) return false;
+
+    EnableWindow(owner, FALSE);
+    ShowWindow(dlg, SW_SHOW);
+    SetForegroundWindow(dlg);
+    UpdateWindow(dlg);
+
+    MSG msg{};
+    while (IsWindow(dlg)) {
+        const BOOL got = GetMessageW(&msg, nullptr, 0, 0);
+        if (got <= 0) {
+            if (got == 0) PostQuitMessage(static_cast<int>(msg.wParam));
+            break;
+        }
+        if (!IsDialogMessageW(dlg, &msg)) {
+            TranslateMessage(&msg);
+            DispatchMessageW(&msg);
+        }
+    }
+
+    EnableWindow(owner, TRUE);
+    SetActiveWindow(owner);
+
+    if (state.accepted) method = state.method;
+    return state.accepted;
 }
 
 void TriggerArtworkSearch(
@@ -620,7 +947,7 @@ void ApplySelectedArtwork(HWND hwnd, int targetSlotId) {
         StorefrontScanner::SavePerGameMetadata(game);
 
         if (targetSlotId == IDM_APPLY_COVER) {
-            RECT rcPreview = { PREVIEW_BOX_X - 4, PREVIEW_BOX_Y - 4, PREVIEW_BOX_X + PREVIEW_BOX_W + 4, PREVIEW_BOX_Y + PREVIEW_BOX_H + 4 };
+            RECT rcPreview = { PREVIEW_BOX_X - 4, g_previewBoxY - 4, PREVIEW_BOX_X + PREVIEW_BOX_W + 4, g_previewBoxY + PREVIEW_BOX_H + 4 };
             InvalidateRect(hwnd, &rcPreview, FALSE);
         }
 
@@ -641,7 +968,10 @@ void GetGalleryCardDimensions(int& cardW, int& cardH, int& imgH, HWND hwndCanvas
     } else if (g_hwndGalleryCanvas && IsWindow(g_hwndGalleryCanvas)) {
         GetClientRect(g_hwndGalleryCanvas, &rc);
     }
-    const int canvasW = (rc.right - rc.left > 100) ? (rc.right - rc.left) : 460;
+    // The canvas paints its own scrollbar gutter, so cards are laid out inside the remaining
+    // width. GetClientRect no longer excludes a non-client scrollbar.
+    const int rawW = (rc.right - rc.left > 100) ? (rc.right - rc.left) : 460;
+    const int canvasW = (std::max)(120, rawW - ThemeScroll::kBarWidth);
 
     std::wstring typeStr = g_activeArtworkType;
     if (typeStr.empty() || typeStr == L"All") {
@@ -712,6 +1042,44 @@ void GetGalleryCardDimensions(int& cardW, int& cardH, int& imgH, HWND hwndCanvas
     }
 }
 
+// Geometry for the artwork grid plus its custom scrollbar, shared by painting, resizing,
+// wheel handling and hit-testing so the three can never disagree.
+struct GalleryLayout {
+    int cardW = 148;
+    int cardH = 248;
+    int imgH = 222;
+    int cols = 1;
+    int contentHeight = 0;
+    int maxScroll = 0;
+};
+
+GalleryLayout ComputeGalleryLayout(HWND hwnd) {
+    GalleryLayout layout{};
+    RECT rc{};
+    GetClientRect(hwnd, &rc);
+    const int w = rc.right - rc.left;
+    const int h = rc.bottom - rc.top;
+
+    GetGalleryCardDimensions(layout.cardW, layout.cardH, layout.imgH, hwnd);
+
+    constexpr int padX = 8;
+    constexpr int padY = 8;
+    const int viewportW = (std::max)(1, w - ThemeScroll::kBarWidth);
+    layout.cols = (std::max)(1, (viewportW - padX) / (layout.cardW + padX));
+
+    const int rows = static_cast<int>((g_galleryCandidates.size() + static_cast<size_t>(layout.cols) - 1) /
+                                      static_cast<size_t>(layout.cols));
+    layout.contentHeight = rows * (layout.cardH + padY) + padY;
+    layout.maxScroll = ThemeScroll::MaxScroll(layout.contentHeight, h);
+    return layout;
+}
+
+ThemeScroll::Metrics ComputeGalleryScrollbar(HWND hwnd, const GalleryLayout& layout) {
+    RECT rc{};
+    GetClientRect(hwnd, &rc);
+    return ThemeScroll::Compute(rc, layout.contentHeight, rc.bottom - rc.top, g_galleryScrollY);
+}
+
 // Custom Child Window for Gallery Canvas
 LRESULT CALLBACK GalleryCanvasWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
     static std::set<std::wstring> s_downloadingUrls;
@@ -745,6 +1113,9 @@ LRESULT CALLBACK GalleryCanvasWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARA
         FillRect(memDC, &rcClient, bgBrush);
         DeleteObject(bgBrush);
 
+        // One layout computation feeds both the grid and the scrollbar.
+        const GalleryLayout layout = ComputeGalleryLayout(hwnd);
+
         if (g_isSearchingArt) {
             SetBkMode(memDC, TRANSPARENT);
             SetTextColor(memDC, g_palette.textSecondary);
@@ -760,29 +1131,14 @@ LRESULT CALLBACK GalleryCanvasWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARA
             graphics.SetInterpolationMode(Gdiplus::InterpolationModeHighQualityBicubic);
             graphics.SetSmoothingMode(Gdiplus::SmoothingModeHighQuality);
 
-            // Determine grid columns and card dimensions based on selected filter
-            int cardW = 148;
-            int cardH = 248;
-            int imgH = 222;
-            GetGalleryCardDimensions(cardW, cardH, imgH, hwnd);
+            // Grid geometry and the custom scrollbar share one layout computation.
+            const int cardW = layout.cardW;
+            const int cardH = layout.cardH;
+            const int imgH = layout.imgH;
+            const int cols = layout.cols;
 
             constexpr int padX = 8;
             constexpr int padY = 8;
-
-            const int cols = (std::max)(1, (w - padX) / (cardW + padX));
-
-            const int totalRows = static_cast<int>((g_galleryCandidates.size() + cols - 1) / cols);
-            const int totalHeight = totalRows * (cardH + padY) + padY;
-
-            // Configure vertical scrollbar
-            SCROLLINFO si{};
-            si.cbSize = sizeof(si);
-            si.fMask = SIF_RANGE | SIF_PAGE | SIF_POS;
-            si.nMin = 0;
-            si.nMax = totalHeight;
-            si.nPage = static_cast<UINT>(h);
-            si.nPos = g_galleryScrollY;
-            SetScrollInfo(hwnd, SB_VERT, &si, TRUE);
 
             for (size_t i = 0; i < g_galleryCandidates.size(); ++i) {
                 const auto& cand = g_galleryCandidates[i];
@@ -899,6 +1255,11 @@ LRESULT CALLBACK GalleryCanvasWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARA
             }
         }
 
+        // Themed scrollbar: a rounded rail and thumb that match the cards instead of the classic
+        // 3D non-client scrollbar.
+        ThemeScroll::Paint(memDC, ComputeGalleryScrollbar(hwnd, ComputeGalleryLayout(hwnd)), g_palette,
+                           g_galleryScrollHovered || g_galleryScrollDragging, g_galleryScrollDragging);
+
         BitBlt(hdc, 0, 0, w, h, memDC, 0, 0, SRCCOPY);
         SelectObject(memDC, oldBmp);
         DeleteObject(memBmp);
@@ -913,26 +1274,25 @@ LRESULT CALLBACK GalleryCanvasWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARA
         return 0;
 
     case WM_VSCROLL: {
+        const GalleryLayout layout = ComputeGalleryLayout(hwnd);
         RECT rc;
         GetClientRect(hwnd, &rc);
-        SCROLLINFO si{};
-        si.cbSize = sizeof(si);
-        si.fMask = SIF_ALL;
-        GetScrollInfo(hwnd, SB_VERT, &si);
+        const int page = rc.bottom - rc.top;
 
-        int curPos = si.nPos;
+        int curPos = g_galleryScrollY;
         switch (LOWORD(wParam)) {
         case SB_LINEUP:   curPos -= 30; break;
         case SB_LINEDOWN: curPos += 30; break;
-        case SB_PAGEUP:   curPos -= si.nPage; break;
-        case SB_PAGEDOWN: curPos += si.nPage; break;
-        case SB_THUMBTRACK: curPos = si.nTrackPos; break;
+        case SB_PAGEUP:   curPos -= page; break;
+        case SB_PAGEDOWN: curPos += page; break;
+        case SB_TOP:      curPos = 0; break;
+        case SB_BOTTOM:   curPos = layout.maxScroll; break;
+        default: break;
         }
 
-        curPos = (std::max)(0, (std::min)(curPos, si.nMax - static_cast<int>(si.nPage)));
-        if (curPos != si.nPos) {
+        curPos = (std::max)(0, (std::min)(curPos, layout.maxScroll));
+        if (curPos != g_galleryScrollY) {
             g_galleryScrollY = curPos;
-            SetScrollPos(hwnd, SB_VERT, curPos, TRUE);
             InvalidateRect(hwnd, nullptr, FALSE);
         }
         return 0;
@@ -945,37 +1305,35 @@ LRESULT CALLBACK GalleryCanvasWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARA
     }
 
     case WM_SIZE: {
-        RECT rcClient;
-        GetClientRect(hwnd, &rcClient);
-        const int w = rcClient.right - rcClient.left;
-        int cardW = 148, cardH = 248, dummyImgH = 222;
-        GetGalleryCardDimensions(cardW, cardH, dummyImgH, hwnd);
-        constexpr int padX = 8;
-        constexpr int padY = 8;
-        const int cols = (std::max)(1, (w - padX) / (cardW + padX));
-        const int totalRows = static_cast<int>((g_galleryCandidates.size() + cols - 1) / cols);
-        const int totalHeight = totalRows * (cardH + padY) + padY;
-
-        SCROLLINFO si{};
-        si.cbSize = sizeof(si);
-        si.fMask = SIF_RANGE | SIF_PAGE | SIF_POS;
-        si.nMin = 0;
-        si.nMax = totalHeight;
-        si.nPage = static_cast<UINT>(rcClient.bottom - rcClient.top);
-        si.nPos = g_galleryScrollY;
-        SetScrollInfo(hwnd, SB_VERT, &si, TRUE);
-
-        if (g_galleryScrollY > si.nMax - static_cast<int>(si.nPage)) {
-            g_galleryScrollY = (std::max)(0, si.nMax - static_cast<int>(si.nPage));
-            SetScrollPos(hwnd, SB_VERT, g_galleryScrollY, TRUE);
-        }
+        // The visible row count changes with the height, so re-clamp the offset and repaint.
+        const GalleryLayout layout = ComputeGalleryLayout(hwnd);
+        g_galleryScrollY = (std::max)(0, (std::min)(g_galleryScrollY, layout.maxScroll));
         InvalidateRect(hwnd, nullptr, TRUE);
         return 0;
     }
 
     case WM_LBUTTONDOWN: {
         const int clickX = GET_X_LPARAM(lParam);
-        const int clickY = GET_Y_LPARAM(lParam) + g_galleryScrollY;
+        const int clickY = GET_Y_LPARAM(lParam);
+
+        // The scrollbar owns the gutter: a click there must never select a card underneath it.
+        const GalleryLayout barLayout = ComputeGalleryLayout(hwnd);
+        const ThemeScroll::Metrics bar = ComputeGalleryScrollbar(hwnd, barLayout);
+        if (bar.needed && clickX >= bar.rail.left - ((ThemeScroll::kBarWidth - ThemeScroll::kRailWidth) / 2)) {
+            const POINT hit{ clickX, clickY };
+            if (PtInRect(&bar.thumb, hit)) {
+                g_galleryScrollDragging = true;
+                g_galleryScrollGrabOffset = clickY - bar.thumb.top;
+                SetCapture(hwnd);
+            } else {
+                // Track click pages towards the pointer, the standard scrollbar behaviour.
+                SendMessageW(hwnd, WM_VSCROLL,
+                             MAKEWPARAM(clickY < bar.thumb.top ? SB_PAGEUP : SB_PAGEDOWN, 0), 0);
+            }
+            return 0;
+        }
+
+        const int contentY = clickY + g_galleryScrollY;
 
         RECT rcClient;
         GetClientRect(hwnd, &rcClient);
@@ -989,7 +1347,8 @@ LRESULT CALLBACK GalleryCanvasWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARA
         constexpr int padX = 8;
         constexpr int padY = 8;
 
-        const int cols = (std::max)(1, (w - padX) / (cardW + padX));
+        const int viewportW = (std::max)(1, w - ThemeScroll::kBarWidth);
+        const int cols = (std::max)(1, (viewportW - padX) / (cardW + padX));
 
         for (size_t i = 0; i < g_galleryCandidates.size(); ++i) {
             const int row = static_cast<int>(i / cols);
@@ -997,7 +1356,7 @@ LRESULT CALLBACK GalleryCanvasWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARA
             const int x = padX + col * (cardW + padX);
             const int y = padY + row * (cardH + padY);
 
-            if (clickX >= x && clickX <= x + cardW && clickY >= y && clickY <= y + cardH) {
+            if (clickX >= x && clickX <= x + cardW && contentY >= y && contentY <= y + cardH) {
                 g_selectedCandidateIdx = static_cast<int>(i);
                 InvalidateRect(hwnd, nullptr, FALSE);
 
@@ -1030,6 +1389,67 @@ LRESULT CALLBACK GalleryCanvasWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARA
         }
         return 0;
     }
+
+    case WM_MOUSEMOVE: {
+        const int x = GET_X_LPARAM(lParam);
+        const int y = GET_Y_LPARAM(lParam);
+
+        if (g_galleryScrollDragging) {
+            const GalleryLayout layout = ComputeGalleryLayout(hwnd);
+            const ThemeScroll::Metrics bar = ComputeGalleryScrollbar(hwnd, layout);
+            RECT rc;
+            GetClientRect(hwnd, &rc);
+            const int newPos = ThemeScroll::PositionForThumbDrag(
+                bar, y, g_galleryScrollGrabOffset, layout.contentHeight, rc.bottom - rc.top);
+            if (newPos != g_galleryScrollY) {
+                g_galleryScrollY = newPos;
+                InvalidateRect(hwnd, nullptr, FALSE);
+            }
+            return 0;
+        }
+
+        const GalleryLayout layout = ComputeGalleryLayout(hwnd);
+        const ThemeScroll::Metrics bar = ComputeGalleryScrollbar(hwnd, layout);
+        const bool hovered =
+            bar.needed && x >= bar.rail.left - ((ThemeScroll::kBarWidth - ThemeScroll::kRailWidth) / 2);
+        if (hovered != g_galleryScrollHovered) {
+            g_galleryScrollHovered = hovered;
+            InvalidateRect(hwnd, nullptr, FALSE);
+        }
+
+        if (!g_galleryTrackingMouse) {
+            TRACKMOUSEEVENT tme{};
+            tme.cbSize = sizeof(tme);
+            tme.dwFlags = TME_LEAVE;
+            tme.hwndTrack = hwnd;
+            TrackMouseEvent(&tme);
+            g_galleryTrackingMouse = true;
+        }
+        return 0;
+    }
+
+    case WM_LBUTTONUP:
+        if (g_galleryScrollDragging) {
+            g_galleryScrollDragging = false;
+            if (GetCapture() == hwnd) ReleaseCapture();
+            InvalidateRect(hwnd, nullptr, FALSE);
+        }
+        return 0;
+
+    case WM_CAPTURECHANGED:
+        if (g_galleryScrollDragging && reinterpret_cast<HWND>(lParam) != hwnd) {
+            g_galleryScrollDragging = false;
+            InvalidateRect(hwnd, nullptr, FALSE);
+        }
+        return 0;
+
+    case WM_MOUSELEAVE:
+        g_galleryTrackingMouse = false;
+        if (g_galleryScrollHovered) {
+            g_galleryScrollHovered = false;
+            InvalidateRect(hwnd, nullptr, FALSE);
+        }
+        return 0;
     }
 
     return DefWindowProcW(hwnd, uMsg, wParam, lParam);
@@ -1039,7 +1459,7 @@ void UpdateLayout(HWND /*hwnd*/, int w, int h) {
     if (w <= 0 || h <= 0) return;
 
     const int cardBottom = h - 16;
-    constexpr int topY = TITLE_BAR_HEIGHT + 48;
+    const int topY = g_titleBarHeight + 48;
 
     HDWP hdwp = BeginDeferWindowPos(45);
     if (!hdwp) return;
@@ -1071,9 +1491,17 @@ void UpdateLayout(HWND /*hwnd*/, int w, int h) {
     deferPos(g_hwndBtnLaunch, 288 + 144, actionBtnY, 102, 34);
     deferPos(g_hwndBtnOpenShell, 288 + 252, actionBtnY, 116, 34);
 
-    const int synY = topY + 428;
-    const int synH = (std::max)(24, (actionBtnY - 8) - synY);
-    deferPos(g_hwndEditSynopsis, 398, synY + 2, 306, synH);
+    // Secondary launch method row (custom launcher dropdown) above the action buttons
+    const int launchMethodY = actionBtnY - 42;
+    deferPos(g_hwndLblLaunchMethod, 288, launchMethodY + 4, 102, 20);
+    deferPos(g_hwndComboLaunchMethod, 398, launchMethodY, 150, 200);
+    deferPos(g_hwndBtnAddLaunchMethod, 554, launchMethodY, 70, 28);
+    deferPos(g_hwndBtnRemoveLaunchMethod, 630, launchMethodY, 74, 28);
+
+    const int synY = topY + 468;
+    const int synH = (std::max)(24, (launchMethodY - 6) - (synY + 1));
+    deferPos(g_hwndLblSynopsis, 288, synY + 5, 106, 20);
+    deferPos(g_hwndEditSynopsis, 398, synY + 1, 306, synH);
 
     // ==========================================
     // COLUMN 3: Online Artwork Discovery & Gallery (Fluid width & height)
@@ -1083,24 +1511,24 @@ void UpdateLayout(HWND /*hwnd*/, int w, int h) {
     const int col3W = (std::max)(400, rightLimit - rightX);
 
     // Row 1: Search Query + Search Providers + Reset Cache
-    constexpr int r1Y = topY + 1;
+    const int r1Y = topY + 1;
     constexpr int btnResetW = 118;
     constexpr int btnSearchW = 136;
     const int resetX = rightLimit - btnResetW;
     const int searchX = resetX - 6 - btnSearchW;
     const int queryW = (std::max)(120, (searchX - 6) - rightX);
 
-    deferPos(g_hwndGalleryQuery, rightX, r1Y + 1, queryW, 24);
-    deferPos(g_hwndBtnSearchProviders, searchX, r1Y, btnSearchW, 26);
-    deferPos(g_hwndBtnResetCache, resetX, r1Y, btnResetW, 26);
+    deferPos(g_hwndGalleryQuery, rightX, r1Y, queryW, ThemeControls::kFieldHeight);
+    deferPos(g_hwndBtnSearchProviders, searchX, r1Y, btnSearchW, 28);
+    deferPos(g_hwndBtnResetCache, resetX, r1Y, btnResetW, 28);
 
     // Row 2: Type filter + Resolution filter
-    constexpr int r2Y = topY + 34;
-    deferPos(g_hwndLblType, rightX, r2Y + 2, 38, 20);
+    const int r2Y = topY + 34;
+    deferPos(g_hwndLblType, rightX, r2Y + 4, 38, 20);
     const int comboTypeW = 180;
     deferPos(g_hwndComboType, rightX + 42, r2Y, comboTypeW, 200);
     const int resLblX = rightX + 42 + comboTypeW + 12;
-    deferPos(g_hwndLblRes, resLblX, r2Y + 2, 72, 20);
+    deferPos(g_hwndLblRes, resLblX, r2Y + 4, 72, 20);
     const int resComboX = resLblX + 76;
     const int resComboW = (std::max)(120, rightLimit - resComboX);
     deferPos(g_hwndComboRes, resComboX, r2Y, resComboW, 200);
@@ -1118,8 +1546,8 @@ void UpdateLayout(HWND /*hwnd*/, int w, int h) {
     const int filterWebX = btnWebX - 6 - filterWebW;
     const int webQueryW = (std::max)(100, (filterWebX - 6) - rightX);
 
-    deferPos(g_hwndWebSearchQuery, rightX, rowB2Y + 1, webQueryW, 26);
-    deferPos(g_hwndComboWebFilter, filterWebX, rowB2Y + 1, filterWebW, 200);
+    deferPos(g_hwndWebSearchQuery, rightX, rowB2Y, webQueryW, ThemeControls::kFieldHeight);
+    deferPos(g_hwndComboWebFilter, filterWebX, rowB2Y, filterWebW, 200);
     deferPos(g_hwndBtnWebSearch, btnWebX, rowB2Y, btnWebW, 28);
 
     // Row B1: Status & Apply Artwork
@@ -1132,7 +1560,7 @@ void UpdateLayout(HWND /*hwnd*/, int w, int h) {
     deferPos(g_hwndBtnApplyArt, btnApplyX, rowB1Y, btnApplyW, 30);
 
     // Viewport Gallery Canvas: Stretches from below Row 2 down to above Row B1
-    constexpr int canvasY = topY + 66;
+    const int canvasY = topY + 66;
     const int canvasH = (std::max)(150, (rowB1Y - 8) - canvasY);
     deferPos(g_hwndGalleryCanvas, rightX, canvasY, col3W, canvasH);
 
@@ -1142,6 +1570,12 @@ void UpdateLayout(HWND /*hwnd*/, int w, int h) {
 LRESULT CALLBACK ManagerWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
     switch (uMsg) {
     case WM_CREATE: {
+        if (lParam != 0) {
+            g_pageMode = true;
+            g_titleBarHeight = 0;
+            g_previewBoxY = g_titleBarHeight + 44;
+        }
+
         NONCLIENTMETRICSW ncm{};
         ncm.cbSize = sizeof(ncm);
         SystemParametersInfoW(SPI_GETNONCLIENTMETRICS, sizeof(ncm), &ncm, 0);
@@ -1154,17 +1588,21 @@ LRESULT CALLBACK ManagerWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPar
         ncm.lfMessageFont.lfHeight = -11;
         g_hFontSmall = CreateFontIndirectW(&ncm.lfMessageFont);
 
+        // Fluent primitives share the palette and the UI font of the page that hosts them.
+        ThemeControls::SetTheme(g_palette, g_hFont, g_isDarkMode);
+
         g_hAppIcon = static_cast<HICON>(LoadImageW(
             GetModuleHandleW(nullptr), MAKEINTRESOURCEW(100), IMAGE_ICON, 16, 16, LR_DEFAULTCOLOR
         ));
 
         // Column 1: Games List (Left)
         constexpr int leftX = 26;
-        constexpr int topY  = TITLE_BAR_HEIGHT + 48;
+        const int topY  = g_titleBarHeight + 48;
 
         g_hwndListGames = CreateWindowExW(
             0, L"LISTBOX", nullptr,
-            WS_CHILD | WS_VISIBLE | WS_VSCROLL | LBS_NOTIFY | LBS_NOINTEGRALHEIGHT,
+            WS_CHILD | WS_VISIBLE | WS_VSCROLL | LBS_NOTIFY | LBS_NOINTEGRALHEIGHT |
+                LBS_OWNERDRAWFIXED | LBS_HASSTRINGS,
             leftX, topY, 230, 560,
             hwnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_LIST_GAMES)), nullptr, nullptr
         );
@@ -1191,63 +1629,114 @@ LRESULT CALLBACK ManagerWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPar
         constexpr int formEditX  = 512;
         constexpr int formEditW  = 192;
 
-        auto createField = [&](const wchar_t* label, HWND& outEdit, HWND& outLbl, int id, int xLbl, int xEd, int wEd, int y) {
+        // The edit style must be supplied at creation time: ES_MULTILINE cannot be enabled later
+        // with SetWindowLongPtrW, so a post-creation patch would leave the control behaving as a
+        // single-line editor that scrolls horizontally instead of wrapping.
+        auto createField = [&](const wchar_t* label, HWND& outEdit, HWND& outLbl, int id, int xLbl, int xEd,
+                               int wEd, int y, DWORD editStyle = ES_AUTOHSCROLL) {
             outLbl = CreateWindowExW(0, L"STATIC", label, WS_CHILD | WS_VISIBLE,
-                xLbl, y + 3, xEd - xLbl - 4, 20, hwnd, nullptr, nullptr, nullptr);
+                xLbl, y + 5, xEd - xLbl - 4, 20, hwnd, nullptr, nullptr, nullptr);
             SendMessageW(outLbl, WM_SETFONT, reinterpret_cast<WPARAM>(g_hFont), TRUE);
 
-            outEdit = CreateWindowExW(0, L"EDIT", L"", WS_CHILD | WS_VISIBLE | ES_AUTOHSCROLL,
-                xEd, y + 2, wEd, 20, hwnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(id)), nullptr, nullptr);
+            outEdit = CreateWindowExW(0, L"EDIT", L"", WS_CHILD | WS_VISIBLE | editStyle,
+                xEd, y + 1, wEd, ThemeControls::kFieldHeight, hwnd,
+                reinterpret_cast<HMENU>(static_cast<INT_PTR>(id)), nullptr, nullptr);
             SendMessageW(outEdit, WM_SETFONT, reinterpret_cast<WPARAM>(g_hFont), TRUE);
             DarkMode::ApplyWindowTheme(outEdit, g_isDarkMode);
+            ThemeControls::ApplyFieldFrame(outEdit);
         };
 
         createField(L"Title:",        g_hwndEditTitle,     g_hwndLblTitle,     IDC_EDIT_TITLE,        formLabelX, formEditX, formEditW, topY + 2);
-        createField(L"Developer:",    g_hwndEditDeveloper, g_hwndLblDeveloper, IDC_EDIT_DEVELOPER,    formLabelX, formEditX, formEditW, topY + 34);
-        createField(L"Publisher:",    g_hwndEditPublisher, g_hwndLblPublisher, IDC_EDIT_PUBLISHER,    formLabelX, formEditX, formEditW, topY + 66);
-        createField(L"Release Date:", g_hwndEditRelease,   g_hwndLblRelease,   IDC_EDIT_RELEASE_DATE, formLabelX, formEditX, formEditW, topY + 98);
-        createField(L"Genres:",       g_hwndEditGenres,    g_hwndLblGenres,    IDC_EDIT_GENRES,       formLabelX, formEditX, formEditW, topY + 130);
-        createField(L"Box Rating:",   g_hwndEditRating,    g_hwndLblRating,    IDC_EDIT_RATING,       formLabelX, formEditX, formEditW, topY + 162);
+        createField(L"Developer:",    g_hwndEditDeveloper, g_hwndLblDeveloper, IDC_EDIT_DEVELOPER,    formLabelX, formEditX, formEditW, topY + 38);
+        createField(L"Publisher:",    g_hwndEditPublisher, g_hwndLblPublisher, IDC_EDIT_PUBLISHER,    formLabelX, formEditX, formEditW, topY + 74);
+        createField(L"Release Date:", g_hwndEditRelease,   g_hwndLblRelease,   IDC_EDIT_RELEASE_DATE, formLabelX, formEditX, formEditW, topY + 110);
+        createField(L"Genres:",       g_hwndEditGenres,    g_hwndLblGenres,    IDC_EDIT_GENRES,       formLabelX, formEditX, formEditW, topY + 146);
+        createField(L"Box Rating:",   g_hwndEditRating,    g_hwndLblRating,    IDC_EDIT_RATING,       formLabelX, formEditX, formEditW, topY + 182);
 
         // Full-width fields below the 2:3 Box Art Preview
         constexpr int fullLabelX = 288;
         constexpr int fullEditX  = 398;
         constexpr int fullEditW  = 238;
 
-        createField(L"Executable:",   g_hwndEditExePath,   g_hwndLblExe,       IDC_EDIT_EXE_PATH,    fullLabelX, fullEditX, fullEditW, topY + 204);
+        createField(L"Executable:",   g_hwndEditExePath,   g_hwndLblExe,       IDC_EDIT_EXE_PATH,    fullLabelX, fullEditX, fullEditW, topY + 216);
         g_hwndBtnBrowseExe = CreateWindowExW(0, L"BUTTON", L"Browse...",
             WS_CHILD | WS_VISIBLE | BS_OWNERDRAW,
-            fullEditX + fullEditW + 6, topY + 201, 62, 24, hwnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_BTN_BROWSE_EXE)), nullptr, nullptr);
+            fullEditX + fullEditW + 6, topY + 217, 62, 28, hwnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_BTN_BROWSE_EXE)), nullptr, nullptr);
         SendMessageW(g_hwndBtnBrowseExe, WM_SETFONT, reinterpret_cast<WPARAM>(g_hFont), TRUE);
 
-        createField(L"Arguments:",    g_hwndEditLaunchArgs, g_hwndLblArgs,     IDC_EDIT_LAUNCH_ARGS, fullLabelX, fullEditX, 306, topY + 236);
-        createField(L"Working Dir:",  g_hwndEditWorkDir,    g_hwndLblWorkDir,  IDC_EDIT_WORK_DIR,    fullLabelX, fullEditX, 306, topY + 268);
+        createField(L"Arguments:",    g_hwndEditLaunchArgs, g_hwndLblArgs,     IDC_EDIT_LAUNCH_ARGS, fullLabelX, fullEditX, 306, topY + 252);
+        createField(L"Working Dir:",  g_hwndEditWorkDir,    g_hwndLblWorkDir,  IDC_EDIT_WORK_DIR,    fullLabelX, fullEditX, 306, topY + 288);
 
-        createField(L"Box Art (~2:3):", g_hwndEditCoverPath, g_hwndLblCover,   IDC_EDIT_COVER_PATH, fullLabelX, fullEditX, fullEditW, topY + 300);
+        createField(L"Box Art (~2:3):", g_hwndEditCoverPath, g_hwndLblCover,   IDC_EDIT_COVER_PATH, fullLabelX, fullEditX, fullEditW, topY + 324);
         g_hwndBtnBrowseCover = CreateWindowExW(0, L"BUTTON", L"Browse...",
             WS_CHILD | WS_VISIBLE | BS_OWNERDRAW,
-            fullEditX + fullEditW + 6, topY + 297, 62, 24, hwnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_BTN_BROWSE_COVER)), nullptr, nullptr);
+            fullEditX + fullEditW + 6, topY + 325, 62, 28, hwnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_BTN_BROWSE_COVER)), nullptr, nullptr);
         SendMessageW(g_hwndBtnBrowseCover, WM_SETFONT, reinterpret_cast<WPARAM>(g_hFont), TRUE);
 
-        createField(L"Hero Banner:",  g_hwndEditHeroPath,   g_hwndLblHero,     IDC_EDIT_HERO_PATH,   fullLabelX, fullEditX, fullEditW, topY + 332);
+        createField(L"Hero Banner:",  g_hwndEditHeroPath,   g_hwndLblHero,     IDC_EDIT_HERO_PATH,   fullLabelX, fullEditX, fullEditW, topY + 360);
         g_hwndBtnBrowseHero = CreateWindowExW(0, L"BUTTON", L"Browse...",
             WS_CHILD | WS_VISIBLE | BS_OWNERDRAW,
-            fullEditX + fullEditW + 6, topY + 329, 62, 24, hwnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_BTN_BROWSE_HERO)), nullptr, nullptr);
+            fullEditX + fullEditW + 6, topY + 361, 62, 28, hwnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_BTN_BROWSE_HERO)), nullptr, nullptr);
         SendMessageW(g_hwndBtnBrowseHero, WM_SETFONT, reinterpret_cast<WPARAM>(g_hFont), TRUE);
 
-        createField(L"Details Art:",  g_hwndEditDetailsPath, g_hwndLblDetails, IDC_EDIT_DETAILS_PATH, fullLabelX, fullEditX, fullEditW, topY + 364);
+        createField(L"Details Art:",  g_hwndEditDetailsPath, g_hwndLblDetails, IDC_EDIT_DETAILS_PATH, fullLabelX, fullEditX, fullEditW, topY + 396);
         g_hwndBtnBrowseDetails = CreateWindowExW(0, L"BUTTON", L"Browse...",
             WS_CHILD | WS_VISIBLE | BS_OWNERDRAW,
-            fullEditX + fullEditW + 6, topY + 361, 62, 24, hwnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_BTN_BROWSE_DETAILS)), nullptr, nullptr);
+            fullEditX + fullEditW + 6, topY + 397, 62, 28, hwnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_BTN_BROWSE_DETAILS)), nullptr, nullptr);
         SendMessageW(g_hwndBtnBrowseDetails, WM_SETFONT, reinterpret_cast<WPARAM>(g_hFont), TRUE);
 
-        createField(L"Icon Path:",    g_hwndEditIconPath,   g_hwndLblIcon,     IDC_EDIT_ICON_PATH,   fullLabelX, fullEditX, fullEditW, topY + 396);
+        createField(L"Icon Path:",    g_hwndEditIconPath,   g_hwndLblIcon,     IDC_EDIT_ICON_PATH,   fullLabelX, fullEditX, fullEditW, topY + 432);
         g_hwndBtnBrowseIcon = CreateWindowExW(0, L"BUTTON", L"Browse...",
             WS_CHILD | WS_VISIBLE | BS_OWNERDRAW,
-            fullEditX + fullEditW + 6, topY + 393, 62, 24, hwnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_BTN_BROWSE_ICON)), nullptr, nullptr);
+            fullEditX + fullEditW + 6, topY + 433, 62, 28, hwnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_BTN_BROWSE_ICON)), nullptr, nullptr);
         SendMessageW(g_hwndBtnBrowseIcon, WM_SETFONT, reinterpret_cast<WPARAM>(g_hFont), TRUE);
 
-        createField(L"Synopsis:",     g_hwndEditSynopsis,   g_hwndLblSynopsis, IDC_EDIT_SYNOPSIS,    fullLabelX, fullEditX, 306, topY + 428);
+        // The synopsis editor is a real wrapped multi-line field: it wraps at the field width and
+        // Enter inserts a line break. Full markdown-style formatting is documented in
+        // docs/metadata-customization.md and rendered in the Explorer details pane.
+        createField(L"Synopsis:", g_hwndEditSynopsis, g_hwndLblSynopsis, IDC_EDIT_SYNOPSIS,
+                    fullLabelX, fullEditX, 306, topY + 468,
+                    ES_MULTILINE | ES_AUTOVSCROLL | ES_WANTRETURN | ES_NOHIDESEL);
+
+        if (g_hwndEditSynopsis != nullptr) {
+            SendMessageW(g_hwndEditSynopsis, EM_SETLIMITTEXT, 0, 0);
+            DarkMode::ApplyWindowTheme(g_hwndEditSynopsis, g_isDarkMode);
+            ThemeControls::ApplyFieldFrame(g_hwndEditSynopsis);
+            // The native 17 px non-client scroll bar cannot be styled to the Fluent palette, so the
+            // field carries the shared ThemeScroll bar painted inside its rounded frame instead.
+            ThemeFieldScroll::Attach(g_hwndEditSynopsis);
+        }
+        if (g_hwndLblSynopsis != nullptr) {
+            SetWindowTextW(g_hwndLblSynopsis, L"Synopsis:");
+        }
+
+        // Secondary launch method controls (populated per selected game)
+        g_hwndLblLaunchMethod = CreateWindowExW(0, L"STATIC", L"Launch method:", WS_CHILD | WS_VISIBLE,
+            fullLabelX, topY + 536, 102, 20, hwnd, nullptr, nullptr, nullptr);
+        SendMessageW(g_hwndLblLaunchMethod, WM_SETFONT, reinterpret_cast<WPARAM>(g_hFont), TRUE);
+
+        g_hwndComboLaunchMethod = CreateWindowExW(0, L"COMBOBOX", nullptr,
+            WS_CHILD | WS_VISIBLE | CBS_DROPDOWNLIST | WS_VSCROLL |
+                CBS_OWNERDRAWFIXED | CBS_HASSTRINGS,
+            fullEditX, topY + 534, 150, 200, hwnd,
+            reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_COMBO_LAUNCH_METHOD)), nullptr, nullptr);
+        SendMessageW(g_hwndComboLaunchMethod, WM_SETFONT, reinterpret_cast<WPARAM>(g_hFont), TRUE);
+        SendMessageW(g_hwndComboLaunchMethod, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"Default launch (primary)"));
+        SendMessageW(g_hwndComboLaunchMethod, CB_SETCURSEL, 0, 0);
+        ThemeControls::AttachCombo(g_hwndComboLaunchMethod);
+
+        g_hwndBtnAddLaunchMethod = CreateWindowExW(0, L"BUTTON", L"Add...",
+            WS_CHILD | WS_VISIBLE | BS_OWNERDRAW,
+            fullEditX + 156, topY + 533, 70, 24, hwnd,
+            reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_BTN_ADD_LAUNCH_METHOD)), nullptr, nullptr);
+        SendMessageW(g_hwndBtnAddLaunchMethod, WM_SETFONT, reinterpret_cast<WPARAM>(g_hFont), TRUE);
+
+        g_hwndBtnRemoveLaunchMethod = CreateWindowExW(0, L"BUTTON", L"Remove",
+            WS_CHILD | WS_VISIBLE | BS_OWNERDRAW,
+            fullEditX + 232, topY + 533, 74, 24, hwnd,
+            reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_BTN_REMOVE_LAUNCH_METHOD)), nullptr, nullptr);
+        SendMessageW(g_hwndBtnRemoveLaunchMethod, WM_SETFONT, reinterpret_cast<WPARAM>(g_hFont), TRUE);
+        EnableWindow(g_hwndBtnRemoveLaunchMethod, FALSE);
 
         // Bottom Action Buttons in Center Column
         g_hwndBtnSave = CreateWindowExW(0, L"BUTTON", L"Save Game Metadata",
@@ -1273,6 +1762,7 @@ LRESULT CALLBACK ManagerWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPar
             rightX, topY + 2, 220, 24, hwnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_EDIT_GALLERY_QUERY)), nullptr, nullptr);
         SendMessageW(g_hwndGalleryQuery, WM_SETFONT, reinterpret_cast<WPARAM>(g_hFont), TRUE);
         DarkMode::ApplyWindowTheme(g_hwndGalleryQuery, g_isDarkMode);
+        ThemeControls::ApplyFieldFrame(g_hwndGalleryQuery);
 
         g_hwndBtnSearchProviders = CreateWindowExW(0, L"BUTTON", L"\U0001F50D Search Providers",
             WS_CHILD | WS_VISIBLE | BS_OWNERDRAW,
@@ -1290,7 +1780,8 @@ LRESULT CALLBACK ManagerWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPar
         SendMessageW(g_hwndLblType, WM_SETFONT, reinterpret_cast<WPARAM>(g_hFont), TRUE);
 
         g_hwndComboType = CreateWindowExW(0, L"COMBOBOX", nullptr,
-            WS_CHILD | WS_VISIBLE | CBS_DROPDOWNLIST | WS_VSCROLL,
+            WS_CHILD | WS_VISIBLE | CBS_DROPDOWNLIST | WS_VSCROLL |
+                CBS_OWNERDRAWFIXED | CBS_HASSTRINGS,
             rightX + 42, topY + 34, 178, 200, hwnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_COMBO_GALLERY_TYPE)), nullptr, nullptr);
         SendMessageW(g_hwndComboType, WM_SETFONT, reinterpret_cast<WPARAM>(g_hFont), TRUE);
         SendMessageW(g_hwndComboType, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"All Types"));
@@ -1299,14 +1790,15 @@ LRESULT CALLBACK ManagerWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPar
         SendMessageW(g_hwndComboType, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"Icon / Logo (1:1)"));
         SendMessageW(g_hwndComboType, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"Details / Screenshots"));
         SendMessageW(g_hwndComboType, CB_SETCURSEL, 0, 0);
-        DarkMode::ApplyWindowTheme(g_hwndComboType, g_isDarkMode);
+        ThemeControls::AttachCombo(g_hwndComboType);
 
         g_hwndLblRes = CreateWindowExW(0, L"STATIC", L"Resolution:", WS_CHILD | WS_VISIBLE,
             rightX + 228, topY + 36, 72, 20, hwnd, nullptr, nullptr, nullptr);
         SendMessageW(g_hwndLblRes, WM_SETFONT, reinterpret_cast<WPARAM>(g_hFont), TRUE);
 
         g_hwndComboRes = CreateWindowExW(0, L"COMBOBOX", nullptr,
-            WS_CHILD | WS_VISIBLE | CBS_DROPDOWNLIST | WS_VSCROLL,
+            WS_CHILD | WS_VISIBLE | CBS_DROPDOWNLIST | WS_VSCROLL |
+                CBS_OWNERDRAWFIXED | CBS_HASSTRINGS,
             rightX + 304, topY + 34, 182, 200, hwnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_COMBO_GALLERY_RES)), nullptr, nullptr);
         SendMessageW(g_hwndComboRes, WM_SETFONT, reinterpret_cast<WPARAM>(g_hFont), TRUE);
         SendMessageW(g_hwndComboRes, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"All Resolutions"));
@@ -1316,11 +1808,12 @@ LRESULT CALLBACK ManagerWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPar
         SendMessageW(g_hwndComboRes, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"1920x1080 (Full HD)"));
         SendMessageW(g_hwndComboRes, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"256x256+ (Square Icon)"));
         SendMessageW(g_hwndComboRes, CB_SETCURSEL, 0, 0);
-        DarkMode::ApplyWindowTheme(g_hwndComboRes, g_isDarkMode);
+        ThemeControls::AttachCombo(g_hwndComboRes);
 
-        // Viewport Gallery Canvas
+        // Viewport Gallery Canvas. It paints its own themed scrollbar (ThemeScroll), so it must not
+        // carry WS_VSCROLL: the non-client scrollbar cannot be restyled to match the cards.
         g_hwndGalleryCanvas = CreateWindowExW(0, L"GameExplorerGalleryCanvas", nullptr,
-            WS_CHILD | WS_VISIBLE | WS_VSCROLL | WS_CLIPCHILDREN,
+            WS_CHILD | WS_VISIBLE | WS_CLIPCHILDREN,
             rightX, topY + 66, 486, 440, hwnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_GALLERY_CANVAS)), nullptr, nullptr);
 
         // Bottom Row 1: Status and Apply Button
@@ -1340,9 +1833,11 @@ LRESULT CALLBACK ManagerWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPar
             rightX, topY + 548, 186, 26, hwnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_EDIT_WEB_QUERY)), nullptr, nullptr);
         SendMessageW(g_hwndWebSearchQuery, WM_SETFONT, reinterpret_cast<WPARAM>(g_hFont), TRUE);
         DarkMode::ApplyWindowTheme(g_hwndWebSearchQuery, g_isDarkMode);
+        ThemeControls::ApplyFieldFrame(g_hwndWebSearchQuery);
 
         g_hwndComboWebFilter = CreateWindowExW(0, L"COMBOBOX", nullptr,
-            WS_CHILD | WS_VISIBLE | CBS_DROPDOWNLIST | WS_VSCROLL,
+            WS_CHILD | WS_VISIBLE | CBS_DROPDOWNLIST | WS_VSCROLL |
+                CBS_OWNERDRAWFIXED | CBS_HASSTRINGS,
             rightX + 192, topY + 548, 150, 200, hwnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_COMBO_WEB_FILTER)), nullptr, nullptr);
         SendMessageW(g_hwndComboWebFilter, WM_SETFONT, reinterpret_cast<WPARAM>(g_hFont), TRUE);
         SendMessageW(g_hwndComboWebFilter, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"All Web Sources"));
@@ -1352,7 +1847,7 @@ LRESULT CALLBACK ManagerWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPar
         SendMessageW(g_hwndComboWebFilter, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"Patreon Campaign Media"));
         SendMessageW(g_hwndComboWebFilter, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"Icons / Logos"));
         SendMessageW(g_hwndComboWebFilter, CB_SETCURSEL, 0, 0);
-        DarkMode::ApplyWindowTheme(g_hwndComboWebFilter, g_isDarkMode);
+        ThemeControls::AttachCombo(g_hwndComboWebFilter);
 
         g_hwndBtnWebSearch = CreateWindowExW(0, L"BUTTON", L"\U0001F310 Search Web",
             WS_CHILD | WS_VISIBLE | BS_OWNERDRAW,
@@ -1361,10 +1856,10 @@ LRESULT CALLBACK ManagerWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPar
 
         // Bottom Row 3: NSFW / SafeSearch Unblock Checkbox (Disables SafeSearch on web + unblocks NSFW in metadata providers)
         g_hwndChkSafeSearch = CreateWindowExW(0, L"BUTTON", L"Disable SafeSearch (Unblock NSFW)",
-            WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX,
+            WS_CHILD | WS_VISIBLE | BS_OWNERDRAW,
             rightX, topY + 580, 280, 22, hwnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_CHK_SAFE_SEARCH)), nullptr, nullptr);
         SendMessageW(g_hwndChkSafeSearch, WM_SETFONT, reinterpret_cast<WPARAM>(g_hFontSmall), TRUE);
-        DarkMode::ApplyWindowTheme(g_hwndChkSafeSearch, g_isDarkMode);
+        ThemeControls::AttachCheck(g_hwndChkSafeSearch);
 
         RECT rcClient{};
         GetClientRect(hwnd, &rcClient);
@@ -1410,16 +1905,20 @@ LRESULT CALLBACK ManagerWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPar
     }
 
     case WM_NCACTIVATE:
+        if (g_pageMode) break;
         return DefWindowProcW(hwnd, WM_NCACTIVATE, wParam, -1);
 
     case WM_NCPAINT:
+        if (g_pageMode) break;
         return 0;
 
     case WM_NCCALCSIZE:
+        if (g_pageMode) break;
         if (wParam == TRUE) return 0;
         break;
 
     case WM_NCHITTEST: {
+        if (g_pageMode) break;
         POINT pt = { GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam) };
         ScreenToClient(hwnd, &pt);
 
@@ -1447,6 +1946,7 @@ LRESULT CALLBACK ManagerWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPar
     }
 
     case WM_MOUSEMOVE: {
+        if (g_pageMode) break;
         const int x = GET_X_LPARAM(lParam);
         const int y = GET_Y_LPARAM(lParam);
 
@@ -1473,6 +1973,7 @@ LRESULT CALLBACK ManagerWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPar
     }
 
     case WM_MOUSELEAVE: {
+        if (g_pageMode) break;
         g_trackingMouse = false;
         if (g_hoverBtn != TitleButton::None) {
             g_hoverBtn = TitleButton::None;
@@ -1485,6 +1986,7 @@ LRESULT CALLBACK ManagerWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPar
     }
 
     case WM_LBUTTONDOWN: {
+        if (g_pageMode) break;
         const int x = GET_X_LPARAM(lParam);
         const int y = GET_Y_LPARAM(lParam);
 
@@ -1504,6 +2006,7 @@ LRESULT CALLBACK ManagerWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPar
     }
 
     case WM_LBUTTONUP: {
+        if (g_pageMode) break;
         if (g_pressedBtn != TitleButton::None) {
             ReleaseCapture();
             const TitleButton clicked = g_pressedBtn;
@@ -1553,6 +2056,7 @@ LRESULT CALLBACK ManagerWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPar
         FillRect(memDC, &rcClient, g_hBgBrush);
 
         // Title Bar
+        if (!g_pageMode) {
         RECT rcTitleBar = { 0, 0, w, TITLE_BAR_HEIGHT };
         HBRUSH titleBrush = CreateSolidBrush(g_palette.drawerBg);
         FillRect(memDC, &rcTitleBar, titleBrush);
@@ -1577,7 +2081,7 @@ LRESULT CALLBACK ManagerWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPar
 
         // Window Controls Pill Pod
         RECT rcPill = GetPillRect(w);
-        HBRUSH pillBg = CreateSolidBrush(g_isDarkMode ? RGB(32, 32, 32) : RGB(236, 236, 236));
+        HBRUSH pillBg = CreateSolidBrush(g_palette.chromePillBg);
         HPEN pillPen = CreatePen(PS_SOLID, 1, g_palette.divider);
         HGDIOBJ prevBr = SelectObject(memDC, pillBg);
         HGDIOBJ prevPen = SelectObject(memDC, pillPen);
@@ -1592,7 +2096,7 @@ LRESULT CALLBACK ManagerWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPar
         const RECT rClose = GetCloseButtonRect(w);
 
         if (g_hoverBtn == TitleButton::Min || g_pressedBtn == TitleButton::Min) {
-            HBRUSH hBr = CreateSolidBrush(g_isDarkMode ? RGB(52, 52, 52) : RGB(220, 220, 220));
+            HBRUSH hBr = CreateSolidBrush(g_palette.chromeHoverBg);
             HPEN hP = CreatePen(PS_NULL, 0, 0);
             HGDIOBJ oB = SelectObject(memDC, hBr);
             HGDIOBJ oP = SelectObject(memDC, hP);
@@ -1614,7 +2118,7 @@ LRESULT CALLBACK ManagerWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPar
         }
 
         if (g_hoverBtn == TitleButton::Max || g_pressedBtn == TitleButton::Max) {
-            HBRUSH hBr = CreateSolidBrush(g_isDarkMode ? RGB(52, 52, 52) : RGB(220, 220, 220));
+            HBRUSH hBr = CreateSolidBrush(g_palette.chromeHoverBg);
             HPEN hP = CreatePen(PS_NULL, 0, 0);
             HGDIOBJ oB = SelectObject(memDC, hBr);
             HGDIOBJ oP = SelectObject(memDC, hP);
@@ -1639,7 +2143,7 @@ LRESULT CALLBACK ManagerWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPar
         const bool closeHover = (g_hoverBtn == TitleButton::Close);
         const bool closePressed = (g_pressedBtn == TitleButton::Close);
         if (closeHover || closePressed) {
-            HBRUSH hBr = CreateSolidBrush(closePressed ? RGB(158, 33, 21) : RGB(196, 43, 28));
+            HBRUSH hBr = CreateSolidBrush(closePressed ? g_palette.chromeClosePressedBg : g_palette.chromeCloseHoverBg);
             HPEN hP = CreatePen(PS_NULL, 0, 0);
             HGDIOBJ oB = SelectObject(memDC, hBr);
             HGDIOBJ oP = SelectObject(memDC, hP);
@@ -1652,7 +2156,7 @@ LRESULT CALLBACK ManagerWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPar
         {
             const int cx = (rClose.left + rClose.right) / 2;
             const int cy = (rClose.top + rClose.bottom) / 2;
-            COLORREF cColor = (closeHover || closePressed) ? RGB(255, 255, 255) : g_palette.textPrimary;
+            COLORREF cColor = (closeHover || closePressed) ? g_palette.chromeOnCloseText : g_palette.textPrimary;
             HPEN glyphPen = CreatePen(PS_SOLID, 1, cColor);
             HGDIOBJ oP = SelectObject(memDC, glyphPen);
             MoveToEx(memDC, cx - 4, cy - 4, nullptr);
@@ -1662,9 +2166,10 @@ LRESULT CALLBACK ManagerWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPar
             SelectObject(memDC, oP);
             DeleteObject(glyphPen);
         }
+        } // !g_pageMode
 
         // 3 Cards: Left (Library), Center (Metadata), Right (Online Gallery)
-        constexpr int cardTop = TITLE_BAR_HEIGHT + 14;
+        const int cardTop = g_titleBarHeight + 14;
         const int cardBottom = h - 16;
 
         RECT rcCol1 = { 16, cardTop, 268, cardBottom };
@@ -1694,7 +2199,7 @@ LRESULT CALLBACK ManagerWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPar
         drawCard(rcCol3, L"Online Artwork Discovery & Gallery");
 
         // Render 2:3 Tall Box Art Preview Frame
-        RECT rcBoxFrame = { PREVIEW_BOX_X, PREVIEW_BOX_Y, PREVIEW_BOX_X + PREVIEW_BOX_W, PREVIEW_BOX_Y + PREVIEW_BOX_H };
+        RECT rcBoxFrame = { PREVIEW_BOX_X, g_previewBoxY, PREVIEW_BOX_X + PREVIEW_BOX_W, g_previewBoxY + PREVIEW_BOX_H };
         HBRUSH boxBgBrush = CreateSolidBrush(g_isDarkMode ? RGB(24, 24, 24) : RGB(242, 242, 242));
         HPEN boxPen = CreatePen(PS_SOLID, 1, g_palette.cardBorder);
         HGDIOBJ oBoxB = SelectObject(memDC, boxBgBrush);
@@ -1712,7 +2217,7 @@ LRESULT CALLBACK ManagerWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPar
             graphics.SetInterpolationMode(Gdiplus::InterpolationModeHighQualityBicubic);
             Gdiplus::Image img(coverPath.c_str());
             if (img.GetLastStatus() == Gdiplus::Ok && img.GetWidth() > 0 && img.GetHeight() > 0) {
-                graphics.DrawImage(&img, PREVIEW_BOX_X + 2, PREVIEW_BOX_Y + 2, PREVIEW_BOX_W - 4, PREVIEW_BOX_H - 4);
+                graphics.DrawImage(&img, PREVIEW_BOX_X + 2, g_previewBoxY + 2, PREVIEW_BOX_W - 4, PREVIEW_BOX_H - 4);
                 drewCover = true;
             }
         }
@@ -1734,9 +2239,38 @@ LRESULT CALLBACK ManagerWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPar
         return 0;
     }
 
+    case WM_MEASUREITEM: {
+        auto* pMis = reinterpret_cast<MEASUREITEMSTRUCT*>(lParam);
+        if (pMis == nullptr) break;
+        if (pMis->CtlType == ODT_LISTBOX && pMis->CtlID == IDC_LIST_GAMES) {
+            pMis->itemHeight = kManagerGameItemHeight;
+            return TRUE;
+        }
+        if (pMis->CtlType == ODT_COMBOBOX) {
+            pMis->itemHeight = ThemeControls::kComboItemHeight;
+            return TRUE;
+        }
+        break;
+    }
+
     case WM_DRAWITEM: {
         auto* pDis = reinterpret_cast<DRAWITEMSTRUCT*>(lParam);
         if (pDis == nullptr) break;
+
+        if (ThemeControls::IsThemedCheck(pDis->hwndItem)) {
+            ThemeControls::DrawCheck(*pDis);
+            return TRUE;
+        }
+
+        if (pDis->CtlType == ODT_LISTBOX && pDis->CtlID == IDC_LIST_GAMES) {
+            DrawManagerGameListItem(*pDis);
+            return TRUE;
+        }
+
+        if (pDis->CtlType == ODT_COMBOBOX) {
+            ThemeControls::DrawComboItem(*pDis);
+            return TRUE;
+        }
 
         HDC hdcBtn = pDis->hDC;
         RECT rcBtn = pDis->rcItem;
@@ -1775,6 +2309,8 @@ LRESULT CALLBACK ManagerWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPar
         case IDC_BTN_BROWSE_HERO:     drawBtn(L"Browse...", false, false); return TRUE;
         case IDC_BTN_BROWSE_DETAILS:  drawBtn(L"Browse...", false, false); return TRUE;
         case IDC_BTN_BROWSE_ICON:     drawBtn(L"Browse...", false, false); return TRUE;
+        case IDC_BTN_ADD_LAUNCH_METHOD:    drawBtn(L"Add...", false, false); return TRUE;
+        case IDC_BTN_REMOVE_LAUNCH_METHOD: drawBtn(L"Remove", false, false); return TRUE;
         case IDC_BTN_SAVE_METADATA:   drawBtn(L"Save Metadata", true, true); return TRUE;
         case IDC_BTN_LAUNCH_SELECTED: drawBtn(L"\u25B6 Play Game", false, true); return TRUE;
         case IDC_BTN_OPEN_SHELL:      drawBtn(L"Open Folder", false, false); return TRUE;
@@ -1789,6 +2325,16 @@ LRESULT CALLBACK ManagerWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPar
     case WM_COMMAND: {
         const int id = LOWORD(wParam);
         const int code = HIWORD(wParam);
+        auto control = reinterpret_cast<HWND>(lParam);
+
+        // Owner-drawn check boxes do not toggle themselves; the drop-down field repaints when the
+        // list opens or closes so its chevron/pressed state stays in sync.
+        if (code == BN_CLICKED && ThemeControls::IsThemedCheck(control)) {
+            ThemeControls::ToggleCheck(control);
+        }
+        if (code == CBN_DROPDOWN || code == CBN_CLOSEUP) {
+            InvalidateRect(control, nullptr, TRUE);
+        }
 
         if (id == IDC_LIST_GAMES && code == LBN_SELCHANGE) {
             g_selectedIndex = static_cast<int>(SendMessageW(g_hwndListGames, LB_GETCURSEL, 0, 0));
@@ -1810,6 +2356,14 @@ LRESULT CALLBACK ManagerWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPar
 
         if (id == IDC_COMBO_GALLERY_RES && code == CBN_SELCHANGE) {
             TriggerArtworkSearch(hwnd, false);
+            return 0;
+        }
+
+        if (id == IDC_COMBO_LAUNCH_METHOD && code == CBN_SELCHANGE) {
+            const int sel = static_cast<int>(SendMessageW(g_hwndComboLaunchMethod, CB_GETCURSEL, 0, 0));
+            if (g_hwndBtnRemoveLaunchMethod != nullptr) {
+                EnableWindow(g_hwndBtnRemoveLaunchMethod, sel > 0);
+            }
             return 0;
         }
 
@@ -1849,7 +2403,7 @@ LRESULT CALLBACK ManagerWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPar
                 g_galleryCandidates.clear();
                 g_selectedCandidateIdx = -1;
                 g_galleryScrollY = 0;
-                RECT rcPreview = { PREVIEW_BOX_X - 4, PREVIEW_BOX_Y - 4, PREVIEW_BOX_X + PREVIEW_BOX_W + 4, PREVIEW_BOX_Y + PREVIEW_BOX_H + 4 };
+                RECT rcPreview = { PREVIEW_BOX_X - 4, g_previewBoxY - 4, PREVIEW_BOX_X + PREVIEW_BOX_W + 4, g_previewBoxY + PREVIEW_BOX_H + 4 };
                 InvalidateRect(hwnd, &rcPreview, FALSE);
                 if (g_selectedIndex >= 0 && static_cast<size_t>(g_selectedIndex) < g_games.size()) {
                     TriggerArtworkSearch(hwnd, false);
@@ -1970,7 +2524,7 @@ LRESULT CALLBACK ManagerWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPar
             std::wstring path;
             if (BrowseForFile(hwnd, L"Select Vertical Box Art (~2:3 Cover Image)", L"Image Files (*.png;*.jpg;*.jpeg;*.webp;*.bmp)\0*.png;*.jpg;*.jpeg;*.webp;*.bmp\0All Files (*.*)\0*.*\0", path)) {
                 SetWindowTextW(g_hwndEditCoverPath, path.c_str());
-                RECT rcPreview = { PREVIEW_BOX_X - 4, PREVIEW_BOX_Y - 4, PREVIEW_BOX_X + PREVIEW_BOX_W + 4, PREVIEW_BOX_Y + PREVIEW_BOX_H + 4 };
+                RECT rcPreview = { PREVIEW_BOX_X - 4, g_previewBoxY - 4, PREVIEW_BOX_X + PREVIEW_BOX_W + 4, g_previewBoxY + PREVIEW_BOX_H + 4 };
                 InvalidateRect(hwnd, &rcPreview, FALSE);
             }
             return 0;
@@ -2000,6 +2554,44 @@ LRESULT CALLBACK ManagerWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPar
             return 0;
         }
 
+        if (id == IDC_BTN_ADD_LAUNCH_METHOD) {
+            if (g_selectedIndex < 0 || static_cast<size_t>(g_selectedIndex) >= g_games.size()) {
+                MessageBoxW(hwnd, L"Please select a game from the library list first.", L"Game Explorer Manager", MB_OK | MB_ICONINFORMATION);
+                return 0;
+            }
+
+            LaunchMethod method{};
+            if (ShowLaunchMethodDialog(hwnd, method)) {
+                auto& game = g_games[static_cast<size_t>(g_selectedIndex)];
+                game.launchMethods.push_back(std::move(method));
+                PopulateLaunchMethodCombo();
+                const int newSel = static_cast<int>(game.launchMethods.size());
+                SendMessageW(g_hwndComboLaunchMethod, CB_SETCURSEL, static_cast<WPARAM>(newSel), 0);
+                if (g_hwndBtnRemoveLaunchMethod != nullptr) {
+                    EnableWindow(g_hwndBtnRemoveLaunchMethod, TRUE);
+                }
+            }
+            return 0;
+        }
+
+        if (id == IDC_BTN_REMOVE_LAUNCH_METHOD) {
+            if (g_selectedIndex < 0 || static_cast<size_t>(g_selectedIndex) >= g_games.size()) return 0;
+
+            const int sel = static_cast<int>(SendMessageW(g_hwndComboLaunchMethod, CB_GETCURSEL, 0, 0));
+            if (sel <= 0) {
+                MessageBoxW(hwnd, L"Select a secondary launch method in the dropdown to remove it. The primary launch method cannot be removed.", L"Game Explorer Manager", MB_OK | MB_ICONINFORMATION);
+                return 0;
+            }
+
+            auto& methods = g_games[static_cast<size_t>(g_selectedIndex)].launchMethods;
+            const size_t index = static_cast<size_t>(sel - 1);
+            if (index < methods.size()) {
+                methods.erase(methods.begin() + static_cast<std::ptrdiff_t>(index));
+                PopulateLaunchMethodCombo();
+            }
+            return 0;
+        }
+
         if (id == IDC_BTN_SAVE_METADATA) {
             SaveCurrentGameEdits(hwnd);
             return 0;
@@ -2007,7 +2599,14 @@ LRESULT CALLBACK ManagerWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPar
 
         if (id == IDC_BTN_LAUNCH_SELECTED) {
             if (g_selectedIndex >= 0 && static_cast<size_t>(g_selectedIndex) < g_games.size()) {
-                PlatformLauncher::Launch(hwnd, g_games[static_cast<size_t>(g_selectedIndex)]);
+                const auto& game = g_games[static_cast<size_t>(g_selectedIndex)];
+                const int sel = static_cast<int>(SendMessageW(g_hwndComboLaunchMethod, CB_GETCURSEL, 0, 0));
+                const size_t methodIndex = (sel > 0) ? static_cast<size_t>(sel - 1) : static_cast<size_t>(-1);
+                if (methodIndex < game.launchMethods.size()) {
+                    PlatformLauncher::LaunchWith(hwnd, game, game.launchMethods[methodIndex]);
+                } else {
+                    PlatformLauncher::Launch(hwnd, game);
+                }
             }
             return 0;
         }
@@ -2042,9 +2641,16 @@ LRESULT CALLBACK ManagerWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPar
     case WM_CTLCOLOREDIT:
     case WM_CTLCOLORLISTBOX: {
         auto hdc = reinterpret_cast<HDC>(wParam);
-        const COLORREF editBg = g_isDarkMode ? RGB(32, 32, 32) : RGB(255, 255, 255);
+        const COLORREF editBg = ThemeControls::FieldSurfaceColor();
         SetBkColor(hdc, editBg);
         SetTextColor(hdc, g_palette.textPrimary);
+
+        // The games list is owner-drawn but still asks for the brush used to erase its background
+        // around the items, so hand it the card brush the items themselves are painted on.
+        if (uMsg == WM_CTLCOLORLISTBOX && reinterpret_cast<HWND>(lParam) == g_hwndListGames) {
+            SetBkColor(hdc, g_palette.cardBg);
+            return reinterpret_cast<LRESULT>(g_hCardBrush);
+        }
         return reinterpret_cast<LRESULT>(g_hEditBrush);
     }
 
@@ -2056,95 +2662,92 @@ LRESULT CALLBACK ManagerWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPar
         if (g_hCardBrush != nullptr) DeleteObject(g_hCardBrush);
         if (g_hEditBrush != nullptr) DeleteObject(g_hEditBrush);
         if (g_hAppIcon != nullptr) DestroyIcon(g_hAppIcon);
-        PostQuitMessage(0);
+        if (!g_pageMode) PostQuitMessage(0);
         return 0;
     }
 
     return DefWindowProcW(hwnd, uMsg, wParam, lParam);
 }
 
-int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE /*hPrevInstance*/, PWSTR lpCmdLine, int nCmdShow) {
-    if (lpCmdLine != nullptr && lpCmdLine[0] != L'\0') {
-        g_initialSelectAppId = lpCmdLine;
-    }
-    INITCOMMONCONTROLSEX icex{};
-    icex.dwSize = sizeof(icex);
-    icex.dwICC = ICC_STANDARD_CLASSES | ICC_WIN95_CLASSES;
-    InitCommonControlsEx(&icex);
+void EnsureManagerResources() {
+    if (g_resourcesReady) return;
 
-    Gdiplus::GdiplusStartupInput gdiplusStartupInput;
-    Gdiplus::GdiplusStartup(&g_gdiplusToken, &gdiplusStartupInput, nullptr);
+    if (g_gdiplusToken == 0) {
+        Gdiplus::GdiplusStartupInput gdiplusStartupInput;
+        Gdiplus::GdiplusStartup(&g_gdiplusToken, &gdiplusStartupInput, nullptr);
+    }
 
     DarkMode::Initialize();
     g_isDarkMode = DarkMode::IsSystemDarkMode();
     g_palette = DarkMode::GetPalette(g_isDarkMode);
     g_hBgBrush = CreateSolidBrush(g_palette.canvasBg);
     g_hCardBrush = CreateSolidBrush(g_palette.cardBg);
-    g_hEditBrush = CreateSolidBrush(g_isDarkMode ? RGB(32, 32, 32) : RGB(255, 255, 255));
 
-    // Register Gallery Canvas custom window class
+    // Publish the palette to the Fluent primitives first: the edit brush below is derived from
+    // FieldSurfaceColor(), which reads that shared palette. Creating the brush beforehand yields a
+    // brush built from a zero-initialised palette - i.e. solid black - and every editable field then
+    // erases its background to black instead of to the field colour. The font arrives in WM_CREATE,
+    // which calls SetTheme again before any control exists.
+    ThemeControls::SetTheme(g_palette, g_hFont, g_isDarkMode);
+    g_hEditBrush = CreateSolidBrush(ThemeControls::FieldSurfaceColor());
+    g_resourcesReady = true;
+}
+
+void EnsureManagerWindowClasses(HINSTANCE instance) {
+    static bool registered = false;
+    if (registered) return;
+
+    // Gallery Canvas custom window class (scrolling artwork grid).
     WNDCLASSEXW wcg{};
     wcg.cbSize = sizeof(wcg);
     wcg.style = CS_HREDRAW | CS_VREDRAW | CS_DBLCLKS;
     wcg.lpfnWndProc = GalleryCanvasWndProc;
-    wcg.hInstance = hInstance;
+    wcg.hInstance = instance;
     wcg.hCursor = LoadCursorW(nullptr, IDC_ARROW);
     wcg.hbrBackground = nullptr;
-    wcg.lpszClassName = L"GameExplorerGalleryCanvas";
+    wcg.lpszClassName = GALLERY_CANVAS_CLASS;
     RegisterClassExW(&wcg);
 
-    const wchar_t* CLASS_NAME = L"GameExplorerManagerWnd";
     WNDCLASSEXW wc{};
     wc.cbSize = sizeof(wc);
     wc.style = CS_HREDRAW | CS_VREDRAW;
     wc.lpfnWndProc = ManagerWndProc;
-    wc.hInstance = hInstance;
+    wc.hInstance = instance;
     wc.hCursor = LoadCursorW(nullptr, IDC_ARROW);
     wc.hbrBackground = g_hBgBrush;
-    wc.lpszClassName = CLASS_NAME;
+    wc.lpszClassName = MANAGER_WINDOW_CLASS;
     RegisterClassExW(&wc);
-
-    constexpr int winW = 1260;
-    constexpr int winH = 760;
-    const int screenW = GetSystemMetrics(SM_CXSCREEN);
-    const int screenH = GetSystemMetrics(SM_CYSCREEN);
-    const int posX = (screenW > winW) ? ((screenW - winW) / 2) : CW_USEDEFAULT;
-    const int posY = (screenH > winH) ? ((screenH - winH) / 2) : CW_USEDEFAULT;
-
-    HWND hwnd = CreateWindowExW(
-        0, CLASS_NAME, Localization::GetStrings().managerWindowTitle,
-        WS_POPUP | WS_THICKFRAME | WS_MINIMIZEBOX | WS_MAXIMIZEBOX | WS_CLIPCHILDREN | WS_CLIPSIBLINGS,
-        posX, posY, winW, winH,
-        nullptr, nullptr, hInstance, nullptr
-    );
-
-    if (hwnd == nullptr) return 1;
-
-    const int roundPreference = DWMWCP_ROUND;
-    DwmSetWindowAttribute(hwnd, DWMWA_WINDOW_CORNER_PREFERENCE, &roundPreference, sizeof(roundPreference));
-
-    BOOL isDark = g_isDarkMode ? TRUE : FALSE;
-    DwmSetWindowAttribute(hwnd, DWMWA_USE_IMMERSIVE_DARK_MODE, &isDark, sizeof(isDark));
-
-    const COLORREF noneBorder = DWMWA_COLOR_NONE;
-    DwmSetWindowAttribute(hwnd, DWMWA_BORDER_COLOR, &noneBorder, sizeof(noneBorder));
-
-    MARGINS margins = { 0, 0, 1, 0 };
-    DwmExtendFrameIntoClientArea(hwnd, &margins);
-
-    DarkMode::ApplyWindowTheme(hwnd, g_isDarkMode);
-    ShowWindow(hwnd, nCmdShow);
-    UpdateWindow(hwnd);
-
-    MSG msg{};
-    while (GetMessageW(&msg, nullptr, 0, 0)) {
-        TranslateMessage(&msg);
-        DispatchMessageW(&msg);
-    }
-
-    if (g_gdiplusToken != 0) {
-        Gdiplus::GdiplusShutdown(g_gdiplusToken);
-    }
-
-    return static_cast<int>(msg.wParam);
+    registered = true;
 }
+
+} // namespace
+
+namespace GameExplorer::Studio {
+
+void SetInitialManagerSelection(const wchar_t* appId) noexcept {
+    g_initialSelectAppId = (appId != nullptr) ? appId : L"";
+}
+
+HWND CreateManagerPage(HWND parent) noexcept {
+    EnsureManagerResources();
+    EnsureManagerWindowClasses(GetModuleHandleW(nullptr));
+
+    // The non-null creation parameter switches the window procedure into page mode: no title bar,
+    // columns laid out from the top edge, and no standalone message-loop ownership.
+    g_pageMode = true;
+    g_titleBarHeight = 0;
+
+    HWND page = CreateWindowExW(
+        WS_EX_CONTROLPARENT, MANAGER_WINDOW_CLASS, L"",
+        WS_CHILD | WS_VISIBLE | WS_CLIPCHILDREN | WS_CLIPSIBLINGS,
+        0, 0, 1200, 720, parent, nullptr, GetModuleHandleW(nullptr),
+        reinterpret_cast<LPVOID>(static_cast<INT_PTR>(1)));
+
+    if (page == nullptr) {
+        g_pageMode = false;
+        g_titleBarHeight = TITLE_BAR_HEIGHT;
+    }
+    return page;
+}
+
+} // namespace GameExplorer::Studio

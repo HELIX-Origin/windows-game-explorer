@@ -355,6 +355,12 @@ LRESULT CALLBACK ShellView::WndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM 
         }
         return 0;
     }
+    case WM_APP_LIBRARY_STATS_UPDATED: {
+        if (pThis != nullptr && pThis->m_viewHost) {
+            pThis->m_viewHost->OnLibraryStatsUpdated();
+        }
+        return 0;
+    }
     case WM_APP + 42:
     case WM_APP + 43: {
         if (pThis != nullptr && pThis->m_viewHost) {

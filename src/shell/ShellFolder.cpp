@@ -368,7 +368,6 @@ IFACEMETHODIMP ShellFolder::EnumObjects(HWND /*hwnd*/, SHCONTF grfFlags, IEnumID
     addProvIfFound(PlatformType::Amazon, L"Amazon Games", PlatformLauncher::GetAmazonExecutablePath());
     addProvIfFound(PlatformType::LegacyGames, L"Legacy Games", PlatformLauncher::GetLegacyGamesExecutablePath());
     addProvIfFound(PlatformType::Jagex, L"Jagex Launcher", PlatformLauncher::GetJagexExecutablePath());
-    addProvIfFound(PlatformType::XIVLauncher, L"XIVLauncher", PlatformLauncher::GetXIVLauncherExecutablePath());
     addProvIfFound(PlatformType::GuildWars2, L"Guild Wars 2", PlatformLauncher::GetGuildWars2ExecutablePath());
     addProvIfFound(PlatformType::Rockstar, L"Rockstar Games", PlatformLauncher::GetRockstarExecutablePath());
     addProvIfFound(PlatformType::Riot, L"Riot Client", PlatformLauncher::GetRiotExecutablePath());
@@ -630,9 +629,12 @@ public:
             wchar_t dllPath[MAX_PATH] = { 0 };
             if (GetModuleFileNameW(g_hInstance, dllPath, MAX_PATH) > 0) {
                 const fs::path dir = fs::path(dllPath).parent_path();
-                const fs::path managerExe = dir / L"GameExplorerManager.exe";
-                if (fs::exists(managerExe)) {
-                    ShellExecuteW(pici->hwnd, L"open", managerExe.c_str(), m_item.appId.c_str(), dir.c_str(), SW_SHOWNORMAL);
+                const fs::path studioExe = dir / L"GameExplorerStudio.exe";
+                if (fs::exists(studioExe)) {
+                    // Open the single Studio window on the Library Manager tab, pre-selected on
+                    // this game, instead of a separate manager process.
+                    const std::wstring args = L"--tab=manager --game=" + m_item.appId;
+                    ShellExecuteW(pici->hwnd, L"open", studioExe.c_str(), args.c_str(), dir.c_str(), SW_SHOWNORMAL);
                     return S_OK;
                 }
             }

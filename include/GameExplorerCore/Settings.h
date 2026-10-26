@@ -19,11 +19,15 @@ struct AppSettings {
     std::wstring steamId64;
     std::wstring retroAchievementsUser;
     std::wstring retroAchievementsApiKey;
+    bool autoSyncAchievements{ true };
 
     // Fallback Metadata & Artwork Providers
     std::wstring steamGridDbApiKey;
     std::wstring igdbClientId;
     std::wstring igdbClientSecret;
+
+    // One base folder for catalogue installs; each storefront gets a subfolder inside it.
+    std::wstring installBaseFolder;
 };
 
 class SettingsManager {

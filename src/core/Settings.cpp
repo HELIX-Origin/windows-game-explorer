@@ -34,6 +34,9 @@ AppSettings SettingsManager::Load() {
     if (auto val = db.GetSetting(L"retroachievements_api_key")) {
         s.retroAchievementsApiKey = *val;
     }
+    if (auto val = db.GetSetting(L"auto_sync_achievements")) {
+        s.autoSyncAchievements = (*val == L"1" || *val == L"true");
+    }
     if (auto val = db.GetSetting(L"sgdb_api_key")) {
         s.steamGridDbApiKey = *val;
     }
@@ -42,6 +45,9 @@ AppSettings SettingsManager::Load() {
     }
     if (auto val = db.GetSetting(L"igdb_client_secret")) {
         s.igdbClientSecret = *val;
+    }
+    if (auto val = db.GetSetting(L"install_base_folder")) {
+        s.installBaseFolder = *val;
     }
 
     return s;
@@ -60,9 +66,11 @@ bool SettingsManager::Save(const AppSettings& settings) {
     db.SetSetting(L"steam_id64", settings.steamId64);
     db.SetSetting(L"retroachievements_user", settings.retroAchievementsUser);
     db.SetSetting(L"retroachievements_api_key", settings.retroAchievementsApiKey);
+    db.SetSetting(L"auto_sync_achievements", settings.autoSyncAchievements ? L"1" : L"0");
     db.SetSetting(L"sgdb_api_key", settings.steamGridDbApiKey);
     db.SetSetting(L"igdb_client_id", settings.igdbClientId);
     db.SetSetting(L"igdb_client_secret", settings.igdbClientSecret);
+    db.SetSetting(L"install_base_folder", settings.installBaseFolder);
 
     return true;
 }

@@ -982,6 +982,33 @@ std::wstring PlatformLauncher::GetViceExecutablePath() {
     return L"";
 }
 
+bool PlatformLauncher::LaunchWith(HWND hwndOwner, const GameItem& game, const LaunchMethod& method) {
+    if (method.executablePath.empty()) return false;
+
+    std::wstring args = method.arguments;
+    auto replaceToken = [&args](const std::wstring& token, const std::wstring& value) {
+        size_t pos = 0;
+        while ((pos = args.find(token, pos)) != std::wstring::npos) {
+            args.replace(pos, token.size(), value);
+            pos += value.size();
+        }
+    };
+    replaceToken(L"{exe}", L"\"" + game.executablePath + L"\"");
+    replaceToken(L"{dir}", L"\"" + game.workingDirectory + L"\"");
+
+    std::wstring workDir = method.workingDirectory;
+    if (workDir.empty()) {
+        workDir = fs::path(method.executablePath).parent_path().wstring();
+    }
+
+    const wchar_t* pArgs = args.empty() ? nullptr : args.c_str();
+    const wchar_t* pDir = workDir.empty() ? nullptr : workDir.c_str();
+    const auto res = reinterpret_cast<INT_PTR>(
+        ShellExecuteW(hwndOwner, L"open", method.executablePath.c_str(), pArgs, pDir, SW_SHOWNORMAL)
+    );
+    return (res > 32);
+}
+
 bool PlatformLauncher::Launch(HWND hwndOwner, const GameItem& game) {
     // 1. STEAM: DRM validation and Steam profile overlay strictly require passing steam.exe in launch path
     if (game.platform == PlatformType::Steam) {

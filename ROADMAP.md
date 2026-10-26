@@ -17,10 +17,9 @@
 
 ## 🔭 Vision & Positioning Principles
 
-1. **Core Value Proposition**: Completely native to Windows. Recreates the classic Windows 7/Vista Game Explorer (`shell:Games`, `FOLDERTYPEID_Games`) directly inside the modern Windows 11 File Explorer canvas as a native Virtual Shell Namespace Extension (C++20, Win32 APIs, COM). Built with a dedicated triple-component architecture:
+1. **Core Value Proposition**: Completely native to Windows. Recreates the classic Windows 7/Vista Game Explorer (`shell:Games`, `FOLDERTYPEID_Games`) directly inside the modern Windows 11 File Explorer canvas as a native Virtual Shell Namespace Extension (C++20, Win32 APIs, COM). Built with a dedicated dual-component architecture:
    - **`GameExplorerShell.dll`**: In-process File Explorer shell extension presenting two collapsible sections (`▾ Game Providers (N)` and `▾ Games (N)`) with vertical ~2:3 box art and rich properties.
-   - **`GameExplorerConfig.exe`**: Lightweight Win32 configuration utility dedicated strictly to configuring the shell integration (enable/disable namespace registration, layout mode preference, storefront integration toggles, and OneDrive cloud sync).
-   - **`GameExplorerManager.exe`**: Separate Win32 GUI application alongside `GameExplorerConfig.exe`, reviving the classic Game Explorer Manager (GEM) utility for managing games in the library, adding local/custom games, picking box art/icons, and editing game metadata.
+   - **`GameExplorerStudio.exe`**: The single companion GUI, one custom-chrome window with three tabs — **Library Manager** (library management, local/custom games, box art/icons, metadata editing, artwork discovery), **Game Catalogue** (owned-games catalogue, still a placeholder), and **Configuration** (shell integration registration, layout mode preference, storefront integration toggles, API credentials, OneDrive cloud sync). It also owns `--register` / `--unregister` / `--reset-cache`.
 2. **Design Principles**:
    - **Automated Storefront-First Discovery (No External Scrapers)**: Automatically detects and indexes titles and storefront providers directly from installed storefronts on disk (Steam, Epic Games, GOG Galaxy, Battle.net, EA App, Ubisoft Connect, itch.io) without manual XML/GDF registration or external third-party scrapers (IGDB, SteamGridDB, VNDB).
    - **Authentic Two-Section Categorization**: Implements `ICategoryProvider` and `ICategorizer` on `PKEY_ItemTypeText` to group installed storefront clients under `▾ Game Providers` and installed game titles under `▾ Games`.
@@ -36,10 +35,53 @@
 |---|---|---|---|---|---|
 | **M15** | Windows Game Explorer Shell Extension & Native Re-Architecture | Shell extension & Win32 apps | ✅ Released | `v2.0.0` | Native C++20 Win32 COM virtual namespace extension (`GameExplorerShell.dll`), two-section categorization (`Installed Providers` & `Games Library`), 17-platform scanner, `GameExplorerConfig.exe`, and `GameExplorerManager.exe` |
 | **M16** | Universal Multi-Source Achievement Tracking & Multi-Viewport Artwork Engine | Core, Shell & Config | ✅ Delivered | `v2.2.0` | Hybrid native storefront + external tracker integration (RetroAchievements, Steam Web API, GOG Galaxy), VNDB Kana API provider, itch storefront scraping, multi-viewport aspect ratio fitting, cache purge & rebuild engine, in-place scroll preservation, write-only OneDrive backup, config UI, and Inspector trophy rendering |
+| **M17** | Unified Tabbed GUI & Game Catalogue for All Owned Games | Unified companion GUI & Service | ✅ Released | `v2.4.0` | Unified companion app `GameExplorerStudio.exe` (Library Manager, Game Catalogue, Configuration), in-memory owned games engine (Steam, GOG, itch, Xbox AsyncCache), multi-store title deduplication with install popup menu, `GameExplorerService.exe` background service, PowerShell registration with ASCII art, and Windows 10/11 platform bounds |
+| **M18** | Game Relocation, Move Engine & In-App Installation Progress Tracking | Companion GUI & Service | ⬜ Planned (unscheduled) | TBD | Relocate installed games across storage volumes using storefront-supported move mechanisms; observe live storefront manifests for download/install progress |
 
 ---
 
 ## 🚀 Active Milestones
+
+### [windows-game-explorer] — Milestone M17: Unified Tabbed GUI & Game Catalogue for All Owned Games (in progress)
+
+> **Architectural Direction (CAT-01):** Owned-games support is a **separate page in a unified companion
+> GUI**, not a shell view and not a standalone executable. The former `GameExplorerConfig.exe` and
+> `GameExplorerManager.exe` standalone apps are retired; their UIs now live inside the single
+> **Game Explorer Studio** (`GameExplorerStudio.exe`, name confirmed by the user 2026-10-25) and ship as
+> **Library Manager**, **Game Catalogue**, and **Configuration** pages. The shell namespace extension is unchanged and stays
+> installed-games-only. The catalogue is an extensive, filterable, sortable browser of every game the
+> user owns, whose purpose is discovery, installation and installation organization:
+>
+> - **Storefront-delegated installation** — the catalogue never downloads game content itself; it hands
+>   off to the official storefront client through that store's URI protocol.
+> - **Managed install locations** — one user-selected base folder; the catalogue creates per-storefront
+>   subfolders under it and installs there.
+> - **Relocation** — installed games can be moved to keep directories organized, using the storefront's
+>   supported move mechanism where one exists.
+> - **Self-tracked progress** — the catalogue observes the storefront's manifests/registry to report
+>   queued → downloading → installing → installed, then signals the shell library to refresh.
+> - **Installed library stays isolated** — the shell namespace remains strictly installed-games-only;
+>   owned-but-not-installed titles never appear in Explorer.
+>
+> Deliverables are tracked as `CAT-01` in [`TODO.md`](./TODO.md).
+>
+> **Delivery order (user decision 2026-10-25):** the unified tabbed shell ships first, hosting today's
+> Library Manager and Configuration pages unchanged plus the Catalogue page. Catalogue data, filtering
+> and install/relocation land in the following slices.
+
+> **Architectural Direction (SVC-01):** the always-running background component is a **true Windows
+> service** (user decision 2026-10-25), named **Game Explorer Service** (`GameExplorerService.exe`,
+> service key `GameExplorerService`). It runs under the least-privileged **`NT AUTHORITY\LocalService`**
+> account — not `LocalSystem` — and its install/start is orchestrated through **Task Scheduler**: the
+> elevated installer registers a highest-privileges task that ensures the service is installed, started
+> and restarted, so no UAC prompt ever appears at login or at runtime. The service preloads
+> library/metadata and keeps achievement and metadata sync warm so the shell view and Studio open
+> instantly. Because neither `LocalService` nor a scheduled task has the interactive user's profile,
+> every write is routed to the owning session's `%USERPROFILE%\Game Explorer\` through the service↔client
+> IPC handshake — the service never assumes `%USERPROFILE%` is its own. Options considered and rejected
+> are recorded in [`docs/research/startup-background-service.md`](./docs/research/startup-background-service.md).
+>
+> Deliverables are tracked as `SVC-01` in [`TODO.md`](./TODO.md).
 
 ### [windows-game-explorer] — Milestone M15: Windows Game Explorer Shell Extension & Native Re-Architecture (v2.0.0)
 

@@ -4,6 +4,7 @@
 #include "GameExplorerCore/Storage.h"
 #include "GameExplorerCore/Types.h"
 #include "GameExplorerCore/ImageValidator.h"
+#include "GameExplorerCore/PlatformLauncher.h"
 #include "sqlite3.h"
 #include <windows.h>
 #include <shlwapi.h>
@@ -459,6 +460,64 @@ std::wstring ExtractJsonStringField(const std::wstring& json, const std::wstring
     return UnescapeJsonOrVdfString(json.substr(pos + 1, endQuote - (pos + 1)));
 }
 
+// Parses the optional "launchMethods" object array from a per-game metadata JSON document.
+// Each entry describes a secondary launch method (custom launcher/wrapper) for the game.
+std::vector<LaunchMethod> ExtractLaunchMethods(const std::wstring& json) {
+    std::vector<LaunchMethod> methods;
+    const std::wstring needle = L"\"launchMethods\"";
+    size_t pos = json.find(needle);
+    if (pos == std::wstring::npos) return methods;
+    pos = json.find(L'[', pos + needle.size());
+    if (pos == std::wstring::npos) return methods;
+
+    while (pos < json.size()) {
+        const size_t arrEnd = json.find(L']', pos);
+        const size_t objStart = json.find(L'{', pos);
+        if (objStart == std::wstring::npos) break;
+        if (arrEnd != std::wstring::npos && arrEnd < objStart) break;
+
+        // Locate the matching closing brace, honoring nested objects and quoted strings.
+        size_t depth = 0;
+        size_t objEnd = std::wstring::npos;
+        bool inString = false;
+        bool escaped = false;
+        for (size_t i = objStart; i < json.size(); ++i) {
+            const wchar_t c = json[i];
+            if (inString) {
+                if (escaped) escaped = false;
+                else if (c == L'\\') escaped = true;
+                else if (c == L'"') inString = false;
+                continue;
+            }
+            if (c == L'"') {
+                inString = true;
+            } else if (c == L'{') {
+                ++depth;
+            } else if (c == L'}') {
+                if (--depth == 0) {
+                    objEnd = i;
+                    break;
+                }
+            }
+        }
+        if (objEnd == std::wstring::npos) break;
+
+        const std::wstring obj = json.substr(objStart, objEnd - objStart + 1);
+        LaunchMethod method{};
+        method.name = ExtractJsonStringField(obj, L"name");
+        method.executablePath = ExtractJsonStringField(obj, L"executablePath");
+        method.arguments = ExtractJsonStringField(obj, L"arguments");
+        method.workingDirectory = ExtractJsonStringField(obj, L"workingDirectory");
+        method.isAutoDetected = obj.find(L"\"autoDetected\": true") != std::wstring::npos ||
+                                obj.find(L"\"autoDetected\":true") != std::wstring::npos;
+        if (!method.name.empty() || !method.executablePath.empty()) {
+            methods.push_back(std::move(method));
+        }
+        pos = objEnd + 1;
+    }
+    return methods;
+}
+
 std::wstring ExtractJsonStringArrayFirstOrJoined(const std::wstring& json, const std::wstring& arrayKey) {
     const std::wstring needle = L"\"" + arrayKey + L"\":[";
     size_t pos = json.find(needle);
@@ -659,10 +718,15 @@ static bool AreTitlesMatching(const std::wstring& requested, const std::wstring&
     return false;
 }
 
+// Artwork sourcing policy: games discovered through a store/provider (Steam, Epic, GOG, itch.io, ...)
+// get their grid-view art solely from that store/provider. Metadata providers (SteamGridDB, IGDB,
+// VNDB, Steam Store Search) only auto-source art for locally added and emulated games. For store
+// games they remain available as user-driven choices in the Game Explorer Manager art search.
+
 void EnrichFromSteamGridDb(GameItem& item, const std::wstring& apiKey) {
     if (apiKey.empty() || item.title.empty()) return;
-
-    const bool isItch = (item.platform == PlatformType::Itch);
+    // SteamGridDB only supplies artwork; store games keep their store-provided art.
+    if (!StorefrontScanner::AllowsAutoArtFromMetadataProviders(item.platform)) return;
 
     const std::wstring cleanTitle = CleanTitleFromBracketTags(item.title);
     const std::wstring authHeader = L"Authorization: Bearer " + apiKey + L"\r\n";
@@ -706,8 +770,8 @@ void EnrichFromSteamGridDb(GameItem& item, const std::wstring& apiKey) {
     const bool isNsfw = StorefrontScanner::IsNsfwGame(item);
     const std::wstring nsfwParam = isNsfw ? L"?dimensions=600x900&nsfw=any&humor=any" : L"?dimensions=600x900";
 
-    // 1. Vertical Cover Art (SteamGridDB 600x900 standard) - Protect authentic storefront covers
-    const bool needsCover = (!isItch || item.coverArtPath.empty()) && (item.coverArtPath.empty() || !ImageValidator::IsValidCover(item.coverArtPath));
+    // 1. Vertical Cover Art (SteamGridDB 600x900 standard)
+    const bool needsCover = item.coverArtPath.empty() || !ImageValidator::IsValidCover(item.coverArtPath);
     if (needsCover) {
         std::string gridResp = RequestHttpsUtf8(
             L"www.steamgriddb.com",
@@ -747,8 +811,8 @@ void EnrichFromSteamGridDb(GameItem& item, const std::wstring& apiKey) {
         }
     }
 
-    // 2. Widescreen Hero Banner (SteamGridDB 1920x620 / 3.1:1 standard) - Protect authentic storefront hero
-    const bool needsHero = (!isItch || item.heroArtPath.empty()) && (item.heroArtPath.empty() || !ImageValidator::IsValidHero(item.heroArtPath));
+    // 2. Widescreen Hero Banner (SteamGridDB 1920x620 / 3.1:1 standard)
+    const bool needsHero = item.heroArtPath.empty() || !ImageValidator::IsValidHero(item.heroArtPath);
     if (needsHero) {
         std::string heroResp = RequestHttpsUtf8(
             L"www.steamgriddb.com",
@@ -810,8 +874,6 @@ void EnrichFromSteamGridDb(GameItem& item, const std::wstring& apiKey) {
 
 void EnrichFromIgdb(GameItem& item, const std::wstring& clientId, const std::wstring& clientSecret) {
     if (clientId.empty() || clientSecret.empty() || item.title.empty()) return;
-
-    const bool isItch = (item.platform == PlatformType::Itch);
 
     static std::wstring s_cachedToken;
     static uint64_t s_tokenExpiry = 0;
@@ -958,8 +1020,9 @@ void EnrichFromIgdb(GameItem& item, const std::wstring& clientId, const std::wst
         }
     }
 
-    // Cover Art (t_1080p high resolution) - Protect authentic storefront covers
-    if ((!isItch || item.coverArtPath.empty()) && (item.coverArtPath.empty() || !ImageValidator::IsValidCover(item.coverArtPath))) {
+    // Cover Art (t_1080p high resolution) - only for local/emulated games
+    if (StorefrontScanner::AllowsAutoArtFromMetadataProviders(item.platform) &&
+        (item.coverArtPath.empty() || !ImageValidator::IsValidCover(item.coverArtPath))) {
         const std::wstring imageId = ExtractJsonStringField(matchedBlock, L"image_id");
         if (!imageId.empty()) {
             if (item.detailsArtPath.empty() && !item.coverArtPath.empty()) {
@@ -977,7 +1040,6 @@ void EnrichFromIgdb(GameItem& item, const std::wstring& clientId, const std::wst
 void EnrichFromVndb(GameItem& item) {
     if (item.title.empty()) return;
 
-    const bool isItch = (item.platform == PlatformType::Itch);
     const std::wstring cleanTitle = CleanTitleFromBracketTags(item.title);
     const std::string cleanUtf8 = WideToUtf8(cleanTitle.empty() ? item.title.c_str() : cleanTitle.c_str());
     std::string escapedTitle;
@@ -1085,8 +1147,9 @@ void EnrichFromVndb(GameItem& item) {
         }
     }
 
-    // 5. Cover Artwork (if item has no cover art yet) - Protect authentic storefront covers
-    if ((!isItch || item.coverArtPath.empty()) && (item.coverArtPath.empty() || !ImageValidator::IsValidCover(item.coverArtPath))) {
+    // 5. Cover Artwork (if item has no cover art yet) - only for local/emulated games
+    if (StorefrontScanner::AllowsAutoArtFromMetadataProviders(item.platform) &&
+        (item.coverArtPath.empty() || !ImageValidator::IsValidCover(item.coverArtPath))) {
         size_t imgPos = matchedObj.find(L"\"image\":{");
         if (imgPos != std::wstring::npos) {
             std::wstring imgUrl = ExtractJsonStringField(matchedObj, L"url", imgPos);
@@ -1397,6 +1460,31 @@ std::wstring CleanTitleFromFolderName(const std::wstring& folderName) {
 }
 
 } // namespace
+
+bool StorefrontScanner::AllowsAutoArtFromMetadataProviders(PlatformType platform) {
+    switch (platform) {
+    case PlatformType::Unknown:
+    case PlatformType::CustomExecutable:
+    case PlatformType::RetroArch:
+    case PlatformType::Dolphin:
+    case PlatformType::ESDE:
+    case PlatformType::Project64:
+    case PlatformType::PCSX2:
+    case PlatformType::DuckStation:
+    case PlatformType::PPSSPP:
+    case PlatformType::mGBA:
+    case PlatformType::Snes9x:
+    case PlatformType::melonDS:
+    case PlatformType::Citra:
+    case PlatformType::Flycast:
+    case PlatformType::RPCS3:
+    case PlatformType::Xemu:
+    case PlatformType::Vice:
+        return true;
+    default:
+        return false;
+    }
+}
 
 std::wstring StorefrontScanner::SanitizeGameText(const std::wstring& text) {
     return SanitizeGameTextInternal(text);
@@ -2119,6 +2207,15 @@ std::vector<std::wstring> StorefrontScanner::GetAllMountedDrives() {
 
 size_t StorefrontScanner::ScanAll(Database& db) {
     size_t total = 0;
+
+    // Retire the former XIVLauncher-as-provider game entry. FINAL FANTASY XIV is now discovered
+    // from the official Square Enix installation, with XIVLauncher exposed as a secondary launch
+    // method on that game instead of being its own provider/game.
+    {
+        std::error_code legacyEc;
+        fs::remove(Storage::GetMetadataPath() / L"xivlauncher_ffxiv.json", legacyEc);
+    }
+
     const auto allGames = ScanAllInstalledGames();
 
     std::set<std::wstring> validAppIds;
@@ -2966,49 +3063,59 @@ std::vector<GameItem> StorefrontScanner::ScanJagex() {
     return games;
 }
 
-std::vector<GameItem> StorefrontScanner::ScanXIVLauncher() {
-    std::vector<GameItem> games;
+namespace {
+
+void AppendUniqueDirectory(std::vector<fs::path>& dirs, std::set<std::wstring>& seen, const fs::path& dir) {
+    if (dir.empty()) return;
+    std::error_code ec;
+    if (!fs::exists(dir, ec) || !fs::is_directory(dir, ec)) return;
+    const std::wstring key = NormalizeDirKey(dir.wstring());
+    if (key.empty() || !seen.insert(key).second) return;
+    dirs.push_back(dir);
+}
+
+// Discovers official FINAL FANTASY XIV installations. XIVLauncher is a custom launcher, not a
+// game provider, so its configuration is used strictly as a path hint to the official Square Enix
+// installation; the game itself is always reported from the Square Enix source.
+std::vector<fs::path> FindFfxivInstallDirectories() {
+    std::vector<fs::path> dirs;
+    std::set<std::wstring> seen;
+
     wchar_t appData[MAX_PATH] = { 0 };
-    if (GetEnvironmentVariableW(L"APPDATA", appData, MAX_PATH) == 0) return games;
-
-    const fs::path cfgPath = fs::path(appData) / L"XIVLauncher" / L"launcherConfigV3.json";
-    if (!fs::exists(cfgPath)) return games;
-
-    std::ifstream stream(cfgPath, std::ios::binary);
-    if (!stream.is_open()) return games;
-    std::string raw((std::istreambuf_iterator<char>(stream)), std::istreambuf_iterator<char>());
-    const std::wstring json = Utf8ToWide(raw.c_str());
-
-    const size_t pos = json.find(L"\"GamePath\"");
-    if (pos != std::wstring::npos) {
-        const size_t q1 = FindNextUnescapedQuote(json, pos + 10);
-        const size_t q2 = (q1 != std::wstring::npos) ? FindNextUnescapedQuote(json, q1 + 1) : std::wstring::npos;
-        if (q1 != std::wstring::npos && q2 != std::wstring::npos) {
-            const std::wstring gameDir = UnescapeJsonOrVdfString(json.substr(q1 + 1, q2 - q1 - 1));
-            if (!gameDir.empty() && fs::exists(gameDir)) {
-                const fs::path boot64 = fs::path(gameDir) / L"boot" / L"ffxivboot64.exe";
-                const fs::path game64 = fs::path(gameDir) / L"game" / L"ffxiv_dx11.exe";
-                GameItem item{};
-                item.appId = L"xivlauncher_ffxiv";
-                item.title = L"FINAL FANTASY XIV Online (XIVLauncher)";
-                item.platform = PlatformType::XIVLauncher;
-                item.developer = L"Square Enix";
-                item.publisher = L"Square Enix";
-                item.rating = L"ESRB: Teen (13+)";
-                item.releaseDate = L"Aug 27, 2013";
-                item.genres = L"MMORPG, Role-Playing";
-                item.synopsis = L"Take part in an epic and ever-changing FINAL FANTASY as you adventure and explore with friends from around the world.";
-                item.workingDirectory = gameDir;
-                item.executablePath = fs::exists(boot64) ? boot64.wstring() : (fs::exists(game64) ? game64.wstring() : L"");
-                item.coverArtPath = CacheRemoteArtwork(item.appId, L"cover", L"https://cdn.cloudflare.steamstatic.com/steam/apps/39210/library_600x900.jpg");
-                item.heroArtPath = CacheRemoteArtwork(item.appId, L"hero", L"https://cdn.cloudflare.steamstatic.com/steam/apps/39210/library_hero.jpg");
-                games.push_back(std::move(item));
-            }
+    if (GetEnvironmentVariableW(L"APPDATA", appData, MAX_PATH) > 0) {
+        const fs::path cfgPath = fs::path(appData) / L"XIVLauncher" / L"launcherConfigV3.json";
+        std::ifstream stream(cfgPath, std::ios::binary);
+        if (stream.is_open()) {
+            const std::string raw((std::istreambuf_iterator<char>(stream)), std::istreambuf_iterator<char>());
+            const std::wstring json = Utf8ToWide(raw.c_str());
+            const std::wstring gamePath = ExtractJsonStringField(json, L"GamePath");
+            if (!gamePath.empty()) AppendUniqueDirectory(dirs, seen, fs::path(gamePath));
         }
     }
 
-    return games;
+    // XIVLauncher's configuration is only a hint; the authoritative install is the official
+    // Square Enix directory layout, which may live under any of these relative locations.
+    const wchar_t* const relativeDirs[] = {
+        L"Games\\Square Enix\\FINAL FANTASY XIV - A Realm Reborn",
+        L"Games\\SquareEnix\\FINAL FANTASY XIV - A Realm Reborn",
+        L"Program Files (x86)\\Square Enix\\FINAL FANTASY XIV - A Realm Reborn",
+        L"Program Files (x86)\\SquareEnix\\FINAL FANTASY XIV - A Realm Reborn",
+        L"Program Files\\Square Enix\\FINAL FANTASY XIV - A Realm Reborn",
+        L"Program Files\\SquareEnix\\FINAL FANTASY XIV - A Realm Reborn",
+        L"Square Enix\\FINAL FANTASY XIV - A Realm Reborn",
+        L"SquareEnix\\FINAL FANTASY XIV - A Realm Reborn"
+    };
+
+    for (const auto& drive : StorefrontScanner::GetAllMountedDrives()) {
+        for (const auto* relativeDir : relativeDirs) {
+            AppendUniqueDirectory(dirs, seen, fs::path(drive) / relativeDir);
+        }
+    }
+
+    return dirs;
 }
+
+} // namespace
 
 std::vector<GameItem> StorefrontScanner::ScanGuildWars2() {
     std::vector<GameItem> games;
@@ -3153,30 +3260,44 @@ std::vector<GameItem> StorefrontScanner::ScanHoYoPlay() {
 
 std::vector<GameItem> StorefrontScanner::ScanStandaloneAndDrives() {
     std::vector<GameItem> games;
-    const auto drives = GetAllMountedDrives();
 
-    for (const auto& drive : drives) {
-        const fs::path ffxivDir = fs::path(drive) / L"Games" / L"Square Enix" / L"FINAL FANTASY XIV - A Realm Reborn";
-        if (fs::exists(ffxivDir)) {
-            const fs::path boot64 = ffxivDir / L"boot" / L"ffxivboot64.exe";
-            const fs::path boot = ffxivDir / L"boot" / L"ffxivboot.exe";
+    const auto ffxivDirs = FindFfxivInstallDirectories();
+    for (const auto& ffxivDir : ffxivDirs) {
+        const fs::path boot64 = ffxivDir / L"boot" / L"ffxivboot64.exe";
+        const fs::path boot = ffxivDir / L"boot" / L"ffxivboot.exe";
+        const fs::path game64 = ffxivDir / L"game" / L"ffxiv_dx11.exe";
+        const bool hasBoot = fs::exists(boot64) || fs::exists(boot);
+        if (!hasBoot && !fs::exists(game64)) continue;
 
-            GameItem item{};
-            item.appId = L"sqex_ffxiv";
-            item.title = L"FINAL FANTASY XIV Online";
-            item.platform = PlatformType::SquareEnix;
-            item.developer = L"Square Enix";
-            item.publisher = L"Square Enix";
-            item.rating = L"ESRB: Teen (13+)";
-            item.releaseDate = L"Aug 27, 2013";
-            item.genres = L"MMORPG, Role-Playing";
-            item.synopsis = L"Take part in an epic and ever-changing FINAL FANTASY as you adventure and explore with friends from around the world. Experience all the hallmarks of the best-selling franchise—an unforgettable story, exhilarating battles, and a myriad of diverse environments to explore.";
-            item.workingDirectory = (fs::exists(boot64) || fs::exists(boot)) ? (ffxivDir / L"boot").wstring() : ffxivDir.wstring();
-            item.executablePath = fs::exists(boot64) ? boot64.wstring() : (fs::exists(boot) ? boot.wstring() : L"");
-            item.coverArtPath = CacheRemoteArtwork(item.appId, L"cover", L"https://cdn.cloudflare.steamstatic.com/steam/apps/39210/library_600x900.jpg");
-            item.heroArtPath = CacheRemoteArtwork(item.appId, L"hero", L"https://cdn.cloudflare.steamstatic.com/steam/apps/39210/library_hero.jpg");
-            games.push_back(std::move(item));
+        GameItem item{};
+        item.appId = L"sqex_ffxiv";
+        item.title = L"FINAL FANTASY XIV Online";
+        item.platform = PlatformType::SquareEnix;
+        item.developer = L"Square Enix";
+        item.publisher = L"Square Enix";
+        item.rating = L"ESRB: Teen (13+)";
+        item.releaseDate = L"Aug 27, 2013";
+        item.genres = L"MMORPG, Role-Playing";
+        item.synopsis = L"Take part in an epic and ever-changing FINAL FANTASY as you adventure and explore with friends from around the world. Experience all the hallmarks of the best-selling franchise—an unforgettable story, exhilarating battles, and a myriad of diverse environments to explore.";
+        item.workingDirectory = hasBoot ? (ffxivDir / L"boot").wstring() : ffxivDir.wstring();
+        item.executablePath = fs::exists(boot64) ? boot64.wstring()
+                            : (fs::exists(boot) ? boot.wstring() : game64.wstring());
+        item.coverArtPath = CacheRemoteArtwork(item.appId, L"cover", L"https://cdn.cloudflare.steamstatic.com/steam/apps/39210/library_600x900.jpg");
+        item.heroArtPath = CacheRemoteArtwork(item.appId, L"hero", L"https://cdn.cloudflare.steamstatic.com/steam/apps/39210/library_hero.jpg");
+
+        // XIVLauncher is a custom launcher for the official game, so it is exposed purely as an
+        // optional secondary launch method (never as a provider or a separate game entry).
+        const std::wstring xivLauncherExe = PlatformLauncher::GetXIVLauncherExecutablePath();
+        if (!xivLauncherExe.empty()) {
+            LaunchMethod method{};
+            method.name = L"XIVLauncher";
+            method.executablePath = xivLauncherExe;
+            method.workingDirectory = fs::path(xivLauncherExe).parent_path().wstring();
+            method.isAutoDetected = true;
+            item.launchMethods.push_back(std::move(method));
         }
+
+        games.push_back(std::move(item));
     }
 
     return games;
@@ -4211,8 +4332,8 @@ bool StorefrontScanner::RemoveCustomLocalGame(const std::wstring& appId) {
 void EnrichFromSteamStoreSearch(GameItem& item) {
     if (item.title.empty()) return;
 
-    // Do not overwrite existing itch cover art!
-    const bool isItch = (item.platform == PlatformType::Itch);
+    // Store games keep store-provided art; only local/emulated games get art from this fallback.
+    const bool allowArt = StorefrontScanner::AllowsAutoArtFromMetadataProviders(item.platform);
     const bool isNsfw = StorefrontScanner::IsNsfwGame(item);
     const std::wstring encTitle = UrlEncodeForCdn(item.title);
     const std::wstring steamHeaders = L"Cookie: birthtime=283993201; mature_content=1; lastagecheckage=1-0-1990\r\n";
@@ -4252,7 +4373,7 @@ void EnrichFromSteamStoreSearch(GameItem& item) {
 
     EnrichSteamMetadataFromStoreApi(steamAppId, item);
 
-    if (!isItch && (item.coverArtPath.empty() || !ImageValidator::IsValidCover(item.coverArtPath))) {
+    if (allowArt && (item.coverArtPath.empty() || !ImageValidator::IsValidCover(item.coverArtPath))) {
         if (item.detailsArtPath.empty() && !item.coverArtPath.empty()) {
             item.detailsArtPath = item.coverArtPath;
         }
@@ -4265,7 +4386,7 @@ void EnrichFromSteamStoreSearch(GameItem& item) {
         }
     }
 
-    if (!isItch && (item.heroArtPath.empty() || !ImageValidator::IsValidHero(item.heroArtPath))) {
+    if (allowArt && (item.heroArtPath.empty() || !ImageValidator::IsValidHero(item.heroArtPath))) {
         if (item.detailsArtPath.empty() && !item.heroArtPath.empty()) {
             item.detailsArtPath = item.heroArtPath;
         }
@@ -4288,50 +4409,63 @@ void StorefrontScanner::EnrichGameMetadata(GameItem& item) {
 
     const auto settings = SettingsManager::Load();
 
-    const bool isItch = (item.platform == PlatformType::Itch);
+    // Artwork sourcing policy: only locally added and emulated games may auto-source artwork
+    // from metadata providers; store-discovered games keep their storefront-provided artwork.
+    const bool allowProviderArt = AllowsAutoArtFromMetadataProviders(item.platform);
+
+    const auto needsCoverArt = [&item]() {
+        return item.coverArtPath.empty() || !ImageValidator::IsValidCover(item.coverArtPath);
+    };
+    const auto needsHeroArt = [&item]() {
+        return item.heroArtPath.empty() || !ImageValidator::IsValidHero(item.heroArtPath);
+    };
+    const auto needsMetadata = [&item]() {
+        return item.synopsis.empty() || item.genres.empty() || item.developer.empty() ||
+               item.publisher.empty() || item.releaseDate.empty() || item.rating.empty();
+    };
 
     // For itch.io games, enrich from authentic itch store page first if icon, details, or synopsis are missing
-    if (isItch) {
+    if (item.platform == PlatformType::Itch) {
         EnrichFromItchStorePage(item);
     }
 
-    const bool needsCover = (!isItch || item.coverArtPath.empty()) && (item.coverArtPath.empty() || !ImageValidator::IsValidCover(item.coverArtPath));
-    const bool needsMeta  = item.synopsis.empty() || item.genres.empty() || item.developer.empty() ||
-                            item.publisher.empty() || item.releaseDate.empty() || item.rating.empty();
+    const bool needsCover = allowProviderArt && needsCoverArt();
+    const bool needsMeta  = needsMetadata();
 
     // 1. DEDICATED VISUAL NOVEL & ADULT GAME METADATA PROVIDER (VNDB Kana API)
     // VNDB is the gold standard for visual novels, adult / 18+ games, and indie VNs (both Western & Japanese).
     // Free, public, no API key required.
     const bool isAdultOrVn = StorefrontScanner::IsNsfwGame(item) ||
                              item.genres.find(L"Visual Novel") != std::wstring::npos ||
-                             isItch || needsMeta;
+                             item.platform == PlatformType::Itch || needsMeta;
     if (isAdultOrVn && (needsMeta || needsCover)) {
         EnrichFromVndb(item);
     }
 
-    const bool postVndbNeedsCover = (!isItch || item.coverArtPath.empty()) && (item.coverArtPath.empty() || !ImageValidator::IsValidCover(item.coverArtPath));
-    const bool postVndbNeedsHero  = (!isItch || item.heroArtPath.empty()) && (item.heroArtPath.empty() || !ImageValidator::IsValidHero(item.heroArtPath));
-    const bool postVndbNeedsMeta  = item.synopsis.empty() || item.genres.empty() || item.developer.empty() ||
-                                    item.publisher.empty() || item.releaseDate.empty() || item.rating.empty();
+    const bool postVndbNeedsCover = allowProviderArt && needsCoverArt();
+    const bool postVndbNeedsHero  = allowProviderArt && needsHeroArt();
+    const bool postVndbNeedsMeta  = needsMetadata();
 
     // 2. PRIMARY METADATA PROVIDERS (When enabled by user configuration)
-    // A. SteamGridDB: Primary default for artwork with strict title verification
-    if (!settings.steamGridDbApiKey.empty() && (postVndbNeedsCover || postVndbNeedsHero || item.iconPath.empty())) {
+    // A. SteamGridDB: artwork only, and only for local/emulated titles
+    if (allowProviderArt && !settings.steamGridDbApiKey.empty() &&
+        (postVndbNeedsCover || postVndbNeedsHero || item.iconPath.empty())) {
         EnrichFromSteamGridDb(item, settings.steamGridDbApiKey);
     }
 
-    // B. IGDB: Primary default for rich game metadata with strict title verification
+    // B. IGDB: rich game metadata (artwork remains local/emulated-only inside the provider)
     if (!settings.igdbClientId.empty() && !settings.igdbClientSecret.empty() && postVndbNeedsMeta) {
         EnrichFromIgdb(item, settings.igdbClientId, settings.igdbClientSecret);
     }
 
     // 3. FREE KEYLESS METADATA PROVIDER FALLBACK (Steam Store Search & AppDetails API):
-    const bool stillNeedsCover = (!isItch || item.coverArtPath.empty()) && (item.coverArtPath.empty() || !ImageValidator::IsValidCover(item.coverArtPath));
-    const bool stillNeedsHero  = (!isItch || item.heroArtPath.empty()) && (item.heroArtPath.empty() || !ImageValidator::IsValidHero(item.heroArtPath));
-    const bool stillNeedsMeta  = item.synopsis.empty() || item.genres.empty() || item.developer.empty() ||
-                                 item.publisher.empty() || item.releaseDate.empty() || item.rating.empty();
+    // Metadata is allowed for store titles, but artwork is gated inside the provider by the same policy.
+    const bool stillNeedsCover = allowProviderArt && needsCoverArt();
+    const bool stillNeedsHero  = allowProviderArt && needsHeroArt();
+    const bool stillNeedsMeta  = needsMetadata();
 
-    if (item.platform != PlatformType::Steam && !isItch && (stillNeedsCover || stillNeedsHero || stillNeedsMeta)) {
+    if (item.platform != PlatformType::Steam && item.platform != PlatformType::Itch &&
+        (stillNeedsCover || stillNeedsHero || stillNeedsMeta)) {
         EnrichFromSteamStoreSearch(item);
     }
 
@@ -4424,6 +4558,20 @@ bool StorefrontScanner::LoadPerGameMetadata(GameItem& item) {
             else if (key == L"storePageUrl" && !val.empty()) item.storePageUrl = val;
         }
     }
+
+    // Secondary launch methods (custom launchers): a saved list is authoritative, including an
+    // empty list, so user removals persist. Auto-detected entries whose executable disappeared
+    // are dropped; user-added entries are kept so their path can be corrected.
+    if (wideContent.find(L"\"launchMethods\"") != std::wstring::npos) {
+        auto methods = ExtractLaunchMethods(wideContent);
+        methods.erase(std::remove_if(methods.begin(), methods.end(), [](const LaunchMethod& method) {
+            if (method.executablePath.empty()) return true;
+            if (!method.isAutoDetected) return false;
+            std::error_code ec;
+            return !fs::exists(method.executablePath, ec);
+        }), methods.end());
+        item.launchMethods = std::move(methods);
+    }
     return true;
 }
 
@@ -4479,7 +4627,25 @@ bool StorefrontScanner::SavePerGameMetadata(const GameItem& item) {
     outStr += L"  \"coverArtPath\": \"" + EscapeJsonString(toSave.coverArtPath) + L"\",\n";
     outStr += L"  \"heroArtPath\": \"" + EscapeJsonString(toSave.heroArtPath) + L"\",\n";
     outStr += L"  \"detailsArtPath\": \"" + EscapeJsonString(toSave.detailsArtPath) + L"\",\n";
-    outStr += L"  \"storePageUrl\": \"" + EscapeJsonString(toSave.storePageUrl) + L"\"\n";
+    outStr += L"  \"storePageUrl\": \"" + EscapeJsonString(toSave.storePageUrl) + L"\",\n";
+
+    std::wstring methodsJson;
+    for (const auto& method : toSave.launchMethods) {
+        if (method.name.empty() && method.executablePath.empty()) continue;
+        if (!methodsJson.empty()) methodsJson += L",\n";
+        methodsJson += L"    {\n";
+        methodsJson += L"      \"name\": \"" + EscapeJsonString(SanitizeGameText(method.name)) + L"\",\n";
+        methodsJson += L"      \"executablePath\": \"" + EscapeJsonString(method.executablePath) + L"\",\n";
+        methodsJson += L"      \"arguments\": \"" + EscapeJsonString(method.arguments) + L"\",\n";
+        methodsJson += L"      \"workingDirectory\": \"" + EscapeJsonString(method.workingDirectory) + L"\",\n";
+        methodsJson += L"      \"autoDetected\": " + std::wstring(method.isAutoDetected ? L"true" : L"false") + L"\n";
+        methodsJson += L"    }";
+    }
+    if (methodsJson.empty()) {
+        outStr += L"  \"launchMethods\": []\n";
+    } else {
+        outStr += L"  \"launchMethods\": [\n" + methodsJson + L"\n  ]\n";
+    }
     outStr += L"}\n";
 
     std::ofstream out(jsonPath, std::ios::binary);
@@ -4519,7 +4685,6 @@ std::vector<GameItem> StorefrontScanner::ScanAllInstalledGames() {
     appendAll(ScanAmazon());
     appendAll(ScanLegacyGames());
     appendAll(ScanJagex());
-    appendAll(ScanXIVLauncher());
     appendAll(ScanGuildWars2());
     appendAll(ScanRockstar());
     appendAll(ScanRiot());
@@ -4553,7 +4718,7 @@ std::vector<GameItem> StorefrontScanner::ScanAllInstalledGames() {
 
         game.id = static_cast<int64_t>(deduped.size() + 1);
         LoadPerGameMetadata(game);
-        
+
         // Multi-source metadata and artwork enrichment:
         // Configured providers (SteamGridDB, IGDB) are primary defaults when enabled;
         // Keyless Steam Store search and storefronts act as fallbacks.

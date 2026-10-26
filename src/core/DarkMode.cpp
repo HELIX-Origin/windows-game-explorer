@@ -146,6 +146,8 @@ ThemePalette DarkMode::GetPalette(bool isDarkMode) {
             RGB(40, 40, 40),     // drawerBg (#282828)
             RGB(45, 45, 45),     // cardBg (#2D2D2D)
             RGB(62, 62, 62),     // cardBorder (#3E3E3E)
+            RGB(43, 43, 43),     // fieldBg
+            RGB(72, 72, 72),     // fieldBorder
             RGB(38, 55, 78),     // cardSelectedBg (Fluent dark slate)
             accentHover,         // cardSelectedBorder (Accent highlight)
             RGB(240, 240, 240),  // textPrimary (#F0F0F0)
@@ -156,7 +158,16 @@ ThemePalette DarkMode::GetPalette(bool isDarkMode) {
             accent,              // accent
             accentHover,         // accentHover
             accentPressed,       // accentPressed
-            accentText           // accentText
+            accentText,          // accentText
+            RGB(32, 32, 32),     // chromePillBg
+            RGB(52, 52, 52),     // chromeHoverBg
+            RGB(196, 43, 28),    // chromeCloseHoverBg
+            RGB(158, 33, 21),    // chromeClosePressedBg
+            RGB(255, 255, 255),  // chromeOnCloseText
+            RGB(38, 38, 38),     // scrollTrack
+            RGB(112, 112, 112),  // scrollThumb
+            RGB(148, 148, 148),  // scrollThumbHover
+            accent               // scrollThumbPressed
         };
     } else {
         return ThemePalette{
@@ -164,6 +175,8 @@ ThemePalette DarkMode::GetPalette(bool isDarkMode) {
             RGB(243, 243, 243),  // drawerBg (#F3F3F3)
             RGB(248, 248, 248),  // cardBg (#F8F8F8)
             RGB(226, 226, 226),  // cardBorder (#E2E2E2)
+            RGB(255, 255, 255),  // fieldBg
+            RGB(198, 198, 198),  // fieldBorder
             RGB(225, 240, 255),  // cardSelectedBg (Fluent light blue tint)
             accent,              // cardSelectedBorder (Accent highlight)
             RGB(24, 24, 24),     // textPrimary (#181818)
@@ -174,7 +187,16 @@ ThemePalette DarkMode::GetPalette(bool isDarkMode) {
             accent,              // accent
             accentHover,         // accentHover
             accentPressed,       // accentPressed
-            accentText           // accentText
+            accentText,          // accentText
+            RGB(236, 236, 236),  // chromePillBg
+            RGB(220, 220, 220),  // chromeHoverBg
+            RGB(196, 43, 28),    // chromeCloseHoverBg
+            RGB(158, 33, 21),    // chromeClosePressedBg
+            RGB(255, 255, 255),  // chromeOnCloseText
+            RGB(234, 234, 234),  // scrollTrack
+            RGB(176, 176, 176),  // scrollThumb
+            RGB(140, 140, 140),  // scrollThumbHover
+            accent               // scrollThumbPressed
         };
     }
 }

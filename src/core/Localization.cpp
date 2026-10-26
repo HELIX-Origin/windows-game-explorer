@@ -51,7 +51,10 @@ const UiStrings kEnglishStrings = {
     L"+ Add Custom Game...",
     L"Remove Selected Game",
     L"Rescan All Storefronts",
-    L"Save Metadata Changes"
+    L"Save Metadata Changes",
+    L"Library Manager",
+    L"Game Catalogue",
+    L"Configuration"
 };
 
 const UiStrings kJapaneseStrings = {
@@ -100,7 +103,10 @@ const UiStrings kJapaneseStrings = {
     L"+ \u30AB\u30B9\u30BF\u30E0\u30B2\u30FC\u30E0\u3092\u8FFD\u52A0...",
     L"\u9078\u629E\u3057\u305F\u30B2\u30FC\u30E0\u3092\u524A\u9664",
     L"\u3059\u3079\u3066\u306E\u30B9\u30C8\u30A2\u3092\u518D\u30B9\u30AD\u30E3\u30F3",
-    L"\u30E1\u30BF\u30C7\u30FC\u30BF\u3092\u4FDD\u5B58"
+    L"\u30E1\u30BF\u30C7\u30FC\u30BF\u3092\u4FDD\u5B58",
+    L"\u30E9\u30A4\u30D6\u30E9\u30EA\u30DE\u30CD\u30FC\u30B8\u30E3\u30FC",
+    L"\u30B2\u30FC\u30E0\u30AB\u30BF\u30ED\u30B0",
+    L"\u8A2D\u5B9A"
 };
 
 const UiStrings kGermanStrings = {
@@ -149,7 +155,10 @@ const UiStrings kGermanStrings = {
     L"+ Eigenes Spiel hinzuf\u00FCgen...",
     L"Ausgew\u00E4hltes Spiel entfernen",
     L"Alle Plattformen neu scannen",
-    L"\u00C4nderungen speichern"
+    L"\u00C4nderungen speichern",
+    L"Bibliotheks-Manager",
+    L"Spielekatalog",
+    L"Konfiguration"
 };
 
 const UiStrings kFrenchStrings = {
@@ -198,7 +207,10 @@ const UiStrings kFrenchStrings = {
     L"+ Ajouter un jeu personnalis\u00E9...",
     L"Supprimer le jeu s\u00E9lectionn\u00E9",
     L"Rescanner toutes les plateformes",
-    L"Enregistrer les modifications"
+    L"Enregistrer les modifications",
+    L"Gestionnaire de biblioth\u00E8que",
+    L"Catalogue de jeux",
+    L"Configuration"
 };
 
 const UiStrings kSpanishStrings = {
@@ -247,7 +259,10 @@ const UiStrings kSpanishStrings = {
     L"+ A\u00F1adir juego personalizado...",
     L"Eliminar juego seleccionado",
     L"Reescanear todas las plataformas",
-    L"Guardar cambios"
+    L"Guardar cambios",
+    L"Gestor de biblioteca",
+    L"Cat\u00E1logo de juegos",
+    L"Configuraci\u00F3n"
 };
 
 } // namespace

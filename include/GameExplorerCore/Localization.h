@@ -58,6 +58,11 @@ struct UiStrings {
     const wchar_t* managerRemoveBtn;
     const wchar_t* managerRescanBtn;
     const wchar_t* managerSaveBtn;
+
+    // Game Explorer Studio (unified tabbed application)
+    const wchar_t* studioTabManager;
+    const wchar_t* studioTabCatalogue;
+    const wchar_t* studioTabConfig;
 };
 
 const UiStrings& GetStrings();

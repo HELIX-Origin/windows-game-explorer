@@ -54,9 +54,12 @@ projects/windows-game-explorer/
 │   │   ├── ShellFolder.cpp         <- IShellFolder / IPersistFolder2 / IPersistIDList
 │   │   ├── ShellView.cpp           <- IShellView / WinUI 3 XAML Island implementation
 │   │   └── ShellView.h
-│   ├── manager/                    <- GameExplorerManager.exe (Win32 Artwork & Metadata GUI)
+│   ├── studio/                     <- GameExplorerStudio.exe (Studio frame & tab strip, Catalogue page)
+│   │   ├── StudioMain.cpp          <- Single window, Fluent tab strip, command-line parsing
+│   │   └── CataloguePage.cpp       <- Game Catalogue page (placeholder)
+│   ├── manager/                    <- Library Manager page source (compiled into GameExplorerStudio.exe)
 │   │   └── ManagerMain.cpp
-│   └── config/                     <- GameExplorerConfig.exe (Win32 Settings GUI)
+│   └── config/                     <- Configuration page source (compiled into GameExplorerStudio.exe)
 │       └── ConfigMain.cpp
 ├── tests/                          <- Automated C++ unit test suite
 │   ├── CMakeLists.txt
@@ -210,6 +213,18 @@ endif()
 | `register.bat` | Self-elevating shell extension registration (portable package) | `.\register.bat` |
 | `unregister.bat`| Self-elevating shell extension removal (portable package) | `.\unregister.bat` |
 
+### Game Explorer Studio Command-Line Switches
+
+`GameExplorerStudio.exe` hosts the Library Manager, Game Catalogue, and Configuration pages in one window; the shell extension passes the switch that selects the page it needs:
+
+| Switch | Behavior |
+|---|---|
+| `--tab=manager` \| `--tab=catalogue` \| `--tab=config` | Opens the Studio on the named page. Aliases: `--manager`, `--catalogue`, `--config`. |
+| `--game=<appId>` | Opens the Library Manager pre-selected on the given game (implies `--tab=manager`). |
+| `--register` | Registers the shell namespace extension by invoking `regsvr32` and broadcasting `SHCNE_ASSOCCHANGED`; self-elevates with a UAC prompt. |
+| `--unregister` | Unregisters the shell namespace extension; self-elevates with a UAC prompt. |
+| `--reset-cache` | Purges and rebuilds the artwork cache via `StorefrontScanner::ResetArtworkCache()`. |
+
 ---
 
 ## 6. Unit Testing Architecture
@@ -222,7 +237,7 @@ Execute tests using PowerShell:
 pwsh -NoProfile -File scripts/test.ps1 -Configuration Release
 ```
 
-### Coverage (20 Dedicated Unit Tests)
+### Coverage (34 Dedicated Unit Tests)
 1. **`DatabaseInitializationAndSchema`**: Verifies table creation, indexes, and automated schema migrations.
 2. **`DatabaseUpsertAndQueryGame`**: Verifies CRUD operations for `GameItem` records.
 3. **`DatabaseKeyValueSettingsPersistence`**: Verifies dynamic settings storage.
@@ -243,6 +258,20 @@ pwsh -NoProfile -File scripts/test.ps1 -Configuration Release
 18. **`AchievementEngineProviderDispatchAndCaching`**: Verifies provider dispatch and local badge image caching.
 19. **`ImageValidatorSlotDimensionsAndAspectRatios`**: Validates aspect ratio boundaries for Cover, Hero, Icon, and Details slots.
 20. **`ImageValidatorAssetPreservationAndNonDestructiveValidation`**: Verifies that original assets are never destructively overwritten or cropped.
+21. **`LaunchMethodMetadataRoundTrip`**: Verifies launch-method overrides (store client, secondary launcher, direct executable) survive metadata serialization.
+22. **`ItchArtworkProtectionAndStrictTitleMatching`**: Verifies itch.io artwork URLs are preserved and title matching stays strict.
+23. **`ArtworkSourcingPolicyForStoreVersusLocalGames`**: Verifies the store-artwork exclusivity policy (store art wins, no automatic provider gap-filling).
+24. **`SynopsisFormatterPlainTextPassThrough`**: Verifies plain synopses render unchanged with correct wrapping.
+25. **`SynopsisFormatterHeadingsAndBullets`**: Verifies heading and bullet markup becomes rich formatted text.
+26. **`SynopsisFormatterInlineEmphasis`**: Verifies bold/italic/underline runs and line breaks.
+27. **`SynopsisFormatterPreservesUnderscoreWordsAndEscapes`**: Verifies snake_case words survive emphasis parsing.
+28. **`SynopsisFormatterStripsMarkup`**: Verifies residual markup is stripped from the output.
+29. **`ThemeScroll_HiddenWhenContentFits`**: Verifies the Fluent scroll rail hides when content fits.
+30. **`ThemeScroll_ThumbTracksContentRatio`**: Verifies thumb length tracks the visible-to-total content ratio.
+31. **`ThemeScroll_ThumbNeverCollapses`**: Verifies the thumb keeps a usable minimum length.
+32. **`ThemeScroll_ScrollPositionClamped`**: Verifies scroll offsets stay inside the content range.
+33. **`ThemeScroll_DragMapsPointerToOffset`**: Verifies pointer drag maps to content offsets.
+34. **`ThemeScroll_DragWithoutOverflowIsNoOp`**: Verifies dragging is inert when nothing overflows.
 
 ---
 

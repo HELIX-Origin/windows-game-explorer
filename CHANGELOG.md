@@ -4,7 +4,56 @@ All notable changes to **Windows Game Explorer** are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [2.4.0] - 2026-10-26
+
+### Added
+- **Game Explorer Studio Unified Shell (`GameExplorerStudio.exe`)**:
+  - One custom-chrome window hosting **Library Manager**, **Game Catalogue**, and **Configuration** tabs.
+  - The Manager and Configuration UIs are compiled as child pages with their own title bars suppressed, so a single window hosts everything; `--tab=manager|catalogue|config` opens a specific page, `--game=<appId>` opens the Library Manager on one game (used by the shell context menu), and the Configuration page's "Open Game Explorer Manager…" button switches the Studio tab instead of spawning a second process.
+- **Fluent Themed Scrollbars & Custom Controls**:
+  - Executables embed an application manifest with Common Controls v6 activating modern visual styles for native controls in both light and dark mode.
+  - Custom surfaces utilize the `ThemeScroll` module (`include/GameExplorerCore/ThemeScroll.h`): thin rounded rail and pill thumb that expands on hover/drag, driven by shared palette tokens.
+  - The multi-line synopsis editor features `ThemeFieldScroll` dropping native `WS_VSCROLL` and painting the custom scrollbar directly within the field frame.
+  - Fluent rounded text boxes, combo boxes, checkboxes, and radio buttons with proper padding and highlight pills.
+- **Owned-Games Catalogue & In-Memory Storefront Aggregation**:
+  - Direct in-memory owned games loading without SQLite bottlenecks: `ScanGogOwnedGamesGalaxy()` (`galaxy-2.0.db`), `ScanItchOwnedGamesButler()` (`butler.db`), `ScanXboxOwnedGamesAsyncCache()` (`AsyncCache.db` `product_summary` scope), and `ScanAllOwnedGamesDirect()`.
+  - Paged browser for all owned games across storefronts, installed or uninstalled, keeping the File Explorer shell library strictly installed-games-only.
+  - Toolbar filtering by search, storefront, installed state, genre, tag, release year, rating, playtime, and family sharing; sorting by title, release date, playtime, last played, storefront, or install size.
+- **Cross-Storefront Title Deduplication & Multi-Source Install Menu**:
+  - Implemented `NormalizeTitleKey()` with word-boundary article stripping (`OwnedGamesSortTitle`) merging identical titles across multiple storefronts into a single catalogue entry with composite storefront labels ("Steam, Xbox").
+  - Context menu selection: clicking "Install" or "Store page" on a multi-store title presents an interactive popup menu (`TrackPopupMenuEx`) letting the user choose which client to invoke.
+- **`GameExplorerService.exe` Background Service**:
+  - Windows SCM background service running under `LocalSystem` with Task Scheduler bootstrap ensuring automatic UAC-free startup at boot.
+  - Named pipe server listening at `\\.\pipe\GameExplorerService` supporting PING, STATUS, RESCAN, PRELOAD, and GET_COUNTS commands.
+  - Storefront manifest and library directory monitoring via `ReadDirectoryChangesW` for live cache invalidation.
+- **PowerShell Registration & ASCII Art Banners**:
+  - Dedicated scripts [`scripts/register.ps1`](./scripts/register.ps1) and [`scripts/unregister.ps1`](./scripts/unregister.ps1) with stylized ASCII art logo blocks, native colorized status output, and graceful UAC elevation handling.
+  - Replaced batch registration logic with lightweight entry points `register.bat` and `unregister.bat` that set UTF-8 code page and delegate to the PowerShell scripts.
+- **Per-Store Install Targets (`InstallTargets`)**:
+  - Configuration specifies an install base folder and the catalogue creates per-storefront subfolders (`<base>\Steam`, `<base>\GOG`, etc.) before launching the official storefront client.
+  - Steam libraries scaffold `steamapps/{common,downloading,temp}` and `libraryfolder.vdf` with content IDs.
+- **Final Fantasy XIV Official Discovery & Secondary Launcher Methods**:
+  - Official Square Enix installation discovered under `sqex_ffxiv` (`PlatformType::SquareEnix`). `XIVLauncher` attached as a secondary launch method in a chevron dropdown on the shell launch button.
+- **Rich Synopsis Formatting (`SynopsisFormatter`)**:
+  - Shared GFM parser supporting headings 1-6, bullet/numbered lists, task lists, block quotes, horizontal rules, code spans/blocks, tables, bold, italic, strikethrough, underline, and escapes.
+- **Platform Bounds Enforcement**:
+  - Removed legacy Windows 7/8/8.1 supportedOS GUIDs from `resources/app.manifest`.
+  - Added NSIS `WinVer.nsh` check in `.onInit` blocking installation on unsupported legacy Windows versions.
+
+### Removed
+- **Standalone `GameExplorerConfig.exe` and `GameExplorerManager.exe`**: Both executables retired and unified into `GameExplorerStudio.exe`.
+- **Shadow-Copy DLL Staging**: Abandoned shadow staging in favor of canonical direct `regsvr32` registration, resolving shell disappearance issues.
+
+### Fixed
+- **Uninstaller Service Teardown**: `UninstallService()` queries SCM for `SERVICE_STOPPED`, deletes scheduled tasks, and issues `taskkill /F /T /IM GameExplorerService.exe`. NSIS uninstaller executes clean service removal before file deletion.
+- **Title Truncation Bug in `NormalizeTitleKey`**: Resolved word truncation on non-article titles starting with "An...", "The...", or "A..." (e.g. *Anodyne*, *Alien*, *Theme Park*).
+- **Black Backgrounds on Themed Edit Fields**: Corrected palette publishing order before deriving field brushes.
+- **Repaint Debris on Themed Controls**: Controls erase their full window rect before drawing rounded shapes.
+
+### Quality Gate
+- MSVC `/W4 /WX`: **0 errors, 0 warnings**.
+- Unit tests: **55 passed, 0 failed** (`scripts/test.ps1`).
+- Packaging: **Portable ZIP, ROMs Template ZIP, and NSIS Setup Installer built cleanly** (`scripts/package.ps1`).
 
 ## [2.3.0] - 2026-10-24
 

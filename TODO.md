@@ -25,6 +25,13 @@
   - [x] Add fallback alpha fixup for legacy/broken icons with unpopulated alpha channels to prevent inadvertent invisibility.
   - [x] Purge stale black-background `icon_prov_*.png` cache files from `%USERPROFILE%\Game Explorer\cache\art\`.
 
+### 🔬 Architecture & Compatibility Research Workstream
+- [ ] **[windows-game-explorer] (projects/windows-game-explorer) ARCH-01: Research Windows 10 vs Windows 11 Build Compatibility for XAML Island Shell Extension Hosting**
+  - [x] Application manifest updated: removed legacy Windows 7, 8, and 8.1 supportedOS GUIDs from `resources/app.manifest` to eliminate misleading compatibility claims.
+  - [x] Installer OS check: added `WinVer.nsh` check in NSIS `.onInit` requiring at least Windows 10/11.
+  - [ ] Research minimum Windows 10 build compatibility for in-process XAML Island hosting inside `explorer.exe` (e.g. Build 18362 vs 19041+), noting that compilation and SDK link against Windows 11 (Windows SDK 10.0.26100.0).
+  - [ ] Document WinUI/XAML Island, DWM backdrop API, and File Explorer tab interactions across Windows 10 vs Windows 11 builds in `docs/research/windows-version-compatibility.md`.
+
 ### 🎮 Emulation & Provider Expansion Workstream
 - [x] **[windows-game-explorer] (projects/windows-game-explorer) EMU-01: Native Xemu & VICE Emulation Architecture Support**
   - [x] Add `PlatformType::Xemu` and `PlatformType::Vice` platform enumerations.
@@ -57,7 +64,50 @@
   - [x] Implemented strict title verification (`AreTitlesMatching`) in SteamGridDB and IGDB to eliminate false-positive substring matches on obscure/indie titles.
   - [x] Relaxed aspect ratio enforcement in `ImageValidator` (`IsValidCover` 0.25f–2.50f, `IsValidHero` 0.80f–4.50f) to natively support itch.io 315×250 cards and diverse box art without artificial rejection.
   - [x] Clarified button label to `Reset Cache` in `GameExplorerConfig.exe` and `GameExplorerManager.exe`, with `--reset-cache` CLI switch.
-  - [x] Dropped "all owned games" milestone plan per user directive; focused strictly on authentic installed game library.
+
+### 🗂️ Unified GUI & Game Catalogue Workstream (Game Explorer Studio)
+
+- [ ] **[windows-game-explorer] (projects/windows-game-explorer) CAT-01: Game Explorer Studio — Unified Tabbed GUI with a Game Catalogue Page for All Owned Games**
+  - [x] **Slice 1 — unified tabbed shell**: `GameExplorerStudio.exe` with a custom Fluent title bar and a tab strip hosting **Library Manager**, **Game Catalogue**, and **Configuration**; Library Manager and Configuration are the existing `GameExplorerManager` / `GameExplorerConfig` UIs converted into child pages (own title bars suppressed, page mode flag), and the Catalogue page ships as an explicit placeholder.
+  - [x] Slice 1: retire the standalone `GameExplorerConfig.exe` / `GameExplorerManager.exe` immediately - the build now emits only `GameExplorerShell.dll` and `GameExplorerStudio.exe`; the installer, Start menu shortcut, shell context menu (`--tab=manager --game=<appId>`), packaging, signing and release workflows all point at Studio, and `--register` / `--unregister` / `--reset-cache` moved into Studio.
+  - [x] Slice 1: the Configuration page's "Open Game Explorer Manager…" button switches the Studio tab instead of launching a separate process.
+  - [x] Slice 1: every page fits the frame at any window size (verified programmatically at 1200×920, 1360×940, 1600×1000, 1920×1040 and maximised — zero child controls outside the page rect); Configuration's fluid card layout replaced its fixed 640 px column, minimum Studio size is 1200×920.
+  - [x] Slice 1: Fluent themed scrollbars in light and dark mode — Common Controls v6 manifest for native controls plus the shared `ThemeScroll` module for custom-painted surfaces (artwork gallery first consumer).
+  - [x] Slice 1: unified field surfaces — text boxes and combo boxes share the `fieldBg` / `fieldBorder` palette tokens; fixed the black field background (BUG-15) and the repaint debris around control edges (BUG-16), proven by pixel probes (0 foreign pixels after a soiled-control repaint; 0 control rects with a black interior patch).
+  - [x] Slice 1: the synopsis editor is a true multi-line GFM editor that wraps and keeps explicit line breaks, and the in-editor formatting hint label is gone (guide lives in `docs/metadata-customization.md`).
+  - [x] QUIRK-01: the synopsis editor paints the shared `ThemeScroll` bar inside its own rounded frame (native `WS_VSCROLL` removed, `ThemeScroll::kBarWidth` reserved in the formatting rect, wheel/drag/page hit-testing in the gutter). Proven by pixel probe: gutter 22 px, track `#262626`, thumb `#707070` (rest) / `#949494` (hover), thumb follows `EM_LINESCROLL` and gutter clicks page the view.
+  - [x] **Slice 2a — owned-games model, catalogue UI and install targets**: `OwnedGames` filter/sort/paging engine with `OwnedGamesQuery`/`OwnedGamesPage`, `owned_games` SQLite schema plus CRUD, and a real paged `CataloguePage` (sticky column header, `ThemeScroll` gutter, empty state, status line, page sizes 12/24/48/96) with a toolbar filtering by search/storefront/installed/genre/tag/year/rating/playtime/family-shared and sorting by title/release/playtime/last played/storefront/size. Steam sync uses `IPlayerService/GetOwnedGames` with the stored key and SteamID64, falling back to `<Steam>/config/loginusers.vdf`; `InstallTargets` creates verified Steam library folders (`steamapps/{common,downloading,temp}` + `libraryfolder.vdf`) and folder-only targets for stores that register installs themselves. Verified: 53/53 tests, zero-warning build, verified-foreground captures at 1200×920 and 1360×920 with 0 pure-black pixels and every field at `#2B2B2B`.
+  - [ ] Keep the shell library strictly installed-games-only; owned-but-not-installed titles live only on the catalogue page.
+  - [ ] Aggregate owned libraries from the remaining official storefront APIs and local client caches (GOG, Epic, Xbox, Ubisoft Connect, EA App, itch.io) — read-only, no scraping, per the researched source matrix in [`docs/research/owned-games-sources.md`](./docs/research/owned-games-sources.md); Steam is delivered in slice 2a.
+  - [x] Detailed catalogue view with filters: storefront, installed/not installed, genre, tag, release year, rating, playtime, family-shared.
+  - [x] Sorting options: title, release date, playtime, last played, storefront, install size.
+  - [ ] Per-title detail pane: synopsis (rich formatted), artwork slots, storefront, requirements, size estimate, owned editions/DLC.
+  - [x] Installation is always delegated to the official storefront client via its URI protocol (e.g. `steam://install/<appid>`); the catalogue never installs games itself.
+  - [x] Single user-selected base folder: the catalogue creates per-storefront subfolders beneath it (e.g. `<base>\Steam`, `<base>\GOG`) and always installs into the correct store subfolder.
+  - [ ] Relocate/move currently installed games: use the storefront's supported move mechanism where one exists (Steam library move, etc.), otherwise perform a verified move-and-repoint so the user can keep installation directories organized.
+  - [ ] Installation progress tracked in-app (queued → downloading → installing → installed) by observing storefront manifests/ACF/registry, then notifying the shell library to refresh.
+  - [ ] Persist catalogue cache, install roots, and queue state under `%USERPROFILE%\Game Explorer\catalogue\`.
+  - [ ] Update the installer, Start menu shortcuts, and release packaging for the consolidated `GameExplorerStudio.exe`.
+
+- [x] **[windows-game-explorer] (projects/windows-game-explorer) SVC-01: Game Explorer Service — Local System Background Service with Task Scheduler Bootstrap**
+  - [x] Service model clarified by user (2026-10-26): true Windows Local System background service with Task Scheduler bootstrap for UAC-free startup at boot.
+  - [x] Name and binary: `GameExplorerService.exe`, SCM service key `GameExplorerService`, display name "Game Explorer Service".
+  - [x] Service implementation: `SERVICE_WIN32_OWN_PROCESS` entry point (`StartServiceCtrlDispatcher`), `SERVICE_ACCEPT_STOP | SERVICE_ACCEPT_SHUTDOWN`, restart-on-failure actions configured.
+  - [x] Task Scheduler bootstrap: installer and `--install` CLI create highest-privilege startup task (`schtasks /create /tn "GameExplorerService" /tr "\"...\GameExplorerService.exe\" --run" /sc onstart /ru "SYSTEM" /rl HIGHEST /f`) ensuring zero UAC prompts at boot or login.
+  - [x] In-memory pre-loading engine: service pre-warms metadata JSON files, installed games across all storefronts, and all owned storefront titles in-memory so companion GUI and shell view load instantly.
+  - [x] Directory monitoring: background `ReadDirectoryChangesW` watching Steam steamapps, Epic Manifests, and GOG Galaxy storage for live cache refreshing.
+  - [x] Named Pipe IPC: `\\.\pipe\GameExplorerService` named pipe server handling PING, STATUS, RESCAN, PRELOAD, and GET_COUNTS queries.
+  - [x] Canonical registration architecture: shadow staging abandoned in favour of direct `regsvr32` registration pointing `InProcServer32` directly to the DLL on disk, eliminating chicken-and-egg service startup and broken registry references.
+  - [x] PowerShell script delegation: implemented `scripts/register.ps1` and `scripts/unregister.ps1` with graceful elevation fallback and stylized ASCII banners; `register.bat` and `unregister.bat` serve as thin launcher entry points.
+  - [x] Robust uninstaller service teardown: `UninstallService()` queries SCM for `SERVICE_STOPPED`, deletes schtask, kills process tree with `taskkill /F /T`, and NSIS uninstaller executes clean service removal before file deletion.
+
+- [x] **[windows-game-explorer] (projects/windows-game-explorer) CAT-02: Direct In-Memory Owned Games Loading, Xbox AsyncCache & Multi-Storefront Deduplication**
+  - [x] SQLite architectural boundary enforced: SQLite strictly limited to persistence/cache layer (API keys, settings, achievement progress); strictly forbidden as primary data source for game data or metadata.
+  - [x] Removed `owned_games` table and related CRUD methods from `Database.h` / `Database.cpp`.
+  - [x] Direct storefront loading in `OwnedGames.cpp`: `ScanGogOwnedGamesGalaxy()` (read-only SQLite query on local `galaxy-2.0.db`), `ScanItchOwnedGamesButler()` (read-only SQLite query on local `butler.db`), `ScanXboxOwnedGamesAsyncCache()` (read-only SQLite query on local Xbox app `AsyncCache.db` `product_summary` scope), and `ScanAllOwnedGamesDirect()` aggregating installed games, GOG, itch, Xbox, and Steam Web API in-memory.
+  - [x] Multi-storefront game deduplication: implemented `NormalizeTitleKey()` with word-boundary article stripping (`OwnedGamesSortTitle`) to merge identical games owned across multiple storefronts into a single `OwnedGame` record with composite labels ("Steam, Xbox").
+  - [x] Multi-source install selection menu: clicking "Install" or "Store page" on a multi-store game triggers a popup menu allowing the user to select which official client to install or view through.
+  - [x] `CataloguePage.cpp` overhauled to use worker thread `BeginCatalogueSync()`, populating game catalogue dynamically in-memory without database blocking.
 
 ---
 

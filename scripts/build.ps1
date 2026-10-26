@@ -40,7 +40,8 @@ if ($Clean -and (Test-Path -LiteralPath $BuildDir)) {
 }
 
 # Unlock or rename in-use binaries so MSVC LINK never hits LNK1104
-Get-Process -Name "GameExplorerConfig","GameExplorerManager" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+Get-Process -Name "GameExplorerStudio" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+Get-Process -Name "GameExplorerService" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
 $OutConfigurationDir = Join-Path $BuildDir $Configuration
 $LockedDll = Join-Path $OutConfigurationDir "GameExplorerShell.dll"
 if (Test-Path -LiteralPath $LockedDll) {

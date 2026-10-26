@@ -4,13 +4,13 @@
 Unicode true
 
 !define APP_NAME "Windows Game Explorer"
-!define APP_VERSION "2.3.0"
+!define APP_VERSION "2.4.0"
 !define APP_PUBLISHER "HELIX Origin"
 !define APP_URL "https://github.com/HELIX-Origin/windows-game-explorer"
-!define APP_EXE_CONFIG "GameExplorerConfig.exe"
-!define APP_EXE_MANAGER "GameExplorerManager.exe"
+!define APP_EXE_STUDIO "GameExplorerStudio.exe"
+!define APP_EXE_SERVICE "GameExplorerService.exe"
 !define APP_DLL_SHELL "GameExplorerShell.dll"
-!define APP_EXE_MAIN "${APP_EXE_CONFIG}"
+!define APP_EXE_MAIN "${APP_EXE_STUDIO}"
 
 !define MULTIUSER_EXECUTIONLEVEL Admin
 !define MULTIUSER_MUI
@@ -26,6 +26,7 @@ Unicode true
 !include "MUI2.nsh"
 !include "x64.nsh"
 !include "FileFunc.nsh"
+!include "WinVer.nsh"
 
 Name "${APP_NAME}"
 OutFile "..\dist\windows-game-explorer-v${APP_VERSION}-setup.exe"
@@ -51,11 +52,11 @@ SetCompressor /SOLID lzma
 !insertmacro MUI_PAGE_INSTFILES
 
 ; Finish page
-!define MUI_FINISHPAGE_RUN "$INSTDIR\${APP_EXE_CONFIG}"
-!define MUI_FINISHPAGE_RUN_TEXT "Launch Windows Game Explorer Settings"
+!define MUI_FINISHPAGE_RUN "$INSTDIR\${APP_EXE_STUDIO}"
+!define MUI_FINISHPAGE_RUN_TEXT "Launch Windows Game Explorer Studio"
 !define MUI_FINISHPAGE_SHOWREADME ""
-!define MUI_FINISHPAGE_SHOWREADME_TEXT "Open Game Explorer Manager"
-!define MUI_FINISHPAGE_SHOWREADME_FUNCTION LaunchManager
+!define MUI_FINISHPAGE_SHOWREADME_TEXT "Open the Game Catalogue"
+!define MUI_FINISHPAGE_SHOWREADME_FUNCTION LaunchCatalogue
 !insertmacro MUI_PAGE_FINISH
 
 ; Uninstaller pages
@@ -65,11 +66,15 @@ SetCompressor /SOLID lzma
 
 !insertmacro MUI_LANGUAGE "English"
 
-Function LaunchManager
-    ExecShell "" "$INSTDIR\${APP_EXE_MANAGER}"
+Function LaunchCatalogue
+    ExecShell "" "$INSTDIR\${APP_EXE_STUDIO}" "--tab=catalogue"
 FunctionEnd
 
 Function .onInit
+    ${IfNot} ${AtLeastWin10}
+        MessageBox MB_ICONSTOP|MB_OK "${APP_NAME} requires Windows 10 or Windows 11.$\nEarlier versions of Windows use a different framework and are not compatible with the modern XAML framework required for File Explorer integration."
+        Abort
+    ${EndIf}
     !insertmacro MULTIUSER_INIT
 FunctionEnd
 
@@ -82,43 +87,55 @@ Section "MainSection" SecMain
 
     ; Ensure old instances are closed
     DetailPrint "Stopping existing processes if running..."
-    nsExec::Exec 'taskkill /F /IM GameExplorerConfig.exe /IM GameExplorerManager.exe'
+    nsExec::Exec 'taskkill /F /IM GameExplorerStudio.exe'
+    ExecWait 'net stop GameExplorerService'
+    nsExec::Exec 'taskkill /F /IM GameExplorerService.exe'
 
     ; Clean up any leftover temporary files from previous installations
     Delete "$INSTDIR\GameExplorerShell.*.tmp"
     Delete "$INSTDIR\GameExplorerShell.dll.old*"
 
-    ; If GameExplorerShell.dll already exists, attempt to unregister and move it aside if locked by Explorer
-    IfFileExists "$INSTDIR\GameExplorerShell.dll" 0 +8
+    ; If GameExplorerShell.dll already exists, unregister and rename aside if locked by Explorer
+    IfFileExists "$INSTDIR\GameExplorerShell.dll" 0 +7
     ExecWait 'regsvr32.exe /u /s "$INSTDIR\GameExplorerShell.dll"'
     Delete "$INSTDIR\GameExplorerShell.dll"
-    IfFileExists "$INSTDIR\GameExplorerShell.dll" 0 +5
+    IfFileExists "$INSTDIR\GameExplorerShell.dll" 0 +4
     System::Call 'kernel32::GetTickCount() i .r0'
     Rename "$INSTDIR\GameExplorerShell.dll" "$INSTDIR\GameExplorerShell.dll.old.$0"
     Delete /REBOOTOK "$INSTDIR\GameExplorerShell.dll.old.$0"
-    Delete /REBOOTOK "$INSTDIR\GameExplorerShell.dll"
 
     ; Write core application files
     File "..\build\Release\GameExplorerShell.dll"
-    File "..\build\Release\GameExplorerConfig.exe"
-    File "..\build\Release\GameExplorerManager.exe"
+    File "..\build\Release\GameExplorerStudio.exe"
+    File "..\build\Release\GameExplorerService.exe"
     File "..\LICENSE"
     File "..\assets\game-explorer-icon.ico"
     File "..\register.bat"
     File "..\unregister.bat"
+    CreateDirectory "$INSTDIR\scripts"
+    File /oname=scripts\register.ps1 "..\scripts\register.ps1"
+    File /oname=scripts\unregister.ps1 "..\scripts\unregister.ps1"
+
+    ; Retire the separate Configuration and Manager executables of older releases.
+    Delete "$INSTDIR\GameExplorerConfig.exe"
+    Delete "$INSTDIR\GameExplorerManager.exe"
 
     ; Register Shell Namespace Extension DLL
     DetailPrint "Registering Windows Shell Extension..."
-    ExecWait 'regsvr32.exe /s "$INSTDIR\GameExplorerShell.dll"'
+    ExecWait 'regsvr32.exe /s "$INSTDIR\${APP_DLL_SHELL}"'
+
+    ; Register and Start Background Service & Startup Task
+    DetailPrint "Registering Background Service..."
+    ExecWait '"$INSTDIR\${APP_EXE_SERVICE}" --install'
+    ExecWait '"$INSTDIR\${APP_EXE_SERVICE}" --start'
 
     ; Write uninstaller
     WriteUninstaller "$INSTDIR\Uninstall.exe"
 
-    ; Create Start Menu Shortcuts for Manager, Settings, and Uninstaller
+    ; Create the Start Menu shortcut for the single Studio app plus the uninstaller
     ; (Native Games.lnk shell shortcuts for Desktop and Start Menu are created by GameExplorerShell.dll registration)
     CreateDirectory "$SMPROGRAMS\Windows Game Explorer"
-    CreateShortcut "$SMPROGRAMS\Windows Game Explorer\Windows Game Explorer Settings.lnk" "$INSTDIR\${APP_EXE_CONFIG}" "" "$INSTDIR\${APP_EXE_CONFIG}" 0
-    CreateShortcut "$SMPROGRAMS\Windows Game Explorer\Windows Game Explorer Manager.lnk" "$INSTDIR\${APP_EXE_MANAGER}" "" "$INSTDIR\${APP_EXE_MANAGER}" 0
+    CreateShortcut "$SMPROGRAMS\Windows Game Explorer\Windows Game Explorer Studio.lnk" "$INSTDIR\${APP_EXE_STUDIO}" "" "$INSTDIR\${APP_EXE_STUDIO}" 0
     CreateShortcut "$SMPROGRAMS\Windows Game Explorer\Uninstall Windows Game Explorer.lnk" "$INSTDIR\Uninstall.exe" "" "$INSTDIR\Uninstall.exe" 0
 
     ; Write Add/Remove Programs registration into SHCTX (HKCU or HKLM depending on install mode)
@@ -146,8 +163,18 @@ Section "MainSection" SecMain
 SectionEnd
 
 Section "Uninstall"
+    ; Stop and unregister background service & startup task
+    DetailPrint "Stopping and removing background service..."
+    ExecWait '"$INSTDIR\${APP_EXE_SERVICE}" --uninstall'
+    ExecWait 'net stop GameExplorerService'
+    ExecWait 'sc delete GameExplorerService'
+    ExecWait 'schtasks /end /tn "GameExplorerService"'
+    ExecWait 'schtasks /delete /tn "GameExplorerService" /f'
+
     ; Ensure instances are closed
-    nsExec::Exec 'taskkill /F /IM GameExplorerConfig.exe /IM GameExplorerManager.exe'
+    nsExec::Exec 'taskkill /F /IM GameExplorerStudio.exe'
+    nsExec::Exec 'taskkill /F /IM GameExplorerService.exe'
+    Sleep 500
 
     ; Unregister COM DLL while binary is present
     ExecWait 'regsvr32.exe /u /s "$INSTDIR\GameExplorerShell.dll"'
@@ -159,12 +186,17 @@ Section "Uninstall"
     Rename "$INSTDIR\GameExplorerShell.dll" "$INSTDIR\GameExplorerShell.dll.old.$0"
     Delete /REBOOTOK "$INSTDIR\GameExplorerShell.dll.old.$0"
     Delete /REBOOTOK "$INSTDIR\GameExplorerShell.dll"
+    Delete "$INSTDIR\GameExplorerStudio.exe"
+    Delete /REBOOTOK "$INSTDIR\GameExplorerService.exe"
     Delete "$INSTDIR\GameExplorerConfig.exe"
     Delete "$INSTDIR\GameExplorerManager.exe"
     Delete "$INSTDIR\LICENSE"
     Delete "$INSTDIR\game-explorer-icon.ico"
     Delete "$INSTDIR\register.bat"
     Delete "$INSTDIR\unregister.bat"
+    Delete "$INSTDIR\scripts\register.ps1"
+    Delete "$INSTDIR\scripts\unregister.ps1"
+    RMDir "$INSTDIR\scripts"
     Delete "$INSTDIR\Uninstall.exe"
     RMDir "$INSTDIR"
 
@@ -176,6 +208,7 @@ Section "Uninstall"
     Delete "$SMPROGRAMS\Windows Game Explorer\Windows Game Explorer.lnk"
     Delete "$SMPROGRAMS\Windows Game Explorer\Windows Game Explorer Settings.lnk"
     Delete "$SMPROGRAMS\Windows Game Explorer\Windows Game Explorer Manager.lnk"
+    Delete "$SMPROGRAMS\Windows Game Explorer\Windows Game Explorer Studio.lnk"
     Delete "$SMPROGRAMS\Windows Game Explorer\Uninstall Windows Game Explorer.lnk"
     RMDir "$SMPROGRAMS\Windows Game Explorer"
 
@@ -186,6 +219,7 @@ Section "Uninstall"
     Delete "$SMPROGRAMS\Windows Game Explorer\Windows Game Explorer.lnk"
     Delete "$SMPROGRAMS\Windows Game Explorer\Windows Game Explorer Settings.lnk"
     Delete "$SMPROGRAMS\Windows Game Explorer\Windows Game Explorer Manager.lnk"
+    Delete "$SMPROGRAMS\Windows Game Explorer\Windows Game Explorer Studio.lnk"
     Delete "$SMPROGRAMS\Windows Game Explorer\Uninstall Windows Game Explorer.lnk"
     RMDir "$SMPROGRAMS\Windows Game Explorer"
 
