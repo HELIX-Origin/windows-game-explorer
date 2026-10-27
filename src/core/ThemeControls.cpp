@@ -30,6 +30,7 @@ bool g_darkMode = true;
 struct HoverState {
     bool hot = false;
     bool tracking = false;
+    LRESULT checkState = BST_UNCHECKED;
 };
 
 COLORREF FieldBackground() {
@@ -301,6 +302,20 @@ LRESULT CALLBACK CheckSubclassProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lP
     auto* state = reinterpret_cast<HoverState*>(refData);
 
     switch (msg) {
+    case BM_SETCHECK:
+        if (state != nullptr) {
+            state->checkState = wParam;
+            InvalidateRect(hwnd, nullptr, TRUE);
+            return 0;
+        }
+        break;
+
+    case BM_GETCHECK:
+        if (state != nullptr) {
+            return state->checkState;
+        }
+        break;
+
     case WM_ERASEBKGND:
         return 1;
     case WM_MOUSEMOVE:

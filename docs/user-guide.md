@@ -2,7 +2,7 @@
 
 > An in-depth guide to customizing games, managing artwork, configuring achievement tracking, and using emulation with **Windows Game Explorer**.
 
-Game Explorer Studio (`GameExplorerStudio.exe`) is the single companion GUI: one window whose Fluent tab strip hosts the **Library Manager** page (library curation, metadata editing, artwork discovery), the **Game Catalogue** page (owned-games catalogue, currently a placeholder), and the **Configuration** page (shell integration, scanning, credentials, and cloud sync). The shell extension opens the Studio directly on the relevant page.
+Game Explorer Studio (`GameExplorerStudio.exe`) is the single companion GUI: one window whose Fluent tab strip hosts the **Library Manager** page (library curation, metadata editing, artwork discovery), the **Game Catalogue** page (owned-games list across every supported storefront), and the **Configuration** page (shell integration, scanning, credentials, and cloud sync). The shell extension opens the Studio directly on the relevant page.
 
 ---
 
@@ -16,12 +16,17 @@ Game Explorer Studio (`GameExplorerStudio.exe`) is the single companion GUI: one
    - [SafeSearch / NSFW Toggle](#safesearch--nsfw-toggle)
    - [Applying Artwork to Slots](#applying-artwork-to-slots)
    - [Resetting the Artwork Cache](#resetting-the-artwork-cache)
-2. [Configuration Page (`GameExplorerStudio.exe`)](#2-configuration-page)
+2. [Game Catalogue Page (`GameExplorerStudio.exe`)](#2-game-catalogue-page)
+   - [Owned-Game Sources](#owned-game-sources)
+   - [Filtering, Sorting & Paging](#filtering-sorting--paging)
+   - [Installing Games](#installing-games)
+   - [What the Catalogue Deliberately Does Not Do](#what-the-catalogue-deliberately-does-not-do)
+3. [Configuration Page (`GameExplorerStudio.exe`)](#3-configuration-page)
    - [View & Layout Customization](#view--layout-customization)
    - [Storefront Scans](#storefront-scans)
    - [Universal Achievement Credentials](#universal-achievement-credentials)
    - [OneDrive Cloud Synchronization](#onedrive-cloud-synchronization)
-3. [Retro & Emulation Support](#3-retro--emulation-support)
+4. [Retro & Emulation Support](#4-retro--emulation-support)
    - [Directory Structure & ROM Templates](#directory-structure--rom-templates)
    - [Supported Emulators & Systems](#supported-emulators--systems)
    - [Automatic Title Cleaning](#automatic-title-cleaning)
@@ -146,7 +151,69 @@ If you ever encounter corrupt image files or want to force a clean redownload of
 
 ---
 
-## 2. Configuration Page (`GameExplorerStudio.exe`)
+## 2. Game Catalogue Page (`GameExplorerStudio.exe`)
+
+The **Game Catalogue** page browses every game you own on a supported storefront, whether or not it is currently installed. It is deliberately a single list view: rows carry the useful facts and the toolbar and footer carry the actions, so there is no separate details pane to manage.
+
+```
++-----------------------------------------------------------------------------------+
+| Game Catalogue                                              [ Refresh Catalogue ] |
+| Everything you own on a storefront. Installing is handled by the store's own      |
+| client; playing stays in the File Explorer Games view.                            |
++-----------------------------------------------------------------------------------+
+| Search [                ] Storefront [All ▾] State [Any ▾] Sort [Title ▾] [Asc ▾] |
+| Genre [All ▾] Tag [All ▾] Year [Any ▾] Rating [All ▾] Playtime [Any ▾] [Family ▾] |
++-----------------------------------------------------------------------------------+
+| Title                    | Storefront | Year | Playtime | Last played | Size  | Status    |
+| Cyberpunk 2077           | Steam      | 2020 | 42h      | 2026-10-20  | 68 GB | Installed |
+| Final Fantasy XIV        | Square     | 2013 | 310h     | 2026-10-18  | 92 GB | Installed |
+| Alan Wake 2              | Epic Games | 2023 | —        | —           | 86 GB | Not inst. |
++-----------------------------------------------------------------------------------+
+| [Previous] [Next]  Page 1 of 4 · 87 games   Per page [24 ▾]  [Store page] [Install] |
++-----------------------------------------------------------------------------------+
+```
+
+### Owned-Game Sources
+
+The catalogue merges every source that can be read without modifying the storefront's files:
+
+- **Steam** — Steam Web API owned-games list (API key + SteamID64) or the local client library. Family-shared titles are marked, and playtime/last-played come from the same source.
+- **Epic Games** — installed manifests, plus an optional read-only **legendary** cache for owned-but-uninstalled titles.
+- **GOG Galaxy** — read-only Galaxy database.
+- **itch.io** — read-only butler receipt database.
+- **Xbox / PC Game Pass** — read-only Xbox app cache.
+- **Ubisoft Connect** — read-only configuration and ownership cache.
+- **Installed-storefront scanners** — EA App, Battle.net, Amazon Games, Riot Client, Rockstar Games Launcher, Legacy Games, and HoYoPlay titles that are already installed.
+- **Final Fantasy XIV** — the official Square Enix source.
+
+The catalogue applies a centralized **Windows-installable gate**, so a title that a storefront sells only for another platform never appears. When the same game is owned on several storefronts — or in several editions — the rows are merged into one entry, and the storefront/edition is chosen at install time. Edition suffixes such as *Deluxe Edition* stay in the source label instead of polluting the canonical title.
+
+### Filtering, Sorting & Paging
+
+- **Search** filters by title as you type.
+- **Toolbar filters**: storefront, install state, genre, tag, release year, rating, playtime threshold (over 1, 10, 50, or 100 hours), and family sharing.
+- **Sort**: title, release date, playtime, last played, storefront, or install size, in ascending or descending order.
+- **Paging**: 12, 24, 48, or 96 rows per page, with Previous/Next and a live `Page N of M · X games` indicator. **Reset filters** restores the default query.
+- **Refresh Catalogue** re-scans all sources on a background thread, so the page stays responsive while the list rebuilds.
+
+### Installing Games
+
+1. Select a row in the list.
+2. Click **Install**. If the title is owned in more than one storefront or edition, a menu lists every source; an edition that is already installed is labelled `(Installed)`.
+3. The app hands the request to the storefront's own client through its official install protocol. The storefront chooses the download location and performs the installation.
+
+Windows Game Explorer never creates, moves, or deletes install folders, and it never installs a game behind the storefront's back. If a source exposes no direct install protocol, the status line directs you to its store page instead.
+
+### What the Catalogue Deliberately Does Not Do
+
+- **No game launching.** The catalogue is for browsing and installing; play installed games from the File Explorer **Games** view, where the shell extension owns the launch experience.
+- **No install-folder management.** Install locations belong to the storefront clients.
+- **No non-Windows titles.** The Windows-installable gate is applied to every source before rows are shown.
+- **No third-party scrapers.** Rows come from storefront APIs and read-only local caches.
+
+---
+
+## 3. Configuration Page (`GameExplorerStudio.exe`)
 
 The **Configuration** page of Game Explorer Studio manages system-level integration, storefront scanning preferences, cloud backups, and API credentials.
 
@@ -197,7 +264,7 @@ To sync live achievements for your games:
 
 ---
 
-## 3. Retro & Emulation Support
+## 4. Retro & Emulation Support
 
 Windows Game Explorer includes built-in auto-discovery for retro ROM collections and emulators across all mounted drives.
 

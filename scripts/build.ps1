@@ -8,6 +8,8 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+. (Join-Path $PSScriptRoot "_common.ps1")
+Write-GameExplorerBanner -Title "Build"
 $RepoRoot = Split-Path -Parent $PSScriptRoot
 $BuildDir = Join-Path $RepoRoot "build"
 $LogDir   = Join-Path $RepoRoot "logs"
@@ -63,3 +65,4 @@ Write-Host "[Windows Game Explorer] Building all targets ($Configuration, /W4 /W
 if ($LASTEXITCODE -ne 0) { throw "CMake build failed with exit code $LASTEXITCODE" }
 
 Write-Host "[Windows Game Explorer] Build succeeded (0 errors, 0 warnings). Log: $LogFile" -ForegroundColor Green
+Write-GameExplorerSuccess -Action "Build"

@@ -22,52 +22,75 @@ The repository is organized into distinct, modular targets under CMake:
 ```text
 projects/windows-game-explorer/
 ├── CMakeLists.txt                  <- Root build configuration (C++20, /W4 /WX)
-├── build.bat                       <- Fast developer build runner
-├── release.bat                     <- Full release runner (build + test + NSIS package)
-├── register.bat                    <- Portable shell extension registrar
-├── unregister.bat                  <- Portable shell extension unregistrar
-├── include/
-│   └── GameExplorerCore/           <- Public C++ API headers
-│       ├── AchievementEngine.h     <- Multi-source achievement provider interface
-│       ├── DarkMode.h              <- DWM & Win32 dark mode interop
-│       ├── Database.h              <- SQLite3 library wrapper
-│       ├── ImageValidator.h        <- Aspect-ratio and non-destructive image fitting
-│       ├── Localization.h          <- Multi-language UI string tables
-│       ├── Models.h                <- GameItem, AchievementItem, ProviderItem data structs
-│       ├── PlatformLauncher.h      <- Protocol & emulator execution dispatch
-│       ├── Settings.h              <- Configuration manager
-│       ├── Storage.h               <- OneDrive sync & filesystem paths
-│       ├── StorefrontScanner.h     <- Storefront and ROM discovery engine
-│       └── Types.h                 <- Enumerations and common aliases
+├── game-explorer.bat               <- Single CLI dispatcher (build/test/lint/package/release/register/…)
+├── scripts/
+│   ├── _common.ps1                 <- Shared banner, colours and result helpers
+│   ├── build.ps1                   <- CMake configure + /W4 /WX build
+│   ├── test.ps1                    <- C++ unit test runner
+│   ├── lint.ps1                    <- PSScriptAnalyzer zero-warning gate
+│   ├── package.ps1                 <- Portable ZIPs + NSIS setup installer
+│   ├── register.ps1                <- Shell extension registration (elevated)
+│   ├── unregister.ps1              <- Shell extension removal (elevated)
+│   ├── sign.ps1                    <- Authenticode signing
+│   ├── generate-installer-art.ps1  <- Installer sidebar/header bitmaps
+│   └── setup-signing-secrets.ps1   <- GitHub signing secrets
+├── include/GameExplorerCore/       <- Public C++ API headers
+│   ├── AchievementEngine.h         <- Multi-source achievement provider interface
+│   ├── DarkMode.h                  <- DWM & Win32 dark mode interop
+│   ├── Database.h                  <- SQLite3 library wrapper
+│   ├── ImageValidator.h            <- Aspect-ratio and non-destructive image fitting
+│   ├── Localization.h              <- Multi-language UI string tables
+│   ├── Models.h                    <- GameItem, AchievementItem, ProviderItem data structs
+│   ├── OwnedGames.h                <- Owned-game sources, filters, sorting and paging
+│   ├── PlatformLauncher.h          <- Protocol & emulator execution dispatch
+│   ├── Settings.h                  <- Configuration manager
+│   ├── Storage.h                   <- OneDrive sync & filesystem paths
+│   ├── StorefrontScanner.h         <- Installed storefront and ROM discovery engine
+│   ├── StudioPages.h               <- Page factories for the unified Studio window
+│   ├── SynopsisFormatter.h         <- GitHub Flavored Markdown synopsis rendering
+│   ├── ThemeControls.h             <- Shared Fluent control theming
+│   ├── ThemeFieldScroll.h          <- Fluent multi-line field scrolling
+│   ├── ThemeScroll.h               <- Fluent scrollbar geometry
+│   └── Types.h                     <- Enumerations and common aliases
 ├── src/
 │   ├── core/                       <- GameExplorerCore.lib implementation
 │   │   ├── AchievementEngine.cpp
 │   │   ├── Database.cpp
 │   │   ├── ImageValidator.cpp
 │   │   ├── Localization.cpp
+│   │   ├── OwnedGames.cpp          <- Storefront/API owned-game scanners, merge, filter, page
 │   │   ├── PlatformLauncher.cpp
 │   │   ├── Settings.cpp
 │   │   ├── Storage.cpp
-│   │   └── StorefrontScanner.cpp
-│   ├── shell/                      <- GameExplorerShell.dll (In-process IShellView)
+│   │   ├── StorefrontScanner.cpp
+│   │   ├── SynopsisFormatter.cpp
+│   │   └── Theme*.cpp              <- ThemeControls, ThemeFieldScroll, ThemeScroll
+│   ├── shell/                      <- GameExplorerShell.dll (in-process IShellView)
+│   │   ├── CategoryProvider.cpp    <- ICategoryProvider / ICategorizer sections
+│   │   ├── ClassFactory.cpp        <- COM class factory
+│   │   ├── DllMain.cpp             <- DLL entry point
+│   │   ├── GameItemUI.cpp          <- Game cards, artwork and Inspector sidepane
 │   │   ├── Registration.cpp        <- DllRegisterServer / DllUnregisterServer COM keys
 │   │   ├── ShellFolder.cpp         <- IShellFolder / IPersistFolder2 / IPersistIDList
 │   │   ├── ShellView.cpp           <- IShellView / WinUI 3 XAML Island implementation
-│   │   └── ShellView.h
-│   ├── studio/                     <- GameExplorerStudio.exe (Studio frame & tab strip, Catalogue page)
+│   │   └── Resource.rc             <- Icons, manifest and version resource
+│   ├── view/                       <- LibraryViewHost (shell view hosting glue)
+│   ├── studio/                     <- GameExplorerStudio.exe frame and pages
 │   │   ├── StudioMain.cpp          <- Single window, Fluent tab strip, command-line parsing
-│   │   └── CataloguePage.cpp       <- Game Catalogue page (placeholder)
+│   │   └── CataloguePage.cpp       <- Game Catalogue page (owned-game list, filters, install delegation)
 │   ├── manager/                    <- Library Manager page source (compiled into GameExplorerStudio.exe)
-│   │   └── ManagerMain.cpp
-│   └── config/                     <- Configuration page source (compiled into GameExplorerStudio.exe)
-│       └── ConfigMain.cpp
+│   ├── config/                     <- Configuration page source (compiled into GameExplorerStudio.exe)
+│   └── service/                    <- GameExplorerService.exe (preloading, directory monitoring, warm cache)
 ├── tests/                          <- Automated C++ unit test suite
-│   ├── CMakeLists.txt
 │   ├── TestAchievementEngine.cpp
 │   ├── TestDatabase.cpp
 │   ├── TestImageValidator.cpp
+│   ├── TestOwnedGames.cpp
 │   ├── TestPlatformLauncher.cpp
-│   └── TestStorefrontScanner.cpp
+│   ├── TestSettings.cpp
+│   ├── TestStorefrontScanner.cpp
+│   ├── TestSynopsisFormatter.cpp
+│   └── TestThemeScroll.cpp
 ├── installer/                      <- NSIS installer script & packaging assets
 │   └── windows-game-explorer.nsi
 └── third_party/                    <- Bundled dependencies (SQLite amalgamation)
@@ -208,10 +231,17 @@ endif()
 
 | Script | Purpose | Execution |
 |---|---|---|
-| `build.bat` | One-click incremental C++ build | `.\build.bat` |
-| `release.bat` | Release build, unit test execution, and NSIS installer packaging | `.\release.bat` |
-| `register.bat` | Self-elevating shell extension registration (portable package) | `.\register.bat` |
-| `unregister.bat`| Self-elevating shell extension removal (portable package) | `.\unregister.bat` |
+| `game-explorer.bat build [Release]` | One-click incremental C++ build (`/W4 /WX`) | `.\game-explorer.bat build Release` |
+| `game-explorer.bat test [Release]` | C++ unit test execution | `.\game-explorer.bat test Release` |
+| `game-explorer.bat lint` | PSScriptAnalyzer zero-warning gate for `scripts\*.ps1` | `.\game-explorer.bat lint` |
+| `game-explorer.bat package [Release]` | Portable ZIPs and NSIS installer packaging | `.\game-explorer.bat package Release` |
+| `game-explorer.bat release` | Release build, unit tests, and packaging in one pass | `.\game-explorer.bat release` |
+| `game-explorer.bat register` / `unregister` | Elevated shell extension registration/removal (portable package) | `.\game-explorer.bat register` |
+| `game-explorer.bat sign` / `art` / `setup-signing` | Authenticode signing, installer artwork, GitHub secrets | `.\game-explorer.bat help` |
+
+`game-explorer.bat` is the only batch file: it never opens a second window and runs every
+PowerShell runbook from `scripts\` in the current console, so registration commands need an
+already-elevated terminal.
 
 ### Game Explorer Studio Command-Line Switches
 
@@ -232,46 +262,84 @@ endif()
 The test suite is built on a custom lightweight C++ test framework that requires zero external runtime dependencies (`tests/CMakeLists.txt` ➔ `GameExplorerTests.exe`).
 
 ### Running the Test Suite
-Execute tests using PowerShell:
+Execute the full suite through the dispatcher (or the underlying script):
 ```powershell
-pwsh -NoProfile -File scripts/test.ps1 -Configuration Release
+.\game-explorer.bat test Release
+# equivalent: pwsh -NoProfile -File scripts/test.ps1 -Configuration Release
 ```
 
-### Coverage (34 Dedicated Unit Tests)
-1. **`DatabaseInitializationAndSchema`**: Verifies table creation, indexes, and automated schema migrations.
-2. **`DatabaseUpsertAndQueryGame`**: Verifies CRUD operations for `GameItem` records.
-3. **`DatabaseKeyValueSettingsPersistence`**: Verifies dynamic settings storage.
-4. **`DatabaseAchievementUpsertAndProgress`**: Verifies composite primary key achievement batch upserts and unlock percentages.
-5. **`ScannerMountedDrivesDiscovery`**: Validates multi-drive mounting and path resolution.
-6. **`ScannerBlacklistExecutableFilter`**: Verifies exclusions for launcher helpers (`agent.exe`, `battlenet.exe`, etc.).
-7. **`PerGameMetadataSerializationAndPriority`**: Validates JSON serialization and override precedence.
-8. **`CustomLocalGameLifecycle`**: Tests adding, querying, and removing custom standalone games.
-9. **`ScannerScanAllPrunesObsoleteGames`**: Verifies automatic pruning of uninstalled games while preserving favorite states.
-10. **`ScannerCleanRomTitleAndEmulatedScan`**: Tests title cleaning and leading article inversion (`Legend of Zelda, The` ➔ `The Legend of Zelda`).
-11. **`ScannerUbisoftDetectionAndArtwork`**: Tests Ubisoft configuration cache parsing and CDN URL generation.
-12. **`StorageOneDriveDirectoryCreationAndSync`**: Tests OneDrive sync folder creation (`backups/`, `metadata/`, `art/`).
-13. **`TextSanitizationAndEntityDecoding`**: Verifies HTML entity decoding, CP1252 mojibake fixes, and emoji cleanup.
-14. **`PlatformEnumToStringAndBack`**: Tests enum conversion round-trips.
-15. **`PlatformLauncherSteamPathQuery`**: Verifies registry discovery for platform launchers.
-16. **`PlatformLauncherEmulatorDiscovery`**: Verifies automatic emulator discovery (Dolphin, PCSX2, Project64, etc.).
-17. **`SettingsDefaultsAndLayoutModes`**: Validates initial configuration defaults and theme detection.
-18. **`AchievementEngineProviderDispatchAndCaching`**: Verifies provider dispatch and local badge image caching.
-19. **`ImageValidatorSlotDimensionsAndAspectRatios`**: Validates aspect ratio boundaries for Cover, Hero, Icon, and Details slots.
-20. **`ImageValidatorAssetPreservationAndNonDestructiveValidation`**: Verifies that original assets are never destructively overwritten or cropped.
-21. **`LaunchMethodMetadataRoundTrip`**: Verifies launch-method overrides (store client, secondary launcher, direct executable) survive metadata serialization.
-22. **`ItchArtworkProtectionAndStrictTitleMatching`**: Verifies itch.io artwork URLs are preserved and title matching stays strict.
-23. **`ArtworkSourcingPolicyForStoreVersusLocalGames`**: Verifies the store-artwork exclusivity policy (store art wins, no automatic provider gap-filling).
-24. **`SynopsisFormatterPlainTextPassThrough`**: Verifies plain synopses render unchanged with correct wrapping.
-25. **`SynopsisFormatterHeadingsAndBullets`**: Verifies heading and bullet markup becomes rich formatted text.
-26. **`SynopsisFormatterInlineEmphasis`**: Verifies bold/italic/underline runs and line breaks.
-27. **`SynopsisFormatterPreservesUnderscoreWordsAndEscapes`**: Verifies snake_case words survive emphasis parsing.
-28. **`SynopsisFormatterStripsMarkup`**: Verifies residual markup is stripped from the output.
-29. **`ThemeScroll_HiddenWhenContentFits`**: Verifies the Fluent scroll rail hides when content fits.
-30. **`ThemeScroll_ThumbTracksContentRatio`**: Verifies thumb length tracks the visible-to-total content ratio.
-31. **`ThemeScroll_ThumbNeverCollapses`**: Verifies the thumb keeps a usable minimum length.
-32. **`ThemeScroll_ScrollPositionClamped`**: Verifies scroll offsets stay inside the content range.
-33. **`ThemeScroll_DragMapsPointerToOffset`**: Verifies pointer drag maps to content offsets.
-34. **`ThemeScroll_DragWithoutOverflowIsNoOp`**: Verifies dragging is inert when nothing overflows.
+### Coverage (61 Dedicated Unit Tests)
+
+**Database (4)**
+1. `DatabaseInitializationAndSchema` — table creation, indexes, and automated schema migrations.
+2. `DatabaseUpsertAndQueryGame` — CRUD operations for `GameItem` records.
+3. `DatabaseKeyValueSettingsPersistence` — dynamic settings storage.
+4. `DatabaseAchievementUpsertAndProgress` — composite-key achievement batch upserts and unlock percentages.
+
+**Storefront discovery, metadata, storage and text (12)**
+5. `ScannerMountedDrivesDiscovery` — multi-drive mounting and path resolution.
+6. `ScannerBlacklistExecutableFilter` — exclusions for launcher helpers (`agent.exe`, `battlenet.exe`, etc.).
+7. `PerGameMetadataSerializationAndPriority` — JSON serialization and override precedence.
+8. `LaunchMethodMetadataRoundTrip` — launch-method overrides survive metadata serialization.
+9. `CustomLocalGameLifecycle` — adding, querying, and removing custom standalone games.
+10. `ScannerScanAllPrunesObsoleteGames` — pruning uninstalled games while preserving favorites.
+11. `ScannerCleanRomTitleAndEmulatedScan` — title cleaning and leading-article inversion.
+12. `ScannerUbisoftDetectionAndArtwork` — Ubisoft configuration-cache parsing and CDN URL generation.
+13. `StorageOneDriveDirectoryCreationAndSync` — OneDrive `backups/`, `metadata/`, `art/` creation.
+14. `TextSanitizationAndEntityDecoding` — HTML entities, CP1252 mojibake fixes, and emoji cleanup.
+15. `ItchArtworkProtectionAndStrictTitleMatching` — itch.io artwork preservation and strict title matching.
+16. `ArtworkSourcingPolicyForStoreVersusLocalGames` — store-artwork exclusivity policy.
+
+**Owned-games catalogue (21)**
+17. `OwnedGames_TokenMatchIsWholeTokenCaseInsensitive` — whole-token, case-insensitive search matching.
+18. `OwnedGames_SearchMatchesTitleCaseInsensitive` — title search casing.
+19. `OwnedGames_SortTitleDropsLeadingArticles` — article-insensitive title sorting.
+20. `OwnedGames_FilterCombinesEveryActiveField` — combined filter fields.
+21. `OwnedGames_SortUsesSelectedKeyThenTitle` — stable sort key with title tie-break.
+22. `OwnedGames_PagingSlicesAndClamps` — page slicing and bounds clamping.
+23. `OwnedGames_MarkInstalledFollowsLibrary` — install flags follow the installed library.
+24. `OwnedGames_SteamJsonParsesGamesAndSkipsEmptyName` — Steam JSON parsing and empty-name skipping.
+25. `OwnedGames_SteamJsonHandlesEmptyLibraryAndGarbage` — malformed and empty Steam payloads.
+26. `OwnedGames_NormalizeTitleKeyStripsPunctuationAndLeadingArticles` — canonical title keys.
+27. `OwnedGames_PlatformListsAreParsedFromStorefrontJson` — storefront platform lists.
+28. `OwnedGames_PcGateNeedsWindowsEvidence` — Windows-installable evidence requirement.
+29. `OwnedGames_GogOsCompatibilityNeedsWindows` — GOG OS compatibility gating.
+30. `OwnedGames_SteamStoreBrowseMarksOnlyNonWindowsApps` — Steam browse platform marking.
+31. `OwnedGames_WindowsGateDropsOnlyNonWindowsSources` — per-source Windows gate.
+32. `OwnedGames_MatchesStoreChecksBothPrimaryAndAllSources` — primary and merged source matching.
+33. `OwnedGames_ExtractBaseTitleStripsCommonEditionSuffixes` — edition suffixes split from titles.
+34. `OwnedGames_NormalizeTitleKeyCollapsesCrossEditionDuplicates` — cross-edition deduplication.
+35. `OwnedGames_UbisoftConfigurationCacheResolvesTitles` — Ubisoft cache title resolution.
+36. `OwnedGames_UbisoftOwnershipIdsAreLowercasedAndDeduped` — Ubisoft ownership ID normalization.
+37. `OwnedGames_LegendaryAssetsMapToEpicOwnedGames` — legendary asset mapping to Epic rows.
+
+**Achievements, settings and platform launching (6)**
+38. `AchievementEngineProviderDispatchAndCaching` — provider dispatch and local badge caching.
+39. `SettingsDefaultsAndLayoutModes` — configuration defaults and theme detection.
+40. `ThemeControls_CheckAndRadioToggleStateRetention` — themed check/radio state retention.
+41. `PlatformEnumToStringAndBack` — enum conversion round-trips.
+42. `PlatformLauncherSteamPathQuery` — registry discovery for platform launchers.
+43. `PlatformLauncherEmulatorDiscovery` — automatic emulator discovery.
+
+**Artwork validation, synopsis formatting and scrolling (18)**
+44. `ImageValidatorSlotDimensionsAndAspectRatios` — aspect-ratio boundaries for every slot.
+45. `ImageValidatorAssetPreservationAndNonDestructiveValidation` — originals never overwritten or cropped.
+46. `SynopsisFormatterPlainTextPassThrough` — plain synopses render unchanged.
+47. `SynopsisFormatterHeadingsAndBullets` — headings and bullets become rich text.
+48. `SynopsisFormatterInlineEmphasis` — bold/italic/underline runs and line breaks.
+49. `SynopsisFormatterPreservesUnderscoreWordsAndEscapes` — snake_case words survive emphasis parsing.
+50. `SynopsisFormatterStripsMarkup` — residual markup stripped from output.
+51. `SynopsisFormatterPreservesLineBreaks` — explicit line breaks survive formatting.
+52. `SynopsisFormatterNumberedQuotesAndRules` — numbered lists, quotes and horizontal rules.
+53. `SynopsisFormatterCodeAndLinks` — inline code and links.
+54. `SynopsisFormatterTablesAndAutolinks` — tables and autolinks.
+55. `SynopsisFormatterKeepsImageMarkupLiteral` — image markup stays literal.
+56. `ThemeScroll_HiddenWhenContentFits` — scroll rail hides when content fits.
+57. `ThemeScroll_ThumbTracksContentRatio` — thumb length tracks content ratio.
+58. `ThemeScroll_ThumbNeverCollapses` — thumb keeps a usable minimum length.
+59. `ThemeScroll_ScrollPositionClamped` — offsets stay inside the content range.
+60. `ThemeScroll_DragMapsPointerToOffset` — pointer drag maps to content offsets.
+61. `ThemeScroll_DragWithoutOverflowIsNoOp` — dragging is inert without overflow.
 
 ---
 

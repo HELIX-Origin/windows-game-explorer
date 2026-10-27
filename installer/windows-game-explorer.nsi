@@ -4,7 +4,7 @@
 Unicode true
 
 !define APP_NAME "Windows Game Explorer"
-!define APP_VERSION "2.4.0"
+!define APP_VERSION "2.5.0"
 !define APP_PUBLISHER "HELIX Origin"
 !define APP_URL "https://github.com/HELIX-Origin/windows-game-explorer"
 !define APP_EXE_STUDIO "GameExplorerStudio.exe"
@@ -46,7 +46,10 @@ SetCompressor /SOLID lzma
 
 ; Installer pages
 !insertmacro MUI_PAGE_WELCOME
-!insertmacro MUI_PAGE_LICENSE "..\LICENSE"
+; The license page word-wraps its own copy of the MIT text: each paragraph is a single line, so
+; rich-edit wrapping never adds a break on top of an artificial hard wrap. The canonical `LICENSE`
+; is still the file installed into $INSTDIR.
+!insertmacro MUI_PAGE_LICENSE "LICENSE.txt"
 !insertmacro MULTIUSER_PAGE_INSTALLMODE
 !insertmacro MUI_PAGE_DIRECTORY
 !insertmacro MUI_PAGE_INSTFILES
@@ -110,11 +113,17 @@ Section "MainSection" SecMain
     File "..\build\Release\GameExplorerService.exe"
     File "..\LICENSE"
     File "..\assets\game-explorer-icon.ico"
-    File "..\register.bat"
-    File "..\unregister.bat"
+    File "..\game-explorer.bat"
     CreateDirectory "$INSTDIR\scripts"
+    File /oname=scripts\_common.ps1 "..\scripts\_common.ps1"
     File /oname=scripts\register.ps1 "..\scripts\register.ps1"
     File /oname=scripts\unregister.ps1 "..\scripts\unregister.ps1"
+
+    ; Retire the per-command batch files of older releases in favour of game-explorer.bat.
+    Delete "$INSTDIR\register.bat"
+    Delete "$INSTDIR\unregister.bat"
+    Delete "$INSTDIR\build.bat"
+    Delete "$INSTDIR\release.bat"
 
     ; Retire the separate Configuration and Manager executables of older releases.
     Delete "$INSTDIR\GameExplorerConfig.exe"
@@ -194,6 +203,10 @@ Section "Uninstall"
     Delete "$INSTDIR\game-explorer-icon.ico"
     Delete "$INSTDIR\register.bat"
     Delete "$INSTDIR\unregister.bat"
+    Delete "$INSTDIR\build.bat"
+    Delete "$INSTDIR\release.bat"
+    Delete "$INSTDIR\game-explorer.bat"
+    Delete "$INSTDIR\scripts\_common.ps1"
     Delete "$INSTDIR\scripts\register.ps1"
     Delete "$INSTDIR\scripts\unregister.ps1"
     RMDir "$INSTDIR\scripts"

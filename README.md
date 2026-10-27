@@ -27,6 +27,7 @@ Organize, browse, and launch your entire multi-platform game library with high-r
 - **Two-Section Organization**: Structured grouping into collapsible `▾ Installed Providers` and `▾ Games Library` sections.
 - **Multi-Viewport Presentation**: Seamless switching between 2:3 vertical Cover Art (SteamGridDB standard), 3.1:1 widescreen Hero Banners, and 1:1 Details icon lists.
 - **Storefront-First Discovery**: Automatically detects installed titles and native art from Steam, Epic Games, GOG Galaxy, Ubisoft Connect, EA App, Battle.net, Xbox/Game Pass, Itch.io, Amazon Games, and retro ROMs.
+- **Owned-Games Catalogue**: A paged, filterable list of every game you own — installed or not — merged across Steam, Epic, GOG, itch.io, Xbox, Ubisoft, and installed-storefront scanners. A Windows-installable gate keeps non-PC titles out, and installs are delegated to each storefront's own client.
 - **Artwork Discovery Hub**: Game Explorer Studio (`GameExplorerStudio.exe`) with a multi-provider visual search gallery (SteamGridDB, Steam Store, IGDB, and internal Web search) with SafeSearch/NSFW unblock.
 - **Universal Achievements & Cloud Sync**: Live trophy cards with progress bars and automated OneDrive backup snapshots (`backups/`, `metadata/`, `art/`).
 
@@ -38,7 +39,7 @@ Detailed user guides, engineering specifications, and customization references a
 
 - **[Project Overview & Architecture](./docs/overview.md)** — Core design philosophy, system architecture, and supported platform breakdown.
 - **[Quick Start Guide](./docs/quick-start.md)** — Installation methods, navigation pane entry points, and first-time library setup.
-- **[Comprehensive User Guide](./docs/user-guide.md)** — Deep-dive manual for the Library Manager, Configuration, Artwork Discovery, ROMs, and cloud sync.
+- **[Comprehensive User Guide](./docs/user-guide.md)** — Deep-dive manual for the Library Manager, Game Catalogue, Configuration, Artwork Discovery, ROMs, and cloud sync.
 - **[Developer & Technical Reference](./docs/developer-guide.md)** — WinUI 3 XAML Islands internals, C++20 core engine, SQLite schema, build gates, and test suites.
 - **[Metadata & Customization Guide](./docs/metadata-customization.md)** — JSON schema specification for per-game overrides and manual imports.
 
@@ -53,14 +54,11 @@ Detailed user guides, engineering specifications, and customization references a
 
 ### Building & Testing
 ```powershell
-# Fast incremental build (/W4 /WX zero-warning gate)
-.\build.bat
-
-# Run the 20-test automated C++ unit test suite
-pwsh -NoProfile -File scripts/test.ps1 -Configuration Release
-
-# Package installer and portable ZIP distributions
-.\release.bat
+# One dispatcher owns every workflow command
+.\game-explorer.bat build Release     # Fast incremental build (/W4 /WX zero-warning gate)
+.\game-explorer.bat test Release      # Run the 61-test automated C++ unit test suite
+.\game-explorer.bat release           # Build, test, lint, and package installer + portable ZIPs
+.\game-explorer.bat help              # List every command and option
 ```
 
 ---

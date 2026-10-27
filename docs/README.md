@@ -33,7 +33,7 @@ Learn about the motivation, architectural design, and core philosophy of Windows
 
 ### 2. ⚡ [Quick Start Guide](./quick-start.md)
 Step-by-step setup for getting started in under two minutes:
-- **Installation Methods**: Standard dual-mode NSIS setup (`windows-game-explorer-setup.exe`) and portable standalone archive (`register.bat` / `unregister.bat`).
+- **Installation Methods**: Standard dual-mode NSIS setup (`windows-game-explorer-setup.exe`) and portable standalone archive (`game-explorer.bat register` / `game-explorer.bat unregister`).
 - **Opening the Explorer**: Launching via the File Explorer navigation pane (pinned **Games** tree item), Game Explorer Studio, or direct shell GUID.
 - **First-Time Discovery**: Running an asynchronous storefront scan to populate your unified game library.
 - **Interface Navigation**: Two-section cataloging, layout mode switching (Cover Art, Hero Banner, Details), and direct game launching.
@@ -49,7 +49,7 @@ Detailed manual covering advanced features and the Game Explorer Studio pages:
     - SafeSearch / NSFW toggle for unblocking mature game artwork across search and providers.
     - Multi-slot artwork application (`Box Art`, `Hero Banner`, `Details Art`, `Icon / Logo`) with instant preview and disk persistence.
     - Clean artwork cache reset (`[ 🧹 Reset Cache ]`) with unlocked GDI+ in-memory stream handles.
-  - **Game Catalogue page**: Owned-games catalogue, currently an explicit placeholder.
+  - **Game Catalogue page**: One filterable, sortable, paged list of every owned storefront game, with multi-store merging, edition labels, a Windows-installable gate, and installs delegated to each storefront's own client. No details pane, no launching, and no install-folder management.
   - **Configuration page**:
     - Presentation modes and appearance customization.
     - Storefront scan controls.
@@ -67,8 +67,8 @@ Complete engineering reference for contributors and integrators:
 - **WinUI 3 XAML Islands Shell Architecture**: Hosting `DesktopWindowXamlSource` within Win32 `IShellView`, DirectComposition rendering, tab switching lifecycle management, and avoiding `0xc000027b` and `0xc00000fd` exceptions.
 - **Core Engine Internals**: Storefront manifest parsing, multi-source `AchievementEngine`, text/mojibake sanitizer (`SanitizeGameText`), and `ImageValidator` aspect-ratio standards.
 - **SQLite Database Schema**: Relational schema diagram and field definitions for `games`, `achievements`, and `settings` tables in `library.db`.
-- **Build Pipelines & Quality Gates**: Windows 11 SDK prerequisites, MSVC `/W4 /WX /permissive- /utf-8` zero-warning invariant, and root batch automation suite (`build.bat`, `release.bat`, `register.bat`, `unregister.bat`).
-- **Unit Testing Architecture**: 34 dedicated C++ unit tests covering database CRUD, storefront discovery, achievement tracking, image validation, storage sync, synopsis formatting, and Fluent scroll geometry.
+- **Build Pipelines & Quality Gates**: Windows 11 SDK prerequisites, MSVC `/W4 /WX /permissive- /utf-8` zero-warning invariant, and the single root CLI dispatcher (`game-explorer.bat`) backed by the `scripts/*.ps1` runbooks.
+- **Unit Testing Architecture**: 61 dedicated C++ unit tests covering database CRUD, storefront discovery, achievement tracking, image validation, storage sync, synopsis formatting, and Fluent scroll geometry.
 - **Sequence Diagrams**: Navigation, initialization, and asynchronous loading lifecycle.
 
 ### 5. 📂 [Metadata & JSON Customization Guide](./metadata-customization.md)

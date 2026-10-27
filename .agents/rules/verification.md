@@ -9,13 +9,15 @@
 
 ```powershell
 # 1. Native C++ build — MSVC warning level /W4 with warnings treated as errors (/WX)
-cmake -B build -S . -DCMAKE_BUILD_TYPE=Release
-cmake --build build --config Release
+.\game-explorer.bat build Release
 
 # 2. Native unit & integration test suite
-ctest --test-dir build -C Release --output-on-failure
+.\game-explorer.bat test Release
 
-# 3. Shell COM extension registration check (if testing live registration)
+# 3. PowerShell static analysis — zero PSScriptAnalyzer diagnostics
+.\game-explorer.bat lint
+
+# 4. Shell COM extension registration check (if testing live registration)
 regsvr32 /s build\Release\GameExplorerShell.dll
 regsvr32 /u /s build\Release\GameExplorerShell.dll
 ```

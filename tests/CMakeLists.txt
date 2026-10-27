@@ -3,7 +3,6 @@ add_executable(GameExplorerTests
     TestDatabase.cpp
     TestStorefrontScanner.cpp
     TestOwnedGames.cpp
-    TestInstallTargets.cpp
     TestPlatformLauncher.cpp
     TestSettings.cpp
     TestAchievementEngine.cpp
@@ -24,6 +23,7 @@ target_link_libraries(GameExplorerTests PRIVATE
     Shlwapi
     Ole32
     Advapi32
+    Comctl32
 )
 
 add_test(NAME GameExplorerUnitTests COMMAND GameExplorerTests)

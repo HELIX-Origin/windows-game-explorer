@@ -10,7 +10,7 @@ high-resolution box art, rich properties, and automated multi-store discovery. M
 - **Shell extension plus a single Studio GUI:**
   - **`GameExplorerShell.dll` (In-shell primary extension):** File Explorer Virtual Shell Namespace Extension (`IShellFolder2`, `IPersistFolder2`, `ICategoryProvider`, `ICategorizer`, `IThumbnailProvider`, `IPropertyStore`, `IExtractIconW`, `IContextMenu`) organizing installed storefront providers (`▾ Game Providers`) and installed games (`▾ Games`) with vertical ~2:3 box art and rich metadata.
   - **`GameExplorerStudio.exe` (Game Explorer Studio):** One Win32 GUI window whose Fluent tab strip hosts three pages — **Library Manager** (game list, metadata editor, artwork discovery gallery, synopsis), **Game Catalogue** (paged catalogue of every owned storefront game with filter/sort toolbar and delegated storefront installs), and **Configuration** (shell integration, layout mode, storefront toggles, OneDrive sync, achievement auto-sync, API credentials, scan/reset cache). The shell extension opens it with `--tab=manager` or `--tab=config`; per-game context-menu commands pass `--tab=manager --game=<appId>`.
-- **Automated storefront-first discovery (no external scrapers):** Automatically indexes games and harvests metadata/artwork directly from 17 installed storefront platforms on disk (Steam `libraryfolders.vdf`/`*.acf`/`librarycache` + Store API `appdetails`, Epic `.item` + Catalog `catcache.bin`, GOG Registry/SQLite, Xbox/MS Store `AppModel\Repository\Packages` & `.GamingRoot`/`MicrosoftGame.Config`, Battle.net, EA App, Ubisoft Connect, itch.io, Amazon Games, Riot Client, Rockstar Games Launcher, Legacy Games, HoYoPlay, Heroic Games Launcher, Playnite, and Lutris) without third-party scrapers (IGDB, SteamGridDB, VNDB).
+- **Automated storefront-first discovery (no external scrapers):** Automatically indexes games and harvests metadata/artwork directly from installed storefront platforms on disk (Steam `libraryfolders.vdf`/`*.acf`/`librarycache` + Store API `appdetails`, Epic `.item` + Catalog `catcache.bin`, GOG Registry/SQLite, Xbox/MS Store `AppModel\Repository\Packages` & `.GamingRoot`/`MicrosoftGame.Config`, Battle.net, EA App, Ubisoft Connect, itch.io, Amazon Games, Riot Client, Rockstar Games Launcher, Legacy Games, HoYoPlay) without third-party scrapers (IGDB, SteamGridDB, VNDB). Owned-but-uninstalled catalogue rows additionally come from Steam's Web API and read-only client caches (GOG Galaxy, itch butler, Xbox app, Ubisoft Connect) plus an optional legendary cache for Epic; see `docs/research/owned-games-sources.md`.
 - **Real-time installation & metadata sync:** Shell views (`IShellView`) monitor storefront manifest directories, registry keys, and `SHChangeNotifyRegister` events to automatically refresh the library within seconds when a game is installed, uninstalled, or updated in Game Explorer Studio.
 - **System locale & animated artwork support:** Respects the user's Windows system locale (`GetUserDefaultUILanguage` / `GetUserDefaultLocaleName`) for localized Steam Store metadata and UI strings, and supports multi-frame animated GIF artwork in the Library Manager page of Game Explorer Studio.
 - **Decentralized sync & user scoping:** User-scoped environment rooted in `%USERPROFILE%\Game Explorer\` with local OneDrive profile backup and sync readiness verification.
@@ -19,11 +19,12 @@ high-resolution box art, rich properties, and automated multi-store discovery. M
 
 | Command / Tool | Purpose |
 |---|---|
-| `pwsh -NoProfile -File scripts/build.ps1 -Configuration Release` | Native C++20 compilation with `/W4 /WX` (warnings as errors) |
-| `pwsh -NoProfile -File scripts/test.ps1 -Configuration Release` | Run native C++ unit and integration test suite (`GameExplorerTests.exe`, 55 tests) |
-| `pwsh -NoProfile -File scripts/package.ps1 -Configuration Release` | Package portable ZIP and compile dual-mode NSIS installer (`dist/`) |
-| `pwsh -NoProfile -File scripts/register.ps1` | Register COM virtual shell namespace extension (or via `register.bat`) |
-| `pwsh -NoProfile -File scripts/unregister.ps1` | Unregister COM virtual shell namespace extension (or via `unregister.bat`) |
+| `game-explorer.bat build [Release\|Debug]` | Native C++20 compilation with `/W4 /WX` (warnings as errors) |
+| `game-explorer.bat test [Release\|Debug]` | Run native C++ unit and integration test suite (`GameExplorerTests.exe`, 61 tests) |
+| `game-explorer.bat lint` | PSScriptAnalyzer zero-warning gate for `scripts\*.ps1` |
+| `game-explorer.bat package [Release\|Debug]` | Package portable ZIP and compile dual-mode NSIS installer (`dist/`) |
+| `game-explorer.bat release` | Build, test, lint, then package in one pass |
+| `game-explorer.bat register` / `game-explorer.bat unregister` | Register/unregister the COM virtual shell namespace extension (elevated terminal) |
 | `build\Release\GameExplorerStudio.exe --register` | Register the shell namespace extension from the Studio (self-elevates with a UAC prompt) |
 | `build\Release\GameExplorerStudio.exe --tab=manager\|catalogue\|config` | Open Game Explorer Studio on a specific page (`--manager`, `--catalogue`, `--config` are aliases) |
 | `build\Release\GameExplorerStudio.exe --game=<appId>` | Open the Library Manager pre-selected on one game |

@@ -19,7 +19,6 @@
 #include "GameExplorerCore/StorefrontScanner.h"
 #include "GameExplorerCore/Localization.h"
 #include "GameExplorerCore/StudioPages.h"
-#include "GameExplorerCore/InstallTargets.h"
 
 #pragma comment(lib, "dwmapi.lib")
 
@@ -166,8 +165,6 @@ constexpr int IDC_EDT_SGDB_KEY           = 2044;
 constexpr int IDC_EDT_IGDB_CLIENT_ID     = 2045;
 constexpr int IDC_EDT_IGDB_CLIENT_SECRET = 2046;
 constexpr int IDC_BTN_RESET_CACHE        = 2047;
-constexpr int IDC_EDT_INSTALL_BASE       = 2048;
-constexpr int IDC_BTN_BROWSE_INSTALL_BASE = 2049;
 
 HWND g_hwndLblIntegrationStatus = nullptr;
 HWND g_hwndBtnScanLibrary       = nullptr;
@@ -194,9 +191,6 @@ HWND g_hwndEdtRaKey             = nullptr;
 HWND g_hwndEdtSgdbKey           = nullptr;
 HWND g_hwndEdtIgdbClientId      = nullptr;
 HWND g_hwndEdtIgdbClientSecret  = nullptr;
-HWND g_hwndEdtInstallBase        = nullptr;
-HWND g_hwndBtnBrowseInstallBase  = nullptr;
-HWND g_hwndLblInstallBase        = nullptr;
 
 // Controls that only need to exist for layout (no command handling) still need a stable handle
 // so the page can be re-flowed whenever the Studio frame resizes it.
@@ -218,7 +212,7 @@ HWND g_hwndLblFallbackHelp     = nullptr;
 // Card geometry is computed on every resize and shared by the layout and paint paths, so the
 // rounded card panels and the controls inside them can never drift apart.
 constexpr int CARD_COUNT = 5;
-constexpr int CARD_HEIGHTS[CARD_COUNT] = { 100, 152, 150, 190, 122 };
+constexpr int CARD_HEIGHTS[CARD_COUNT] = { 100, 152, 110, 190, 122 };
 constexpr int CARD_GAP = 12;
 constexpr int PAGE_MARGIN = 20;
 constexpr int CARD_PADDING = 16;
@@ -292,16 +286,6 @@ void LayoutConfigControls(HWND hwnd) {
     place(g_hwndBtnOpenOneDriveDir, innerLeft + actionWidth + 8, card2.top + 64, actionWidth, 30);
     place(g_hwndBtnSyncOneDrive, innerLeft + (actionWidth + 8) * 2, card2.top + 64,
           innerWidth - (actionWidth + 8) * 2, 30);
-
-    // Card 2 also holds the one base folder the catalogue installs into. Each storefront gets its
-    // own subfolder inside it; a per-install custom folder stays available in the catalogue.
-    const int browseWidth = 96;
-    const int installLabelWidth = 148;
-    place(g_hwndLblInstallBase, innerLeft, card2.top + 106, installLabelWidth, 20);
-    place(g_hwndEdtInstallBase, innerLeft + installLabelWidth, card2.top + 102,
-          innerWidth - installLabelWidth - browseWidth - 8, ThemeControls::kFieldHeight);
-    place(g_hwndBtnBrowseInstallBase, innerLeft + innerWidth - browseWidth, card2.top + 102,
-          browseWidth, ThemeControls::kFieldHeight);
 
     // Card 3: achievement credentials (two label/field rows that share the row width).
     const int fieldH = ThemeControls::kFieldHeight;
@@ -409,13 +393,6 @@ void LoadConfigValues() {
     if (g_hwndEdtIgdbClientId != nullptr)     SetWindowTextW(g_hwndEdtIgdbClientId, s.igdbClientId.c_str());
     if (g_hwndEdtIgdbClientSecret != nullptr) SetWindowTextW(g_hwndEdtIgdbClientSecret, s.igdbClientSecret.c_str());
 
-    // Show the effective folder, not an empty box: a blank setting means "use the default".
-    if (g_hwndEdtInstallBase != nullptr) {
-        const std::wstring installBase =
-            s.installBaseFolder.empty() ? DefaultInstallBaseFolder() : s.installBaseFolder;
-        SetWindowTextW(g_hwndEdtInstallBase, installBase.c_str());
-    }
-
     UpdateIntegrationStatusUI();
 }
 
@@ -497,11 +474,6 @@ void SaveConfigValues(HWND hwndParent) {
         GetWindowTextW(g_hwndEdtIgdbClientSecret, buf, 512);
         s.igdbClientSecret = buf;
     }
-    if (g_hwndEdtInstallBase != nullptr) {
-        GetWindowTextW(g_hwndEdtInstallBase, buf, 512);
-        s.installBaseFolder = buf;
-    }
-
     if (SettingsManager::Save(s)) {
         if (s.enableOneDriveBackup) {
             Storage::SyncToOneDrive();
@@ -596,10 +568,6 @@ LRESULT CALLBACK ConfigWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPara
                                                BS_OWNERDRAW, g_hFont);
         g_hwndBtnSyncOneDrive = makeButton(L"Sync to OneDrive Now", IDC_BTN_SYNC_ONEDRIVE,
                                             BS_OWNERDRAW, g_hFontBold);
-        g_hwndLblInstallBase = makeStatic(L"Install base folder:", 0);
-        g_hwndEdtInstallBase = makeEdit(IDC_EDT_INSTALL_BASE, false);
-        g_hwndBtnBrowseInstallBase = makeButton(L"Browse...", IDC_BTN_BROWSE_INSTALL_BASE,
-                                                BS_OWNERDRAW, g_hFont);
 
         // Card 3: Universal Achievement Credentials & API Keys
         g_hwndLblSteamKey = makeStatic(L"Steam Web API Key:", 0);
@@ -1069,15 +1037,6 @@ LRESULT CALLBACK ConfigWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPara
             } else if (ThemeControls::IsThemedCheck(control)) {
                 ThemeControls::ToggleCheck(control);
             }
-        }
-
-        if (id == IDC_BTN_BROWSE_INSTALL_BASE) {
-            std::wstring folder;
-            if (PickFolderDialog(hwnd, L"Choose the base folder for game installs", folder) &&
-                g_hwndEdtInstallBase != nullptr) {
-                SetWindowTextW(g_hwndEdtInstallBase, folder.c_str());
-            }
-            return 0;
         }
 
         if (id == IDC_BTN_RESET_CACHE) {

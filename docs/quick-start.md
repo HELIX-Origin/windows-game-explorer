@@ -9,7 +9,7 @@
 Windows Game Explorer is distributed in two official formats: an automated installer and a portable standalone archive.
 
 ### Option A: Standard Setup Installer (Recommended)
-1. Download the latest installer: `windows-game-explorer-v2.1.1-setup.exe` from the [GitHub Releases](https://github.com/HELIX-Origin/windows-game-explorer/releases).
+1. Download the latest installer: `windows-game-explorer-v2.5.0-setup.exe` from the [GitHub Releases](https://github.com/HELIX-Origin/windows-game-explorer/releases).
 2. Run the installer.
 3. The setup automatically:
    - Installs the shell extension (`GameExplorerShell.dll`) and Game Explorer Studio (`GameExplorerStudio.exe`) to `%LOCALAPPDATA%\Programs\Windows Game Explorer\`.
@@ -17,10 +17,10 @@ Windows Game Explorer is distributed in two official formats: an automated insta
    - Pins **Games** directly under File Explorer's navigation pane tree (alongside native Windows 11 *Home* and *Gallery*).
 
 ### Option B: Portable ZIP Package
-1. Download `windows-game-explorer-v2.1.1-win64.zip`.
+1. Download `windows-game-explorer-v2.5.0-win64.zip`.
 2. Extract the archive to any permanent folder (e.g. `C:\Tools\Windows Game Explorer`).
-3. Right-click **`register.bat`** and select **Run as Administrator** to register the shell extension and setup desktop namespace keys.
-4. *(To remove later, simply run `unregister.bat` as Administrator).*
+3. Open an elevated terminal in the extracted folder and run **`game-explorer.bat register`** to register the shell extension and set up the desktop namespace keys.
+4. *(To remove later, run `game-explorer.bat unregister` from an elevated terminal).*
 
 ---
 
@@ -106,7 +106,9 @@ Game Explorer Studio (`GameExplorerStudio.exe`) is the single Win32 companion GU
    - Discover, search, and apply artwork from SteamGridDB, Steam Store, IGDB, and internal Web search.
    - Edit per-game metadata and synopsis, and cleanly reset the local artwork cache with `[ 🧹 Reset Cache ]`.
 2. **Game Catalogue**:
-   - Reserved for the owned-games catalogue; currently an explicit placeholder page.
+   - Browses every game you own on a supported storefront, installed or not, in one filterable, sortable, paged list.
+   - Merges multi-store ownership into single rows and keeps edition labels per source.
+   - Hands installs to the storefront's own client; play installed games from the File Explorer **Games** view.
 3. **Configuration**:
    - Configure presentation layout modes (Cover Art, Hero Banner, Details).
    - Trigger manual storefront scans.

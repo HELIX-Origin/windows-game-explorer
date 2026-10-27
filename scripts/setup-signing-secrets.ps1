@@ -7,6 +7,10 @@ param(
   [string]$Repo = ""
 )
 
+$ErrorActionPreference = "Stop"
+. (Join-Path $PSScriptRoot "_common.ps1")
+Write-GameExplorerBanner -Title "Signing secrets"
+
 if (-not (Test-Path $CertPath)) {
   $discovered = Get-ChildItem -Path "certificates" -Filter "*.pfx" -ErrorAction SilentlyContinue | Select-Object -First 1
   if (-not $discovered) {
@@ -47,3 +51,4 @@ Write-Host "Uploading WINDOWS_CERTIFICATE_PASSWORD to GitHub Secrets for $Repo..
 $Password | gh secret set WINDOWS_CERTIFICATE_PASSWORD --repo $Repo
 
 Write-Host "Successfully configured signing secrets on $Repo!"
+Write-GameExplorerSuccess -Action "Signing secret upload"

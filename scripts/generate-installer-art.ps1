@@ -4,6 +4,8 @@
 param()
 
 $ErrorActionPreference = "Stop"
+. (Join-Path $PSScriptRoot "_common.ps1")
+Write-GameExplorerBanner -Title "Installer artwork"
 $RepoRoot = Split-Path -Parent $PSScriptRoot
 $InstallerDir = Join-Path $RepoRoot "installer"
 $AssetIcon = Join-Path $RepoRoot "assets\game-explorer-icon.png"

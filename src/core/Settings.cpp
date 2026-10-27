@@ -46,9 +46,6 @@ AppSettings SettingsManager::Load() {
     if (auto val = db.GetSetting(L"igdb_client_secret")) {
         s.igdbClientSecret = *val;
     }
-    if (auto val = db.GetSetting(L"install_base_folder")) {
-        s.installBaseFolder = *val;
-    }
 
     return s;
 }
@@ -70,7 +67,6 @@ bool SettingsManager::Save(const AppSettings& settings) {
     db.SetSetting(L"sgdb_api_key", settings.steamGridDbApiKey);
     db.SetSetting(L"igdb_client_id", settings.igdbClientId);
     db.SetSetting(L"igdb_client_secret", settings.igdbClientSecret);
-    db.SetSetting(L"install_base_folder", settings.installBaseFolder);
 
     return true;
 }

@@ -1,55 +1,59 @@
 # Windows Game Explorer - Unregister Shell Extension (PowerShell)
+#
+# Run through the root game-explorer.bat (`game-explorer.bat unregister`), which
+# checks elevation before dispatching. This script never spawns a second window:
+# if it is invoked without Administrator rights it stops with instructions.
+
+[Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidUsingWriteHost', '', Justification = 'CLI shell extension unregistration status output')]
+[CmdletBinding()]
 param(
+    [Parameter(Position = 0)]
     [string]$DllPath
 )
 
-$ErrorActionPreference = 'SilentlyContinue'
+$ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot '_common.ps1')
 
-# Ensure running elevated
-$isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
-if (-not $isAdmin) {
-    Write-Host "[*] Administrator privileges required. Requesting elevation..." -ForegroundColor Yellow
-    Start-Process -FilePath powershell.exe -ArgumentList ("-NoProfile -ExecutionPolicy Bypass -File `"{0}`" {1}" -f $PSCommandPath, $DllPath) -Verb RunAs
-    exit
+Write-GameExplorerBanner -Title 'Unregister shell extension'
+
+if (-not (Test-GameExplorerAdministrator)) {
+    Write-GameExplorerFailure -Action 'Unregistration' -Detail 'Administrator rights are required; open an elevated terminal and run: game-explorer.bat unregister'
+    exit 1
 }
 
-# Locate GameExplorerShell.dll if not explicitly passed
-if (-not $DllPath -or -not (Test-Path $DllPath)) {
+# Locate GameExplorerShell.dll when no explicit path was supplied.
+if (-not $DllPath -or -not (Test-Path -LiteralPath $DllPath)) {
     $candidates = @(
-        (Join-Path $PSScriptRoot "..\GameExplorerShell.dll"),
-        (Join-Path $PSScriptRoot "..\build\Release\GameExplorerShell.dll"),
-        (Join-Path $PSScriptRoot "..\Release\GameExplorerShell.dll")
+        (Join-Path $PSScriptRoot '..\GameExplorerShell.dll'),
+        (Join-Path $PSScriptRoot '..\build\Release\GameExplorerShell.dll'),
+        (Join-Path $PSScriptRoot '..\Release\GameExplorerShell.dll')
     )
-    foreach ($cand in $candidates) {
-        if (Test-Path $cand) {
-            $DllPath = (Resolve-Path $cand).Path
+    foreach ($candidate in $candidates) {
+        if (Test-Path -LiteralPath $candidate) {
+            $DllPath = (Resolve-Path -LiteralPath $candidate).Path
             break
         }
     }
 }
 
-Write-Host "`n+--------------------------------------------------------------------------+" -ForegroundColor Cyan
-Write-Host "|         ___   _   __  __ ___   _____  _____ _    ___  ___ ___ ___        |" -ForegroundColor Cyan
-Write-Host "|        / __| /_\ |  \/  | __| | __\ \/ / _ \ |  / _ \| _ \ __| _ \       |" -ForegroundColor Cyan
-Write-Host "|       | (_ |/ _ \| |\/| | _|  | _| >  <|  _/ |_| (_) |   / _||   /       |" -ForegroundColor Cyan
-Write-Host "|        \___/_/ \_\_|  |_|___| |___/_/\_\_| |____\___/|_|_|___|_|_\       |" -ForegroundColor Cyan
-Write-Host "+--------------------------------------------------------------------------+" -ForegroundColor Cyan
-Write-Host "|         Windows Game Explorer -- Shell Extension Unregistration          |" -ForegroundColor White
-Write-Host "+--------------------------------------------------------------------------+`n" -ForegroundColor Cyan
+# Stop the Studio and the background service so the DLL can be released.
+Stop-Process -Name 'GameExplorerStudio' -Force -ErrorAction SilentlyContinue
+Stop-Service -Name 'GameExplorerService' -Force -ErrorAction SilentlyContinue
+Stop-Process -Name 'GameExplorerService' -Force -ErrorAction SilentlyContinue
 
-# Terminate companion processes & service
-Stop-Process -Name "GameExplorerStudio" -Force -ErrorAction SilentlyContinue
-Stop-Service -Name "GameExplorerService" -Force -ErrorAction SilentlyContinue
-Stop-Process -Name "GameExplorerService" -Force -ErrorAction SilentlyContinue
-
-if ($DllPath -and (Test-Path $DllPath)) {
-    Write-Host "Target DLL : " -NoNewline -ForegroundColor White
-    Write-Host "$DllPath`n" -ForegroundColor Cyan
-    Write-Host "Unregistering Windows Shell Extension with regsvr32..." -ForegroundColor White
-    $proc = Start-Process -FilePath "regsvr32.exe" -ArgumentList @("/u", "/s", "`"$DllPath`"") -PassThru -Wait
+if ($DllPath -and (Test-Path -LiteralPath $DllPath)) {
+    Write-Host ('Target DLL : {0}' -f $DllPath) -ForegroundColor White
+    Write-Host 'Unregistering the Windows Shell extension with regsvr32...' -ForegroundColor White
+    $process = Start-Process -FilePath 'regsvr32.exe' -ArgumentList @('/u', '/s', $DllPath) -PassThru -Wait
+    if ($process.ExitCode -ne 0) {
+        Write-GameExplorerFailure -Action 'Unregistration' -Detail ('regsvr32 exited with code {0}' -f $process.ExitCode)
+        exit $process.ExitCode
+    }
+} else {
+    Write-Host 'GameExplorerShell.dll not found; cleaning registration keys and shortcuts only.' -ForegroundColor Yellow
 }
 
-# Clean shortcuts
+# Remove shortcut leftovers from current-user and all-users contexts.
 $shortcutPaths = @(
     "$env:USERPROFILE\Desktop\Games.lnk",
     "$env:USERPROFILE\OneDrive\Desktop\Games.lnk",
@@ -59,18 +63,23 @@ $shortcutPaths = @(
     "$env:PROGRAMDATA\Microsoft\Windows\Start Menu\Programs\Games.lnk",
     "$env:PROGRAMDATA\Microsoft\Windows\Start Menu\Programs\Windows Game Explorer\Games.lnk"
 )
-foreach ($lnk in $shortcutPaths) {
-    if (Test-Path $lnk) { Remove-Item -Path $lnk -Force -ErrorAction SilentlyContinue }
+foreach ($shortcut in $shortcutPaths) {
+    if (Test-Path -LiteralPath $shortcut) {
+        Remove-Item -LiteralPath $shortcut -Force -ErrorAction SilentlyContinue
+    }
 }
-$dirPaths = @(
+
+$directoryPaths = @(
     "$env:APPDATA\Microsoft\Windows\Start Menu\Programs\Windows Game Explorer",
     "$env:PROGRAMDATA\Microsoft\Windows\Start Menu\Programs\Windows Game Explorer"
 )
-foreach ($dir in $dirPaths) {
-    if (Test-Path $dir) { Remove-Item -Path $dir -Recurse -Force -ErrorAction SilentlyContinue }
+foreach ($directory in $directoryPaths) {
+    if (Test-Path -LiteralPath $directory) {
+        Remove-Item -LiteralPath $directory -Recurse -Force -ErrorAction SilentlyContinue
+    }
 }
 
-Write-Host "`n+--------------------------------------------------------------------------+" -ForegroundColor Green
-Write-Host "|     [SUCCESS] Windows Game Explorer Shell Successfully Unregistered      |" -ForegroundColor Green
-Write-Host "+--------------------------------------------------------------------------+`n" -ForegroundColor Green
-Write-Host "Cleaned up all namespace and CLSID registrations from Windows Shell.`n" -ForegroundColor White
+Write-GameExplorerSuccess -Action 'Unregistration'
+Write-Host 'Shell namespace and CLSID registrations were removed.' -ForegroundColor White
+Write-Host ''
+exit 0

@@ -1,7 +1,7 @@
 # HANDOFF.md — Windows Game Explorer Session Handoff
 
 **Last updated:** 2026-10-26
-**Current session status:** Direct In-Memory Storefront Owned Games Loading, `GameExplorerService.exe` Background Service (LocalSystem + Task Scheduler bootstrap), Xbox AsyncCache Ingestion, Multi-Storefront Deduplication & Install Popup Menu, Canonical PowerShell Registration (`register.ps1` / `unregister.ps1` with batch entry points and ASCII banners), and Windows 10/11 Platform Guardrails **delivered in the working tree (uncommitted)** · SQLite strictly limited to persistence/cache layer · Shadow-copy staging abandoned in favour of direct `regsvr32` registration · Uninstaller service teardown resolved · 0 errors / 0 warnings under `/W4 /WX` · 55/55 unit tests passing · Complete distribution packaging verified (`dist/windows-game-explorer-v2.4.0-setup.exe`).
+**Current session status:** `v2.5.0` release gate passed — version stamped in `CMakeLists.txt` and the NSIS installer, docs reconciled to the shipped catalogue, `CHANGELOG.md` promoted to `[2.5.0]`, release notes written with final SHA256s · uncommitted on top of `origin/main` = `93eba3e` · `game-explorer.bat release` completed in one pass: 0 errors / 0 warnings under `/W4 /WX`, 61/61 unit tests, 0 PSScriptAnalyzer diagnostics, `dist\windows-game-explorer-v2.5.0-setup.exe` (1,813,439 bytes) + `-win64.zip` + `-ROMs-template.zip` · awaiting explicit authorization to commit, push, tag `v2.5.0` and publish the release.
 **Project:** windows-game-explorer (Windows Game Explorer)
 **Root:** projects/windows-game-explorer
 
@@ -12,7 +12,7 @@
 
 ---
 
-## 0) [windows-game-explorer] SVC-01, CAT-02 & Registration Alignment (delivered — uncommitted)
+## 0) [windows-game-explorer] SVC-01, CAT-02 & Registration Alignment (v2.4.0 — released, pushed)
 
 ### Delivered in this workstream (working tree)
 - **SQLite Architectural Boundary & Direct Storefront Loading**:
@@ -41,12 +41,153 @@
   - Packaging: **Portable ZIP, ROMs Template ZIP, and NSIS Setup Installer compile cleanly** into `dist/`.
 
 ### State
-- All changes are **uncommitted** (`HEAD` = `f82f4b9`, v2.3.0). No git mutation authorized yet.
-- Version in `CHANGELOG.md` is `2.4.0` [Unreleased].
+- Delivered in the v2.4.0 release commit (`1c9e1d3`), tagged `v2.4.0` and pushed to `origin main`;
+  the follow-up `93eba3e` fix is pushed as well.
+- 55/55 unit tests at the v2.4.0 tag; the current working tree reports 61/61 after slices 2b/2c retired
+  `TestInstallTargets` and added the Ubisoft/legendary/gate coverage.
 
 ---
 
-## 0a) [windows-game-explorer] CAT-01 slice 2a: Owned-Games Catalogue UI, Steam Sync & Per-Store Install Targets (delivered — uncommitted)
+## 0b) [windows-game-explorer] Unified CLI Dispatcher (delivered — v2.5.0)
+
+### Delivered in this workstream (working tree)
+- **Single root batch dispatcher**: `game-explorer.bat` is now the only batch file. Explicit
+  subcommands (`build`, `test`, `lint`, `package`, `release`, `register`, `unregister`, `sign`,
+  `art`, `setup-signing`, `help`) delegate to `scripts\*.ps1`, propagate exit codes, verify the
+  runbook exists, and never open a second window. `build.bat`, `release.bat`, `register.bat` and
+  `unregister.bat` were removed.
+- **Shared PowerShell presentation**: new `scripts\_common.ps1` owns the ASCII banner, colourised
+  step/result lines and the Administrator probe; all eight runbooks dot-source it, so the dispatcher
+  does not duplicate banners.
+- **Fail-fast registration**: `register.ps1` / `unregister.ps1` verify elevation and print the exact
+  command to rerun instead of spawning an elevated window; they also propagate `regsvr32` exit codes.
+- **Self-contained portable package**: the ZIP now ships `game-explorer.bat` plus
+  `scripts\register.ps1`, `scripts\unregister.ps1` and `scripts\_common.ps1` in the installed layout;
+  the NSIS installer ships the same files and retires the old root batch files on upgrade.
+- **Docs reconciled**: project `README.md`, `docs/README.md`, `docs/quick-start.md`,
+  `docs/developer-guide.md`, `AGENTS.md`, `BUGS.md`, `TODO.md` and `CHANGELOG.md`.
+- **Release automation retired**: `.github/workflows/release.yml` was deleted. It rebuilt only
+  `GameExplorerShell.dll` + `GameExplorerStudio.exe` and therefore never matched the manual release
+  set (service, dispatcher, runbooks, NSIS setup, portable ZIP, ROMs template). `ci.yml` still runs
+  the zero-warning build, tests and PSScriptAnalyzer lint on `main`/PRs; `cleanup-failed-runs.yml` is
+  unchanged. Releases are
+  packaged with `game-explorer.bat release` and published manually. The two historical failures
+  (`v2.3.0`, `v2.4.0`) were the environment-sensitive `PlatformLauncherEmulatorDiscovery` test, fixed
+  at HEAD `93eba3e`; the latest CI run on `main` is green.
+
+### Verification
+- `game-explorer.bat help` → exit 0; unknown command → exit 1 with usage.
+- `game-explorer.bat build Release` → **0 errors, 0 warnings**.
+- `game-explorer.bat test Release` → **61/61**.
+- `game-explorer.bat lint` → **0 PSScriptAnalyzer diagnostics**.
+- `game-explorer.bat package Release` → setup 1,813,439 bytes; ZIP verified to contain the dispatcher
+  and `scripts\` runbooks.
+- `game-explorer.bat release` → one pass, exit 0: build 0/0, 61/61 tests, 0 lint diagnostics, setup +
+  portable ZIP + ROMs template in `dist/`.
+- Release artifacts (SHA256): setup `AE0A36C6…CEF455E`, ZIP `A4DBF7AC…4FEC52A`, ROMs
+  `A36A908E…5EF856E` (full values in `.github/releases/v2.5.0.md`).
+
+### Next
+- Commit, push, tag `v2.5.0` and publish the release — pending explicit user authorization.
+- M18 (planned, unscheduled): Windows 10 vs 11 shell compatibility research (`ARCH-01`).
+  Relocation/move and in-app install-progress tracking are dropped (user decision 2026-10-26) with
+  install-location handling. The catalogue stays list-only by design (no detail pane, user decision
+  2026-10-26).
+
+---
+
+## 0a) [windows-game-explorer] CAT-01 slice 2c: Owned-Library Coverage & the Windows-Only Gate (delivered — v2.5.0)
+
+### Delivered in this workstream (working tree)
+- **Ubisoft Connect owned library**: `ScanUbisoftOwnedGames()` reads two read-only caches under
+  `%LOCALAPPDATA%\Ubisoft Game Launcher\cache\` — `ownership\<accountId>` (owned app/space UUIDs) and
+  `configuration\configurations`. The configuration file is parsed as length-delimited protobuf
+  (`0A <len> 08 <installId> 10 <launchId> 1A <yamlLen> <yaml>`); titles resolve from
+  `localizations.default` (`l1`/`GAMENAME`), then `sort_string` (ordinal stripped), then
+  `installer.game_identifier`, with trademark marks and typographic quotes normalized. Artwork comes
+  from the official CDN file named by `root.thumb_image`, the same asset base the installed-game
+  scanner uses. Install stays delegated: `uplay://launch/<installId>/0`.
+- **Epic owned library through legendary (optional)**: `ScanLegendaryEpicOwnedGames()` reads the cache
+  legendary writes after the user authenticates its CLI — `assets.json` (the platform asset list
+  legendary's own `get_assets()` treats as ownership) plus per-app `metadata\*.json` — preferring
+  `Windows`, falling back to `Win32`, and skipping namespace `ue` exactly like legendary's own list.
+  Titles, synopsis, release year and wide key image come from metadata. Rows keep Epic identity
+  (`epic_<appName>`) and install through `com.epicgames.launcher://apps/<appName>?action=install`; the
+  app never authenticates, installs or writes through legendary.
+- **Windows-only gate**: `StorefrontSource::windowsInstallable` records per-source platform evidence
+  (Xbox `availablePlatforms` containing `PC`, GOG `osCompatibility` piece 220, itch
+  `scanned_platforms`, batched Steam `IStoreBrowseService/GetItems` probes), and
+  `FilterWindowsInstallableOwnedGames()` drops console/mobile/macOS/Linux-only editions in one place
+  while keeping a title when any PC edition survives. Unknown platform data keeps the title.
+- **Coverage record**: `docs/research/owned-games-sources.md` rewritten to the shipped state — per-store
+  verified artefacts, the gate evidence per store, aggregator deferrals (Playnite LiteDB, Heroic,
+  Lutris) and the stores that stay installed-only because they publish no sanctioned offline
+  owned-uninstalled artefact.
+- **Installer license page**: `MUI_PAGE_LICENSE` now reads the installer-only `installer/LICENSE.txt`,
+  whose MIT paragraphs are single lines so the rich-edit control wraps them to the dialog width
+  instead of stacking its wrap on top of 78-column hard breaks. The installed `LICENSE` is unchanged.
+
+### Verification
+- `/W4 /WX` build: **0 errors, 0 warnings**.
+- Unit tests: **61/61** (`scripts/test.ps1`); four new cases cover the Ubisoft cache/title resolution and
+  ownership-id dedupe plus legendary asset/metadata mapping.
+- Real-machine probe: **59 owned Ubisoft titles** across 66 ownership UUIDs (incl. uninstalled Star Wars
+  Outlaws, Avatar: Frontiers of Pandora, Prince of Persia: The Lost Crown) and **250 owned Epic titles**
+  (GTA V, Redout 2, Arcadegeddon, …) from 304 Windows assets minus UE/metadata gaps.
+
+### State
+- Uncommitted on top of `93eba3e` (`origin/main`). Included in the `v2.5.0` release gate; commit/push/tag awaits explicit authorization.
+- Project version stamped `2.5.0`; `CHANGELOG.md` promoted to `[2.5.0] - 2026-10-26`.
+
+### Next
+- EA App / Battle.net / Amazon Games / Rockstar owned-uninstalled libraries remain installed-only: no
+  verified offline artefact exists and no sanctioned endpoint is available without the app handling
+  auth. Playnite (LiteDB) and Heroic caches stay deferred aggregators.
+- Next planned: M18 Windows 10 vs 11 shell compatibility research (`ARCH-01`). Install progress tracking
+  and library relocation are dropped (user decision 2026-10-26) with install-location handling. No
+  per-title detail pane — the catalogue is intentionally list-only.
+
+---
+
+## 0b) [windows-game-explorer] CAT-01 slice 2b: Delegated Installs, Catalogue Editions & Synopsis (delivered — v2.5.0)
+
+### Delivered in this workstream (working tree)
+- **Install location belongs to the storefront**: `InstallTargets` (`src/core/InstallTargets.cpp`,
+  `tests/TestInstallTargets.cpp`, `docs/research/install-library-folders.md`), the Configuration
+  "Install base folder" row, `AppSettings::installBaseFolder` and the `install_base_folder` setting are
+  removed. A storefront install URI (`steam://install/<appid>`) cannot be told where to install, so a
+  pre-created `<base>\Steam` library never controlled the outcome. The catalogue now only hands the
+  request over and reports "Passed install request to <store>."; the store's own client owns the folder.
+- **Editions**: `StorefrontSource::editionLabel` plus `ExtractBaseTitle()` keep "Deluxe Edition" /
+  "Console Edition (Game Preview)" out of `OwnedGame::title`, so cross-store deduplication compares the
+  base game while the Install and Store page popup menus still name the edition being acted on. An
+  already-installed source is labelled "(Installed)" and selecting it explains that playing happens in
+  the File Explorer Games view rather than reinstalling.
+- **Catalogue synopsis**: `OwnedGame::synopsis` carries each source's overview in the metadata model;
+  the catalogue itself stays list-only and does not render a detail pane.
+- **Themed checkboxes/radios**: `ThemeControls` stores `BM_SETCHECK` and answers `BM_GETCHECK`
+  (`HoverState::checkState`), so owned-drawn checkboxes and radios keep their state; covered by
+  `tests/TestSettings.cpp`.
+- **Configuration**: card heights return to `{100,152,110,190,122}` now that card 2 no longer carries the
+  install-folder row.
+
+### Verification
+- `/W4 /WX` build: **0 errors, 0 warnings**.
+- Unit tests: **53/53** (`scripts/test.ps1`); `TestInstallTargets` retired with the feature.
+- Not yet re-captured: this slice changes catalogue/Configuration behaviour but has no new screenshot
+  evidence; the populated-list capture is still outstanding from slice 2a.
+
+### State
+- Uncommitted on top of `93eba3e` (`origin/main`). Included in the `v2.5.0` release gate; commit/push/tag awaits explicit authorization.
+- Project version stamped 2.5.0; `CHANGELOG.md` promoted to `[2.5.0]`.
+
+### Next
+- Remaining owned-library work: EA App (no verified offline artefact; installed-only for now).
+  Relocation and install-progress tracking are dropped (user decision 2026-10-26); no detail pane.
+
+---
+
+## 0c) [windows-game-explorer] CAT-01 slice 2a: Owned-Games Catalogue UI & Steam Sync (v2.4.0)
 
 ### Delivered in this workstream (working tree)
 - **Catalogue engine**: `OwnedGames` model plus `OwnedGamesQuery` / `OwnedGamesPage` with filtering
@@ -56,20 +197,16 @@
   and CRUD in `Database`, covered by `tests/TestOwnedGames.cpp`.
 - **Catalogue page**: the placeholder is gone. `CataloguePage.cpp` paints a custom list with a sticky
   column header and the shared `ThemeScroll` gutter, a toolbar card with all filters/sorts, an empty
-  state, a status line, footer pagination and action buttons, and reads the install base folder from
-  settings. Combos are forced to the 28 px field height (`CB_SETITEMHEIGHT -1` = 22) so they line up
-  with text fields.
+  state, a status line and footer pagination/action buttons. Combos are forced to the 28 px field
+  height (`CB_SETITEMHEIGHT -1` = 22) so they line up with text fields.
 - **Steam sync**: `IPlayerService/GetOwnedGames` on a worker thread with the stored Web API key;
   SteamID64 falls back to the most-recent account in `<Steam>/config/loginusers.vdf`. A private
   "Game details" profile that returns `game_count: 0` is reported as no owned games, never filled in.
-  Results replace the `steam` rows and installed titles are badged from the library scan.
-- **Install targets**: `InstallTargets` implements one Config-owned base folder plus per-store
-  subfolders. Steam gets a real library (`steamapps/{common,downloading,temp}` +
-  `libraryfolder.vdf` with a random 64-bit `contentid`, written once); Epic/GOG/itch get only the
-  folder plus a note because their clients own install registration; Xbox/MSIX refuses a custom
-  folder. Evidence: [`docs/research/install-library-folders.md`](./docs/research/install-library-folders.md).
-- **Configuration**: new "Install base folder" row with a Browse button on card 2, persisted as
-  `install_base_folder`, card heights retuned so everything fits 1200×920.
+  Results are merged in memory (no `owned_games` table) and installed titles are badged from the
+  library scan.
+- **Install delegation**: installs always run through the storefront's own URI. The v2.4.0 tag also
+  shipped an `InstallTargets` base-folder/per-store library scaffold; slice 2b removed it because the
+  install URI cannot be pointed at a folder, so it never controlled where the store installed.
 - **Verification**: `/W4 /WX` build 0 errors / 0 warnings; 53/53 tests; catalogue and Configuration
   captured only after `capture-verified.ps1` reported `foreground=True uncovered=True`; pixel probes
   show every field at `#2B2B2B`, canvas `#202020`, cards `#2D2D2D`, and 0 pure-black pixels; overlap
@@ -78,22 +215,18 @@
 ### Known remaining
 - Populated-list rendering has not been captured with a live owned library yet (the engine paths are
   unit-tested; the chrome/empty state are pixel-verified).
-- GOG, Epic, Xbox, Ubisoft Connect, EA App and itch.io ownership sync still pending; genre/tag/rating/
-  family-sharing columns stay empty until those sources (or Steam metadata for genres/tags) land.
-- Catalogue detail pane, install progress tracking, library relocation and `catalogue\` cache
-  persistence remain open in `TODO.md` (CAT-01).
+- Epic and Ubisoft Connect ownership sync landed in slice 2c; EA App remains pending. Genre/tag/rating/family-sharing
+  columns stay empty until those sources (or Steam metadata for genres/tags) land.
+- Catalogue detail pane, install-progress tracking and library relocation are dropped
+  (user decisions 2026-10-26); the catalogue stays a single list view.
 
 ### State
-- All of the above is **uncommitted** (`HEAD` = `f82f4b9`, v2.3.0). No git mutation has been authorized.
-- Project version remains 2.4.0 with new work under `CHANGELOG.md` `[Unreleased]`.
-
-### Next
-- Remaining storefront syncs, then catalogue detail pane and install progress.
-- **SVC-01**: `LocalService` service skeleton, Task Scheduler bootstrap, per-session path routing, named-pipe IPC.
+- Released in `v2.4.0` (`1c9e1d3`, tagged and pushed); the install-target part of this slice was
+  superseded by slice 2b above.
 
 ---
 
-## 0a) [windows-game-explorer] W.62: Field Surface & Edge-Repaint Defects (delivered — uncommitted)
+## 0d) [windows-game-explorer] W.62: Field Surface & Edge-Repaint Defects (v2.4.0)
 
 ### Delivered in this workstream (working tree)
 - **Black field backgrounds (BUG-15)**: `g_hEditBrush` was created from `ThemeControls::FieldSurfaceColor()` before `ThemeControls::SetTheme()` published the palette, so the brush was built from a zero-initialised palette and came out `RGB(0,0,0)`. Both `EnsureManagerResources()` and `EnsureConfigResources()` now call `SetTheme()` before deriving the brush. The synopsis editor's interior histogram is uniformly `#2B2B2B` (was 36 765 black pixels); a sweep of all 59 Manager and 32 Configuration control rects reports zero black interior patches.
@@ -106,10 +239,10 @@
 - Synopsis in-field scrollbar (`QUIRK-01`) is resolved: `ThemeFieldScroll` paints the shared
   `ThemeScroll` bar inside the rounded frame (gutter 22 px, no native `WS_VSCROLL`).
 - Manager combo text buffers now allocate `length + 1` before `CB_GETLBTEXT` (fixed).
-- CAT-01 slice 2a is delivered; see section 0 above.
+- CAT-01 slice 2a is delivered; see the CAT-01 slices above.
 
 ### State
-- All of the above is **uncommitted** (`HEAD` = `f82f4b9`, v2.3.0). No git mutation has been authorized.
+- Released in `v2.4.0` (`1c9e1d3`, tagged and pushed to `origin main`).
 - Project version remains 2.4.0 with new work under `CHANGELOG.md` `[Unreleased]`.
 
 ### Next
@@ -118,7 +251,7 @@
 
 ---
 
-## 1) [windows-game-explorer] W.61: Game Explorer Studio Unified GUI, Fluent Controls & Standalone-App Retirement (delivered — uncommitted)
+## 0e) [windows-game-explorer] W.61: Game Explorer Studio Unified GUI, Fluent Controls & Standalone-App Retirement (v2.4.0)
 
 ### Delivered in this workstream (working tree)
 - **Single companion GUI**: `GameExplorerStudio.exe` hosts **Library Manager**, **Game Catalogue** (explicit placeholder) and **Configuration** as child pages in one Fluent tabbed window; Studio minimum size 1200×920, initial 1360×920. Every page fit verified at 1200×920, 1360×940, 1600×1000, 1920×1040 and maximised (zero controls outside the page rect).
@@ -136,16 +269,17 @@
 - Some Manager combo text buffers still allocate `length` instead of `length + 1` before `CB_GETLBTEXT` (pre-existing).
 
 ### State
-- All of the above is **uncommitted** (`HEAD` = `f82f4b9`, v2.3.0). No git mutation has been authorized.
+- Released in `v2.4.0` (`1c9e1d3`, tagged and pushed to `origin main`).
 - Project version remains 2.4.0 with new work under `CHANGELOG.md` `[Unreleased]`.
 
 ### Next
-- Remaining storefront syncs, catalogue detail pane, install progress.
+- Remaining storefront syncs. A catalogue detail pane and install-progress tracking are intentionally
+  not planned (user decision 2026-10-26).
 - **SVC-01**: `LocalService` service skeleton, Task Scheduler bootstrap, per-session path routing, named-pipe IPC.
 
 ---
 
-## 0b) [windows-game-explorer] W.60: FFXIV Official Source, Secondary Launchers, Store-Artwork Exclusivity, Rich Synopsis, Background Achievement Sync & Footprint Fix (Delivered, v2.4.0 — uncommitted)
+## 0f) [windows-game-explorer] W.60: FFXIV Official Source, Secondary Launchers, Store-Artwork Exclusivity, Rich Synopsis, Background Achievement Sync & Footprint Fix (v2.4.0)
 
 ### Delivered in this workstream (working tree, version manifests at 2.4.0)
 - **FFXIV official-source rework**: `StorefrontScanner` now discovers the official Square Enix installation (`sqex_ffxiv`, `PlatformType::SquareEnix`). `PlatformType::XIVLauncher` is retained only for backward-compatible JSON reads and is never emitted. When the XIVLauncher executable exists it is auto-attached as an alternate launch method (`PlatformLauncher`).
@@ -159,11 +293,11 @@
 - **Verification**: `scripts/build.ps1` → 0 errors / 0 warnings (`/W4 /WX`); `scripts/test.ps1` → 28 passed / 0 failed.
 
 ### State
-- All of the above is **uncommitted** (`HEAD` = `f82f4b9`, v2.3.0). No git mutation has been authorized.
+- Released in `v2.4.0` (`1c9e1d3`, tagged and pushed to `origin main`).
 - `CMakeLists.txt` and `installer/windows-game-explorer.nsi` already carry 2.4.0.
 
 ### Next
-- Superseded by **W.61 (section 0)**: the M17/CAT-01 shell and SVC-01 decisions were resolved by the user on 2026-10-25; slice 1 shipped in the working tree and slice 2 (catalogue data/UI) plus SVC-01 are next.
+- Superseded by **W.61 (section 0e)**: the M17/CAT-01 shell and SVC-01 decisions were resolved by the user on 2026-10-25; slice 1 shipped in the working tree and the catalogue slices 2a–2c (sections 0a–0c) plus SVC-01 followed.
 
 ---
 
@@ -429,28 +563,23 @@ Delivered universal achievement tracking across native storefronts (Steam, GOG, 
 ## 2) Active Build & Test Verification
 
 - **Compiler**: MSVC 19.51 / CMake 4.3.1 (Visual Studio 2026 BuildTools)
-- **Compilation Gate**: `/W4 /WX /permissive- /utf-8` enforced across all targets (`sqlite3`, `GameExplorerCore`, `GameExplorerConfig`, `GameExplorerManager`, `GameExplorerShell`, `GameExplorerTests`).
+- **Compilation Gate**: `/W4 /WX /permissive- /utf-8` across every target (`sqlite3`, `GameExplorerCore`,
+  `GameExplorerShell`, `GameExplorerStudio`, `GameExplorerService`, `GameExplorerTests`).
 - **Result**: 0 compiler warnings, 0 linker warnings, 0 errors.
-- **Unit Tests**: `GameExplorerTests.exe` -> 15/15 passed (`pwsh -NoProfile -File scripts/test.ps1 -Configuration Release`).
-- **Distribution Packages (`dist/`)**:
-  - `windows-game-explorer-v2.1.0-setup.exe` (NSIS dual-mode installer)
-  - `windows-game-explorer-v2.1.0-win64.zip` (Portable binary archive)
-  - `windows-game-explorer-v2.1.0-ROMs-template.zip` (Structured empty ROMs template)
+- **Unit Tests**: `GameExplorerTests.exe` → **61/61 passed**
+  (`pwsh -NoProfile -File scripts/test.ps1 -Configuration Release`).
+- **Distribution (`dist/`)**: rebuilt for `v2.5.0` by the release gate —
+  `windows-game-explorer-v2.5.0-setup.exe`, `-win64.zip`, `-ROMs-template.zip`.
 
 ---
 
 ## 3) Next Immediate Priorities
 
-1. **Bug Resolution & Verification Complete**:
-   - BUG-10, BUG-11, BUG-12, and BUG-13 resolved with 21/21 unit tests passing under zero-warning gate (`/W4 /WX`).
-   - Obscure/indie/adult metadata accuracy delivered via VNDB Kana API integration, itch.io storefront scraping, loose aspect ratio enforcement, and strict candidate title verification.
-   - Cache reset engine (`Reset Cache` button / `--reset-cache` CLI) reliably purges existing cache and rebuilds fresh metadata and artwork across installed titles.
-   - Future "all owned games" plan officially dropped per user directive; scope remains strictly focused on installed games library.
-2. **Emulation Support Expansion**:
-   - Added native support for **Xemu** (Original Xbox) and **VICE** (Commodore 64, C128, VIC-20, Plus/4, PET) emulators and launch commands.
-   - Updated `assets/roms-template/ROMs` with systems `xbox`, `xboxclassic`, `c128`, and `pet`.
-   - Verified 21/21 unit tests passing under `/W4 /WX`.
-3. **Provider Icon Transparency Fix (BUG-14)**:
-   - Root cause identified: GDI `CreateDIBSection` + `DrawIconEx` zeroed alpha bytes and `Gdiplus::Bitmap(hDib, nullptr)` crushed transparent areas to solid opaque black.
-   - Replaced with direct `Gdiplus::Bitmap::FromHICON` preserving 32-bit ARGB alpha transparency and icon masks.
-   - Stale black-background `icon_prov_*.png` cached files purged from `%USERPROFILE%\Game Explorer\cache\art\`.
+1. **Ship the `v2.5.0` release** — the release gate has passed (build, 61 tests, lint, package; artifacts
+   and SHA256s verified in `dist/`); commit, push, tag `v2.5.0` and publish the release once the user
+   authorizes it.
+2. **M18 (planned, unscheduled)** — Windows 10 vs 11 shell compatibility research (`ARCH-01`): minimum
+   Windows 10 build for in-process XAML Island hosting plus WinUI/DWM/tab behaviour documentation.
+   Relocation/move and in-app install-progress tracking are dropped (user decision 2026-10-26). EA App /
+   Battle.net / Amazon Games / Rockstar owned-uninstalled libraries stay installed-only until a
+   sanctioned offline artefact exists. Details in `TODO.md`.

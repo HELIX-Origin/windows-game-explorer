@@ -9,6 +9,8 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+. (Join-Path $PSScriptRoot "_common.ps1")
+Write-GameExplorerBanner -Title "Authenticode signing"
 $RepoRoot = Split-Path -Parent $PSScriptRoot
 $OutDir   = Join-Path $RepoRoot "build\$Configuration"
 

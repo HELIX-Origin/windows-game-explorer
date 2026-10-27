@@ -29,3 +29,9 @@ jobs:
       - name: Run C++ Unit Tests
         shell: pwsh
         run: ./scripts/test.ps1 -Configuration Release
+
+      - name: Lint PowerShell Scripts (zero diagnostics)
+        shell: pwsh
+        run: |
+          Install-Module PSScriptAnalyzer -Scope CurrentUser -Force -Confirm:$false
+          ./scripts/lint.ps1

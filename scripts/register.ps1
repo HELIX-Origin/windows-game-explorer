@@ -1,64 +1,57 @@
 # Windows Game Explorer - Register Shell Extension (PowerShell)
+#
+# Run through the root game-explorer.bat (`game-explorer.bat register`), which
+# checks elevation before dispatching. This script never spawns a second window:
+# if it is invoked without Administrator rights it stops with instructions.
+
+[Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidUsingWriteHost', '', Justification = 'CLI shell extension registration status output')]
+[CmdletBinding()]
 param(
+    [Parameter(Position = 0)]
     [string]$DllPath
 )
 
 $ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot '_common.ps1')
 
-# Locate GameExplorerShell.dll if not explicitly passed
-if (-not $DllPath -or -not (Test-Path $DllPath)) {
+Write-GameExplorerBanner -Title 'Register shell extension'
+
+if (-not (Test-GameExplorerAdministrator)) {
+    Write-GameExplorerFailure -Action 'Registration' -Detail 'Administrator rights are required; open an elevated terminal and run: game-explorer.bat register'
+    exit 1
+}
+
+# Locate GameExplorerShell.dll when no explicit path was supplied.
+if (-not $DllPath -or -not (Test-Path -LiteralPath $DllPath)) {
     $candidates = @(
-        (Join-Path $PSScriptRoot "..\GameExplorerShell.dll"),
-        (Join-Path $PSScriptRoot "..\build\Release\GameExplorerShell.dll"),
-        (Join-Path $PSScriptRoot "..\Release\GameExplorerShell.dll")
+        (Join-Path $PSScriptRoot '..\GameExplorerShell.dll'),
+        (Join-Path $PSScriptRoot '..\build\Release\GameExplorerShell.dll'),
+        (Join-Path $PSScriptRoot '..\Release\GameExplorerShell.dll')
     )
-    foreach ($cand in $candidates) {
-        if (Test-Path $cand) {
-            $DllPath = (Resolve-Path $cand).Path
+    foreach ($candidate in $candidates) {
+        if (Test-Path -LiteralPath $candidate) {
+            $DllPath = (Resolve-Path -LiteralPath $candidate).Path
             break
         }
     }
 }
 
-if (-not $DllPath -or -not (Test-Path $DllPath)) {
-    Write-Host "[ERROR] GameExplorerShell.dll was not found." -ForegroundColor Red
-    Write-Host "Please ensure the project is built or place this script next to GameExplorerShell.dll." -ForegroundColor Gray
+if (-not $DllPath -or -not (Test-Path -LiteralPath $DllPath)) {
+    Write-GameExplorerFailure -Action 'Registration' -Detail 'GameExplorerShell.dll was not found; build the project or pass the DLL path.'
     exit 1
 }
 
-# Elevation check
-$isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
-if (-not $isAdmin) {
-    try {
-        Start-Process -FilePath powershell.exe -ArgumentList ("-NoProfile -ExecutionPolicy Bypass -File `"{0}`" `"{1}`"" -f $PSCommandPath, $DllPath) -Verb RunAs -ErrorAction Stop
-        exit
-    } catch {
-        Write-Host "[INFO] Running registration in current user scope (HKCU)..." -ForegroundColor Yellow
-    }
+Write-Host ('Target DLL : {0}' -f $DllPath) -ForegroundColor White
+Write-Host 'Registering the Windows Shell extension with regsvr32...' -ForegroundColor White
+
+$process = Start-Process -FilePath 'regsvr32.exe' -ArgumentList @('/s', $DllPath) -PassThru -Wait
+if ($process.ExitCode -ne 0) {
+    Write-GameExplorerFailure -Action 'Registration' -Detail ('regsvr32 exited with code {0}' -f $process.ExitCode)
+    exit $process.ExitCode
 }
 
-Write-Host "`n+--------------------------------------------------------------------------+" -ForegroundColor Cyan
-Write-Host "|         ___   _   __  __ ___   _____  _____ _    ___  ___ ___ ___        |" -ForegroundColor Cyan
-Write-Host "|        / __| /_\ |  \/  | __| | __\ \/ / _ \ |  / _ \| _ \ __| _ \       |" -ForegroundColor Cyan
-Write-Host "|       | (_ |/ _ \| |\/| | _|  | _| >  <|  _/ |_| (_) |   / _||   /       |" -ForegroundColor Cyan
-Write-Host "|        \___/_/ \_\_|  |_|___| |___/_/\_\_| |____\___/|_|_|___|_|_\       |" -ForegroundColor Cyan
-Write-Host "+--------------------------------------------------------------------------+" -ForegroundColor Cyan
-Write-Host "|          Windows Game Explorer -- Shell Extension Registration           |" -ForegroundColor White
-Write-Host "+--------------------------------------------------------------------------+`n" -ForegroundColor Cyan
-
-Write-Host "Target DLL : " -NoNewline -ForegroundColor White
-Write-Host "$DllPath`n" -ForegroundColor Cyan
-
-Write-Host "Registering Windows Shell Extension with regsvr32..." -ForegroundColor White
-
-$proc = Start-Process -FilePath "regsvr32.exe" -ArgumentList @("/s", "`"$DllPath`"") -PassThru -Wait
-if ($proc.ExitCode -eq 0) {
-    Write-Host "`n+--------------------------------------------------------------------------+" -ForegroundColor Green
-    Write-Host "|      [SUCCESS] Windows Game Explorer Shell Successfully Registered       |" -ForegroundColor Green
-    Write-Host "+--------------------------------------------------------------------------+`n" -ForegroundColor Green
-    Write-Host "The `"Games`" tab is now pinned to the File Explorer navigation pane." -ForegroundColor White
-    Write-Host "Desktop and Start Menu shortcuts created for Windows Game Explorer.`n" -ForegroundColor White
-} else {
-    Write-Host "`n[ERROR] Failed to register GameExplorerShell.dll (Exit code: $($proc.ExitCode))`n" -ForegroundColor Red
-    exit $proc.ExitCode
-}
+Write-GameExplorerSuccess -Action 'Registration'
+Write-Host 'The "Games" tab is now pinned to the File Explorer navigation pane.' -ForegroundColor White
+Write-Host 'Desktop and Start Menu shortcuts were created for Windows Game Explorer.' -ForegroundColor White
+Write-Host ''
+exit 0

@@ -4,6 +4,90 @@ All notable changes to **Windows Game Explorer** are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.5.0] - 2026-10-26
+
+### Added
+- **Single CLI dispatcher (`game-explorer.bat`)**: every developer/portable workflow is now one batch
+  file with explicit subcommands (`build`, `test`, `lint`, `package`, `release`, `register`,
+  `unregister`, `sign`, `art`, `setup-signing`, `help`) instead of four separate launchers. It
+  validates that the target runbook exists, propagates exit codes, requires an already-elevated
+  terminal for registration, and never opens a second window. Shared banners, colours and result
+  lines live in `scripts/_common.ps1`; `scripts/lint.ps1` runs PSScriptAnalyzer as a zero-diagnostic
+  gate (also enforced by `release` and CI); the portable ZIP now ships the dispatcher plus
+  `scripts\register.ps1`, `scripts\unregister.ps1` and `scripts\_common.ps1` with the installed
+  tree's layout.
+- **Ubisoft Connect owned library**: `ScanUbisoftOwnedGames()` reads the client's read-only
+  `cache\ownership` and `cache\configuration\configurations` caches. The configuration cache is parsed
+  as length-delimited protobuf records (`0A <len> 08 <installId> 10 <launchId> 1A <yaml> <yaml>`),
+  titles resolve from `localizations.default` (`l1`/`GAMENAME` keys) with `sort_string` and
+  `installer.game_identifier` fallbacks, trademark marks and typographic quotes are normalized, and
+  box art uses the official CDN file named by `root.thumb_image`. Install stays delegated through
+  `uplay://launch/<installId>/0`. Verified on this machine: 59 owned titles, installed or not.
+- **Epic owned library through legendary (optional, read-only)**: `ScanLegendaryEpicOwnedGames()`
+  reads the cache legendary writes after the user authenticates its CLI — `assets.json` (the platform
+  asset list legendary's own `get_assets()` treats as ownership) plus per-app metadata — preferring the
+  `Windows` list, falling back to `Win32`, and skipping namespace `ue` exactly like legendary's game
+  list. Metadata supplies the title, synopsis (CRLF normalized for the GFM detail pane), release year
+  and wide key image. Rows keep Epic identity (`epic_<appName>`) and install through
+  `com.epicgames.launcher://apps/<appName>?action=install`; the app never authenticates, installs or
+  writes through legendary. Verified on this machine: 250 owned Epic titles.
+- **Windows-only catalogue gate**: `StorefrontSource::windowsInstallable` records per-source platform
+  evidence (Xbox `availablePlatforms`, GOG `osCompatibility` piece 220, itch `scanned_platforms`,
+  batched Steam `IStoreBrowseService/GetItems` probes) and `FilterWindowsInstallableOwnedGames()`
+  drops console/mobile/macOS/Linux-only editions in one place, keeping a title when any PC edition
+  survives. Unknown platform data still keeps the title, so a real owned game is never hidden.
+- **Catalogue editions**: `StorefrontSource::editionLabel` keeps a storefront's edition/variant suffix
+  ("Deluxe Edition", "Console Edition (Game Preview)") out of the canonical title via
+  `ExtractBaseTitle()`, so the same game owned in different editions still deduplicates into one
+  catalogue row; the install and store-page pickers name the edition being acted on.
+- **Catalogue synopsis**: `OwnedGame::synopsis` carries the storefront overview supplied by each
+  source, normalized for the GitHub Flavored Markdown renderer.
+
+### Changed
+- **Registration is fail-fast, not self-elevating**: `scripts/register.ps1` and
+  `scripts/unregister.ps1` no longer launch `Start-Process -Verb RunAs` (which opened a second
+  window). They verify Administrator rights, print the exact `game-explorer.bat register` /
+  `unregister` command when elevation is missing, and propagate `regsvr32` exit codes.
+- **Owned-games source record** (`docs/research/owned-games-sources.md`) rewritten to the shipped
+  state: per-store verified artefacts, the Windows-only gate evidence per store, aggregator deferrals
+  (Playnite LiteDB, Heroic, Lutris) and the stores that remain installed-only because they publish no
+  owned-uninstalled artefact.
+
+### Removed
+- **Tag-triggered release workflow (`.github/workflows/release.yml`)**: retired because it never
+  produced the shipped release set — it built only `GameExplorerShell.dll` and
+  `GameExplorerStudio.exe`, skipping the service, dispatcher, runbooks, NSIS setup and ROMs template.
+  Releases are packaged with `game-explorer.bat release` and published manually with the standard
+  setup EXE, portable ZIP and ROMs template; `ci.yml` and `cleanup-failed-runs.yml` remain.
+- **Root batch launchers `build.bat`, `release.bat`, `register.bat` and `unregister.bat`**: replaced by
+  the single `game-explorer.bat` dispatcher. The NSIS installer retires the old files on upgrade and
+  now ships `game-explorer.bat` with `scripts\_common.ps1`, `scripts\register.ps1` and
+  `scripts\unregister.ps1`.
+- **Install base folder and per-store install targets (`InstallTargets`)**: install location is owned
+  entirely by the storefront client, because a storefront install URI (`steam://install/<appid>`)
+  cannot be told where to install — the folder the catalogue pre-created was never authoritative.
+  The catalogue now only hands the install request to the store; the Configuration page's
+  "Install base folder" row, `AppSettings::installBaseFolder`, the `install_base_folder` setting,
+  `tests/TestInstallTargets.cpp` and `docs/research/install-library-folders.md` are gone.
+- **Planned game relocation and in-app install-progress tracking**: dropped by user decision
+  (2026-10-26) alongside the install-location handling. The catalogue never moves an installation or
+  tracks a download queue; M18 is now scoped to Windows 10 vs 11 shell compatibility research
+  (`ARCH-01`).
+
+### Fixed
+- **Installer license page wrapping**: the NSIS license page now reads `installer/LICENSE.txt`, an
+  installer-only copy of the MIT text with each paragraph kept on one line. The rich-edit control
+  wraps it to the dialog width, so the previous 78-column hard wraps no longer force a break on top of
+  the control's own wrapping. The canonical `LICENSE` is still the file installed into `$INSTDIR`.
+- **Themed checkbox/radio state**: `ThemeControls` now stores `BM_SETCHECK` and answers
+  `BM_GETCHECK`, so owned-drawn checkboxes and radio buttons keep their state (covered by
+  `tests/TestSettings.cpp`).
+
+### Quality Gate
+- MSVC `/W4 /WX`: **0 errors, 0 warnings**.
+- Unit tests: **61 passed, 0 failed** (`scripts/test.ps1`).
+- PSScriptAnalyzer: **0 diagnostics** across `scripts/*.ps1` (`scripts/lint.ps1`).
+
 ## [2.4.0] - 2026-10-26
 
 ### Added

@@ -7,6 +7,8 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+. (Join-Path $PSScriptRoot "_common.ps1")
+Write-GameExplorerBanner -Title "Packaging"
 $RepoRoot = Split-Path -Parent $PSScriptRoot
 $InstallerScript = Join-Path $RepoRoot "installer\windows-game-explorer.nsi"
 $DistDir = Join-Path $RepoRoot "dist"
@@ -68,16 +70,30 @@ if (Test-Path -LiteralPath $ZipPath) {
     Remove-Item -LiteralPath $ZipPath -Force
 }
 Write-Host "[Windows Game Explorer] Creating portable distribution ZIP..." -ForegroundColor Cyan
-$FilesToZip = @(
-    (Join-Path $BinDir "GameExplorerShell.dll"),
-    (Join-Path $BinDir "GameExplorerStudio.exe"),
-    (Join-Path $BinDir "GameExplorerService.exe"),
-    (Join-Path $RepoRoot "LICENSE"),
-    (Join-Path $RepoRoot "assets\game-explorer-icon.ico"),
-    (Join-Path $RepoRoot "register.bat"),
-    (Join-Path $RepoRoot "unregister.bat")
+$StagingDir = Join-Path $DistDir ".portable-staging"
+if (Test-Path -LiteralPath $StagingDir) {
+    Remove-Item -LiteralPath $StagingDir -Recurse -Force
+}
+New-Item -ItemType Directory -Path (Join-Path $StagingDir "scripts") -Force | Out-Null
+
+# Keep the portable archive self-contained: the single game-explorer.bat dispatcher plus the
+# registration scripts it delegates to, laid out exactly like the installed tree.
+$PortableFiles = @(
+    @{ Source = (Join-Path $BinDir "GameExplorerShell.dll");       Target = "GameExplorerShell.dll" },
+    @{ Source = (Join-Path $BinDir "GameExplorerStudio.exe");      Target = "GameExplorerStudio.exe" },
+    @{ Source = (Join-Path $BinDir "GameExplorerService.exe");     Target = "GameExplorerService.exe" },
+    @{ Source = (Join-Path $RepoRoot "LICENSE");                   Target = "LICENSE" },
+    @{ Source = (Join-Path $RepoRoot "assets\game-explorer-icon.ico"); Target = "game-explorer-icon.ico" },
+    @{ Source = (Join-Path $RepoRoot "game-explorer.bat");         Target = "game-explorer.bat" },
+    @{ Source = (Join-Path $RepoRoot "scripts\_common.ps1");       Target = "scripts\_common.ps1" },
+    @{ Source = (Join-Path $RepoRoot "scripts\register.ps1");      Target = "scripts\register.ps1" },
+    @{ Source = (Join-Path $RepoRoot "scripts\unregister.ps1");    Target = "scripts\unregister.ps1" }
 )
-Compress-Archive -Path $FilesToZip -DestinationPath $ZipPath -CompressionLevel Optimal
+foreach ($entry in $PortableFiles) {
+    Copy-Item -LiteralPath $entry.Source -Destination (Join-Path $StagingDir $entry.Target) -Force
+}
+Compress-Archive -Path (Join-Path $StagingDir "*") -DestinationPath $ZipPath -CompressionLevel Optimal
+Remove-Item -LiteralPath $StagingDir -Recurse -Force
 
 $ZipHash = (Get-FileHash -Path $ZipPath -Algorithm SHA256).Hash
 Write-Host "  -> ZIP: $ZipPath" -ForegroundColor Green
@@ -124,3 +140,4 @@ Write-Host "  -> Setup: $SetupPath" -ForegroundColor Green
 Write-Host "  -> SHA256: $SetupHash" -ForegroundColor DarkGray
 
 Write-Host "`n[Windows Game Explorer] Distribution packages ready in $DistDir" -ForegroundColor Green
+Write-GameExplorerSuccess -Action "Packaging"

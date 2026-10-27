@@ -7,6 +7,8 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+. (Join-Path $PSScriptRoot "_common.ps1")
+Write-GameExplorerBanner -Title "Unit tests"
 $RepoRoot = Split-Path -Parent $PSScriptRoot
 $BuildDir = Join-Path $RepoRoot "build"
 $LogDir   = Join-Path $RepoRoot "logs"
@@ -30,3 +32,4 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 Write-Host "[Windows Game Explorer] All unit tests passed! Log: $LogFile" -ForegroundColor Green
+Write-GameExplorerSuccess -Action "Unit tests"

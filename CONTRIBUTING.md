@@ -37,13 +37,12 @@ Open an issue or comment on an existing one before starting significant work, so
 ## Development Setup
 
 Prerequisites:
-- Windows 11 (Build 22000+)
+- Windows 10/11
 - Visual Studio 2022 / Build Tools (C++20 MSVC v143+)
 - CMake 3.20+
 
 ```powershell
-cmake -B build -S .
-cmake --build build --config Release
+.\game-explorer.bat build Release
 ```
 
 ---
@@ -63,9 +62,9 @@ cmake --build build --config Release
 Everything below must pass with **zero errors and zero warnings** (`/W4 /WX`) before a pull request can be merged:
 
 ```powershell
-cmake -B build -S .
-cmake --build build --config Release
-ctest --test-dir build -C Release --output-on-failure
+.\game-explorer.bat build Release
+.\game-explorer.bat test Release
+.\game-explorer.bat lint
 ```
 
 ---

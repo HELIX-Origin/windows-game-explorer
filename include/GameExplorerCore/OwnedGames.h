@@ -12,7 +12,15 @@ struct StorefrontSource {
     std::wstring productId;         // store-native id
     std::wstring installUri;        // official client protocol URI
     std::wstring storePageUrl;      // store page URL
+    std::wstring editionLabel;      // edition suffix stripped from the title, e.g. "Deluxe Edition",
+                                    // "Console Edition (Game Preview)"; empty = base/standard edition
     bool installed{ false };
+    // False only when this storefront publishes evidence that this edition has no Windows build
+    // (an Xbox console-only product, a macOS/Linux-only GOG release, an itch.io non-Windows
+    // upload). Unknown platform data stays true so a real owned game is never hidden. Every
+    // scanner must set this from its own platform evidence; the catalogue drops non-Windows
+    // sources in one place (FilterWindowsInstallableOwnedGames).
+    bool windowsInstallable{ true };
 };
 
 /**
@@ -36,6 +44,7 @@ struct OwnedGame {
     std::wstring genres;            // comma-separated storefront genres
     std::wstring tags;              // comma-separated storefront tags
     std::wstring rating;            // storefront/ESRB/PEGI rating label
+    std::wstring synopsis;          // overview / description
     std::vector<StorefrontSource> sources; // all storefronts where the user owns this game
     int releaseYear{ 0 };           // 0 when the storefront does not report one
     bool installed{ false };
@@ -85,8 +94,49 @@ struct OwnedGamesFilter {
 // "The Witcher 3" files under W.
 [[nodiscard]] std::wstring OwnedGamesSortTitle(const std::wstring& title);
 
+// Strips common edition/variant suffixes from a title, returning only the base game name.
+// E.g. "7 Days to Die - Console Edition (Game Preview)" → "7 Days to Die"
+//      "9 Years of Shadows - Amazon Prime" → "9 Years of Shadows"
+//      "007 First Light - Deluxe Edition" → "007 First Light"
+// The extracted suffix (edition label) is written to `outEditionLabel` when non-null.
+[[nodiscard]] std::wstring ExtractBaseTitle(const std::wstring& title,
+                                            std::wstring* outEditionLabel = nullptr);
+
 // Normalizes a title into an alphanumeric lowercase key for cross-store deduplication.
+// Uses ExtractBaseTitle first so editions of the same game share a key.
 [[nodiscard]] std::wstring NormalizeTitleKey(const std::wstring& title);
+
+// --- Windows-only platform gate ------------------------------------------------
+// The catalogue only lists titles that can actually be installed on this Windows PC, so console,
+// mobile and macOS/Linux-only editions never appear. Every storefront publishes platform data in its
+// own shape; these helpers keep each decision pure and testable. A storefront that publishes no
+// platform data is treated as "unknown" and keeps the title rather than hiding a real owned game.
+
+// Parses a JSON array of strings, e.g. `"availablePlatforms":["PC","XboxOne"]`. An empty `key`
+// parses a bare array such as itch.io's `scanned_platforms`.
+[[nodiscard]] std::vector<std::wstring> JsonStringArray(const std::wstring& json,
+                                                        const std::wstring& key);
+
+// True when `tokens` names a Windows/PC build (Xbox `PC`, itch.io `windows-amd64`, GOG `Windows`).
+// `hasEvidence` is false when the list is empty, meaning the storefront published nothing.
+[[nodiscard]] bool OwnedGamesPlatformsIncludeWindows(const std::vector<std::wstring>& tokens,
+                                                     bool& hasEvidence);
+
+// GOG Galaxy `osCompatibility` game piece:
+// `{"supported":[{"name":"Windows","slug":"windows","versions":null}]}`. `hasEvidence` is false for
+// `{"supported":[]}`, which is GOG's "not published" state, not "unsupported".
+[[nodiscard]] bool GogOsPieceSupportsWindows(const std::wstring& json, bool& hasEvidence);
+
+// Steam `IStoreBrowseService/GetItems` response: collects every `appid` whose `platforms.windows`
+// is false. Returns false when the payload contained no platform blocks at all.
+[[nodiscard]] bool ParseSteamStoreBrowsePlatforms(const std::wstring& json,
+                                                  std::vector<std::wstring>& outNonWindows);
+
+// Official Steam store-browse probe, batched 100 app ids per request (no API key required). Returns
+// false on transport failure with `outNonWindows` empty, so the caller keeps the whole library.
+[[nodiscard]] bool FetchSteamNonWindowsAppIds(const std::vector<std::wstring>& appIds,
+                                              std::vector<std::wstring>& outNonWindows,
+                                              std::wstring& error);
 
 // True when the game or any of its storefront sources matches `targetStoreKey`.
 [[nodiscard]] bool OwnedGameMatchesStore(const OwnedGame& game, const std::wstring& targetStoreKey);
@@ -154,6 +204,73 @@ void MarkInstalledOwnedGames(std::vector<OwnedGame>& games,
 
 // Pure JSON mapping, split out from the HTTP call so it can be unit-tested.
 [[nodiscard]] bool ParseSteamOwnedGamesJson(const std::wstring& json, std::vector<OwnedGame>& out);
+
+// Single enforcement point for the Windows-only catalogue: removes every source a storefront
+// marked as having no Windows build, recomputes the composite store labels, and drops a title only
+// when it had sources and none survive. Titles with no sources are kept because their platform is
+// unknown, never treated as unsupported.
+[[nodiscard]] std::vector<OwnedGame> FilterWindowsInstallableOwnedGames(std::vector<OwnedGame> games);
+
+// --- Ubisoft Connect owned library --------------------------------------------
+// Ubisoft Connect keeps two read-only caches under
+// `%LOCALAPPDATA%\Ubisoft Game Launcher\cache\`:
+//   ownership\<accountId>            - the app/space ids the signed-in account owns
+//   configuration\configurations     - one YAML game configuration per record
+// The configuration file is a sequence of protobuf-style records
+// (`0A <len> 08 <installId> 10 <launchId> 1A <yamlLen> <yaml>`), where `<installId>` is exactly
+// the id Ubisoft's own `uplay://launch/<installId>/0` protocol expects. Titles are usually
+// localization tokens (`l1`, `GAMENAME`) that resolve through `localizations.default`.
+struct UbisoftConfigEntry {
+    std::wstring installId;   // decimal install id, used by uplay://launch/<id>/0
+    std::wstring launchId;    // decimal launch id (usually equal to installId)
+    std::wstring title;       // resolved, human-readable title
+    std::wstring thumbnailHash; // official `root.thumb_image` file name on Ubisoft's CDN
+    // Every app/space UUID the configuration references, root or nested (crash reporting blocks
+    // repeat them). Ownership files list these ids, so the full set is what maps a cache record to
+    // an owned product.
+    std::vector<std::wstring> ownershipIds;
+};
+
+// Parses the configuration cache blob. Malformed or non-game records are skipped, so a partial or
+// newer cache still yields the entries it does contain.
+[[nodiscard]] std::vector<UbisoftConfigEntry> ParseUbisoftConfigurationCache(const std::string& blob);
+
+// Every UUID listed by one ownership cache file, lowercased and de-duplicated. The file is a
+// binary blob; only the UUIDs are meaningful for the catalogue.
+[[nodiscard]] std::vector<std::wstring> ExtractUbisoftOwnershipIds(const std::string& blob);
+
+// Owned Ubisoft Connect library, installed or not. Reads the two caches above and never writes.
+[[nodiscard]] std::vector<OwnedGame> ScanUbisoftOwnedGames();
+
+// --- Epic Games through Legendary (optional, read-only) -----------------------
+// Legendary is a third-party Epic CLI. When the user has run it, its cache already contains the
+// account's owned PC assets (`assets.json`) plus per-app metadata, so the catalogue can list the
+// library without authenticating, installing, or launching anything itself. Legendary's own
+// `get_assets()` treats the platform asset list as the ownership truth, so this scanner does too.
+// Games stay Epic rows: installing opens the official Epic launcher protocol.
+struct LegendaryAssetEntry {
+    std::wstring appName;
+    std::wstring namespaceId;
+    std::wstring catalogItemId;
+};
+
+struct LegendaryMetadataEntry {
+    std::wstring appName;
+    std::wstring json;   // contents of <appName>.json
+};
+
+// Reads the `Windows` asset list from legendary's `assets.json`, falling back to `Win32` for older
+// caches. Unreal Engine namespace assets are skipped, matching legendary's own game list.
+[[nodiscard]] std::vector<LegendaryAssetEntry> ParseLegendaryWindowsAssets(const std::wstring& assetsJson);
+
+// Maps legendary assets + metadata to Epic owned games. Pure, so the mapping is unit-testable.
+[[nodiscard]] std::vector<OwnedGame> BuildLegendaryOwnedGames(
+    const std::vector<LegendaryAssetEntry>& assets,
+    const std::vector<LegendaryMetadataEntry>& metadata);
+
+// Scans legendary's local cache (`%USERPROFILE%\.config\legendary` or `%LOCALAPPDATA%\legendary`).
+// Returns nothing when legendary was never configured, or when its cache predates a login.
+[[nodiscard]] std::vector<OwnedGame> ScanLegendaryEpicOwnedGames();
 
 // Direct in-memory storefront scanners (no database persistence).
 [[nodiscard]] std::vector<OwnedGame> ScanGogOwnedGamesGalaxy();

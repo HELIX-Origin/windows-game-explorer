@@ -31,7 +31,7 @@ flowchart TD
     subgraph CompanionApps["Game Explorer Studio (GameExplorerStudio.exe)"]
         TabStrip["Fluent Tab Strip<br/>(one window, one message loop)"]
         ManagerApp["Library Manager Page<br/>(Artwork Discovery & Editor)"]
-        CatalogueApp["Game Catalogue Page<br/>(Placeholder)"]
+        CatalogueApp["Game Catalogue Page<br/>(Owned Games List & Install Delegation)"]
         ConfigApp["Configuration Page<br/>(Settings & Storefront Scans)"]
         TabStrip --> ManagerApp
         TabStrip --> CatalogueApp
@@ -79,7 +79,7 @@ flowchart TD
 Unlike legacy tools that required manual Game Definition Files (GDF XML) or third-party web scrapers that break over time, Windows Game Explorer automatically indexes games directly from locally installed storefront manifests on disk. Steam `.acf` manifests, Epic `.item` files, GOG Galaxy registries, Ubisoft Connect binary configurations, and Battle.net manifests are parsed locally in milliseconds without requiring external API tokens or web scraping.
 
 ### 2. Native C++20 Performance & Minimal Footprint
-The entire stack is authored in modern native C++20 (`/W4 /WX /permissive- /utf-8`) with direct Win32 and COM integrations. There are zero Chromium, Electron, or Node.js runtimes in the distribution. The complete release installer is under 1.5 MB, and the shell extension loads instantly into File Explorer.
+The entire stack is authored in modern native C++20 (`/W4 /WX /permissive- /utf-8`) with direct Win32 and COM integrations. There are zero Chromium, Electron, or Node.js runtimes in the distribution. The complete release installer stays under 2 MB, and the shell extension loads instantly into File Explorer.
 
 ### 3. Non-Destructive Isolation Invariant
 Windows Game Explorer strictly honors the **Native Isolation Invariant**:
@@ -112,6 +112,10 @@ In File Explorer, the namespace is organized into two distinct, collapsible sect
 | **Xbox / PC Game Pass** | Windows Package Manager (`AppModel\Repository\Packages`) & `.GamingRoot` | High-res package logos, display titles, URI launch endpoints |
 | **Retro & Emulation ROMs** | Auto-detected across `<Drive>:\ROMs` and `<Drive>:\Games\ROMs` | Cleaned title names, Libretro Thumbnails CDN box art, direct emulator dispatch |
 | **Standalone & Custom Executables** | User-added `.exe`, `.bat`, `.cmd`, `.lnk` files | Extracted PE version info, embedded icons, user custom artwork |
+
+### Owned-Games Catalogue
+
+Alongside the installed library, Game Explorer Studio hosts a **Game Catalogue** page that lists every game the user owns on a supported storefront, installed or not, in one filterable and paged list. Rows are assembled from the Steam Web API or local Steam client, Epic manifests and an optional read-only legendary cache, and read-only client databases for GOG Galaxy, itch.io, Xbox, and Ubisoft Connect, plus the installed-store scanners. A centralized Windows-installable gate removes titles that cannot run on Windows, and multi-store or multi-edition ownership collapses into a single row with the edition kept in the source label. The page is a list only — it has no details pane, never launches a game, and never manages install folders; the **Install** action hands the request to the storefront's own client, while playing stays in the File Explorer Games view.
 
 ---
 

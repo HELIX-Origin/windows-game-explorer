@@ -15,11 +15,11 @@
 #include <vector>
 
 #include "GameExplorerCore/DarkMode.h"
-#include "GameExplorerCore/InstallTargets.h"
 #include "GameExplorerCore/OwnedGames.h"
 #include "GameExplorerCore/Settings.h"
 #include "GameExplorerCore/Storage.h"
 #include "GameExplorerCore/StudioPages.h"
+#include "GameExplorerCore/SynopsisFormatter.h"
 #include "GameExplorerCore/ThemeControls.h"
 #include "GameExplorerCore/ThemeScroll.h"
 
@@ -49,7 +49,6 @@ constexpr int IDC_CAT_PAGE_SIZE = 3012;
 constexpr int IDC_CAT_PREV = 3013;
 constexpr int IDC_CAT_NEXT = 3014;
 constexpr int IDC_CAT_INSTALL = 3015;
-constexpr int IDC_CAT_CUSTOM_INSTALL = 3016;
 constexpr int IDC_CAT_SYNC = 3017;
 constexpr int IDC_CAT_CONFIG = 3018;
 constexpr int IDC_CAT_OPEN_STORE = 3019;
@@ -90,7 +89,6 @@ HWND g_hwndPageSize = nullptr;
 HWND g_hwndPrev = nullptr;
 HWND g_hwndNext = nullptr;
 HWND g_hwndInstall = nullptr;
-HWND g_hwndCustomInstall = nullptr;
 HWND g_hwndOpenStore = nullptr;
 HWND g_hwndSync = nullptr;
 HWND g_hwndConfig = nullptr;
@@ -122,7 +120,6 @@ std::vector<int> g_playtimeThresholds;
 RECT g_toolbarRect{};
 RECT g_listCardRect{};
 RECT g_footerRect{};
-RECT g_installBaseRect{};
 
 struct SyncResult {
     bool ok{ false };
@@ -203,10 +200,6 @@ void RefreshCommandStates() {
     if (g_hwndInstall != nullptr) {
         EnableWindow(g_hwndInstall, hasSelection && !g_syncing);
         InvalidateRect(g_hwndInstall, nullptr, TRUE);
-    }
-    if (g_hwndCustomInstall != nullptr) {
-        EnableWindow(g_hwndCustomInstall, hasSelection && !g_syncing);
-        InvalidateRect(g_hwndCustomInstall, nullptr, TRUE);
     }
     if (g_hwndOpenStore != nullptr) {
         EnableWindow(g_hwndOpenStore, hasSelection);
@@ -670,12 +663,6 @@ void ReloadOwnedGames(HWND hwnd) {
     BeginCatalogueSync(hwnd);
 }
 
-std::wstring InstallBaseFolder() {
-    const AppSettings settings = SettingsManager::Load();
-    return settings.installBaseFolder.empty() ? DefaultInstallBaseFolder()
-                                              : settings.installBaseFolder;
-}
-
 void OpenStorePage(HWND hwnd) {
     if (g_selected < 0 || g_selected >= static_cast<int>(g_page.items.size())) return;
     const OwnedGame& game = g_page.items[static_cast<size_t>(g_selected)];
@@ -685,6 +672,7 @@ void OpenStorePage(HWND hwnd) {
         HMENU hMenu = CreatePopupMenu();
         for (size_t i = 0; i < game.sources.size(); ++i) {
             std::wstring label = L"Open " + game.sources[i].storeName + L" Store Page";
+            if (!game.sources[i].editionLabel.empty()) label += L" \u2013 " + game.sources[i].editionLabel;
             AppendMenuW(hMenu, MF_STRING, static_cast<UINT_PTR>(2000 + i), label.c_str());
         }
 
@@ -712,21 +700,18 @@ void OpenStorePage(HWND hwnd) {
     }
 }
 
-void BeginInstall(HWND hwnd, bool useCustomFolder) {
+void BeginInstall(HWND hwnd) {
     if (g_selected < 0 || g_selected >= static_cast<int>(g_page.items.size())) return;
     const OwnedGame& game = g_page.items[static_cast<size_t>(g_selected)];
-
-    if (game.installed) {
-        SetStatus(L"Already installed. Play it from the Games view in File Explorer.");
-        return;
-    }
 
     const StorefrontSource* chosenSource = nullptr;
     if (game.sources.size() > 1) {
         HMENU hMenu = CreatePopupMenu();
         for (size_t i = 0; i < game.sources.size(); ++i) {
-            std::wstring label = L"Install via " + game.sources[i].storeName;
-            if (game.sources[i].installed) label += L" (Installed)";
+            const StorefrontSource& src = game.sources[i];
+            std::wstring label = L"Install via " + src.storeName;
+            if (!src.editionLabel.empty()) label += L" \u2013 " + src.editionLabel;
+            if (src.installed) label += L" (Installed)";
             AppendMenuW(hMenu, MF_STRING, static_cast<UINT_PTR>(1000 + i), label.c_str());
         }
 
@@ -745,37 +730,27 @@ void BeginInstall(HWND hwnd, bool useCustomFolder) {
         chosenSource = &game.sources[0];
     }
 
+    if (chosenSource != nullptr && chosenSource->installed) {
+        SetStatus(chosenSource->storeName + L" edition is already installed. Play it from the Games view in File Explorer.");
+        return;
+    }
+
     const std::wstring installUri = chosenSource != nullptr ? chosenSource->installUri : game.installUri;
-    const std::wstring storeKey = chosenSource != nullptr ? chosenSource->storeKey : game.storeKey;
     const std::wstring storeName = chosenSource != nullptr ? chosenSource->storeName : game.storeName;
 
     if (installUri.empty()) {
-        SetStatus(L"This storefront has no install protocol. Use its store page instead.");
-        return;
-    }
-
-    std::wstring base = InstallBaseFolder();
-    if (useCustomFolder && !PickFolderDialog(hwnd, L"Choose a folder for this install", base)) {
-        return;
-    }
-
-    std::wstring folder;
-    std::wstring error;
-    if (!EnsureStoreLibraryFolder(base, storeKey, folder, error)) {
-        SetStatus(error);
+        SetStatus(L"This storefront has no direct install protocol. Open its store page instead.");
         return;
     }
 
     const HINSTANCE result = ShellExecuteW(hwnd, L"open", installUri.c_str(), nullptr,
                                            nullptr, SW_SHOWNORMAL);
     if (reinterpret_cast<INT_PTR>(result) <= 32) {
-        SetStatus(L"Could not open " + storeName +
-                  L". Make sure the client is installed.");
+        SetStatus(L"Could not open " + storeName + L". Make sure the client is installed.");
         return;
     }
 
-    SetStatus(L"Opened " + storeName + L"'s install dialog. Choose " + folder +
-              L" as the install location.");
+    SetStatus(L"Passed install request to " + storeName + L".");
 }
 
 void ApplyThemeToControls() {
@@ -784,7 +759,7 @@ void ApplyThemeToControls() {
                               g_hwndRating,  g_hwndPlaytime,     g_hwndFamily,
                               g_hwndSort,    g_hwndDirection,    g_hwndPageSize,
                               g_hwndPrev,    g_hwndNext,         g_hwndInstall,
-                              g_hwndCustomInstall, g_hwndOpenStore, g_hwndSync,
+                              g_hwndOpenStore, g_hwndSync,
                               g_hwndConfig,  g_hwndResetFilters };
     for (HWND control : controls) {
         if (control != nullptr) {
@@ -904,20 +879,14 @@ void PaintCatalogue(HWND hwnd) {
     DeleteObject(cardPen);
     DeleteObject(cardBrush);
 
-    // Footer: effective install folder and the status of the last action.
+    // Footer: status of the last action.
     SelectObject(memDC, g_hFont);
-    SetTextColor(memDC, g_palette.textSecondary);
-    const std::wstring baseText = L"Install base folder: " + InstallBaseFolder();
-    RECT rcBase = g_installBaseRect;
-    DrawTextW(memDC, baseText.c_str(), static_cast<int>(baseText.size()), &rcBase,
-              DT_LEFT | DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
-
     if (!g_status.empty()) {
-        const int statusLeft = g_installBaseRect.right + 24;
-        const int statusRight = g_footerRect.right - 162;
+        const int statusLeft = g_footerRect.left + 720;
+        const int statusRight = g_footerRect.right - 280;
         if (statusRight > statusLeft) {
-            RECT rcStatus{ statusLeft, g_installBaseRect.top, statusRight,
-                           g_installBaseRect.bottom };
+            RECT rcStatus{ statusLeft, g_footerRect.top, statusRight,
+                           g_footerRect.bottom };
             SetTextColor(memDC, g_palette.textPrimary);
             DrawTextW(memDC, g_status.c_str(), static_cast<int>(g_status.size()), &rcStatus,
                       DT_LEFT | DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
@@ -970,13 +939,6 @@ void LayoutCatalogue(HWND hwnd) {
     g_toolbarRect = RECT{ kPageMargin, 78, width - kPageMargin, 78 + kToolbarHeight };
     g_footerRect = RECT{ kPageMargin, height - kFooterHeight + 8, width - kPageMargin,
                          height - kFooterHeight + 8 + kButtonHeight };
-    // Two bands above the footer row: the effective install folder on the left, the last action's
-    // result in the middle, and the Configuration shortcut on the right. They must not overlap.
-    const int bandTop = g_footerRect.top - 38;
-    const int bandBottom = g_footerRect.top - 10;
-    const int bandMid = g_footerRect.left + (g_footerRect.right - g_footerRect.left) / 2;
-    g_installBaseRect = RECT{ kPageMargin, bandTop, bandMid - 12, bandBottom };
-
     const int listTop = g_toolbarRect.bottom + 14;
     const int listBottom = g_footerRect.top - 44;
     g_listCardRect = RECT{ kPageMargin, listTop, width - kPageMargin, listBottom };
@@ -1026,10 +988,7 @@ void LayoutCatalogue(HWND hwnd) {
     int right = g_footerRect.right;
     place(g_hwndInstall, right - 130, g_footerRect.top, 130, kButtonHeight);
     right -= 138;
-    place(g_hwndCustomInstall, right - 150, g_footerRect.top, 150, kButtonHeight);
-    right -= 158;
     place(g_hwndOpenStore, right - 130, g_footerRect.top, 130, kButtonHeight);
-    right -= 138;
 
     // The list fills the card, inset by its one-pixel border.
     RECT listRect{ g_listCardRect.left + 1, g_listCardRect.top + 1,
@@ -1215,7 +1174,7 @@ LRESULT HandleListMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
         const int index = (y - kListHeaderHeight + g_scroll) / kRowHeight;
         if (index >= 0 && index < static_cast<int>(g_page.items.size())) {
             SelectRow(index);
-            BeginInstall(GetParent(hwnd), false);
+            BeginInstall(GetParent(hwnd));
         }
         return 0;
     }
@@ -1244,7 +1203,7 @@ LRESULT HandleListMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
             index = (std::min)(count - 1, index + 12);
             break;
         case VK_RETURN:
-            BeginInstall(GetParent(hwnd), false);
+            BeginInstall(GetParent(hwnd));
             return 0;
         default:
             return 0;
@@ -1328,7 +1287,6 @@ void CreateCatalogueControls(HWND hwnd) {
     g_hwndPrev = MakeButton(hwnd, L"Previous", IDC_CAT_PREV);
     g_hwndNext = MakeButton(hwnd, L"Next", IDC_CAT_NEXT);
     g_hwndInstall = MakeButton(hwnd, L"Install", IDC_CAT_INSTALL);
-    g_hwndCustomInstall = MakeButton(hwnd, L"Install to\u2026", IDC_CAT_CUSTOM_INSTALL);
     g_hwndOpenStore = MakeButton(hwnd, L"Store page", IDC_CAT_OPEN_STORE);
     g_hwndSync = MakeButton(hwnd, L"Refresh Catalogue", IDC_CAT_SYNC);
     g_hwndConfig = MakeButton(hwnd, L"Configuration\u2026", IDC_CAT_CONFIG);
@@ -1408,11 +1366,7 @@ LRESULT HandlePageCommand(HWND hwnd, WPARAM wParam) {
         return 0;
 
     case IDC_CAT_INSTALL:
-        if (code == BN_CLICKED) BeginInstall(hwnd, false);
-        return 0;
-
-    case IDC_CAT_CUSTOM_INSTALL:
-        if (code == BN_CLICKED) BeginInstall(hwnd, true);
+        if (code == BN_CLICKED) BeginInstall(hwnd);
         return 0;
 
     case IDC_CAT_OPEN_STORE:

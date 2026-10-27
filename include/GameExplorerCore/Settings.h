@@ -25,9 +25,6 @@ struct AppSettings {
     std::wstring steamGridDbApiKey;
     std::wstring igdbClientId;
     std::wstring igdbClientSecret;
-
-    // One base folder for catalogue installs; each storefront gets a subfolder inside it.
-    std::wstring installBaseFolder;
 };
 
 class SettingsManager {

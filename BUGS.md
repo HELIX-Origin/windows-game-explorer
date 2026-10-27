@@ -20,6 +20,7 @@
 - 🔒 **[windows-game-explorer] Native Launcher Delegation**: Game launches always delegate strictly through official platform clients (`steam.exe -applaunch <appId>`, etc.) to ensure DRM validation, user profiles, and overlays remain intact.
 - 🔒 **[windows-game-explorer] Storefront-First Discovery (No External Scrapers)**: Unlike Microsoft's legacy Game Explorer that required manual Game Definition Files (GDF XML) and defunct online servers, Windows Game Explorer automatically discovers installed titles and harvests metadata/artwork directly from installed storefronts on disk without third-party scrapers.
 - 🔒 **[windows-game-explorer] Modern Windows Architecture Constraint (No Windows 7/8/8.1 Support)**: Windows Game Explorer integrates directly into File Explorer using modern in-process XAML Island hosting, modern DWM visual composition, and Windows 10/11 shell contracts. Legacy Windows (Windows 7, 8, 8.1) use an entirely different legacy shell architecture and do not support XAML Islands or modern shell namespace tabs. Application manifest `resources/app.manifest` and installer `.onInit` explicitly enforce this requirement. Compatibility across older Windows 10 releases is subject to dedicated research due to evolving XAML Island and File Explorer tab hosting constraints.
+- 🔒 **[windows-game-explorer] Catalogue is Deliberately List-Only**: the Game Catalogue has no per-title detail pane (user decision 2026-10-26). Rows carry title, storefront, year, playtime, last played, size and status; filters, sorting, paging and the Install/Store page actions live in the toolbar and footer. The model still carries a synopsis for future use.
 
 ---
 
@@ -30,6 +31,11 @@
 ---
 
 ## ✅ Resolved Bugs & Historical Fixes
+
+- ✅ **[windows-game-explorer] BUG-21 — Installer License Page Added Hard Breaks on Top of Rich-Edit Wrapping**:
+  - **Root Cause**: `MUI_PAGE_LICENSE` read the canonical `LICENSE`, whose MIT text is hard-wrapped at 78 columns. The NSIS rich-edit control then wrapped the already-broken lines to the dialog width, producing uneven, stacked line breaks.
+  - **Resolution**: the installer now reads `installer/LICENSE.txt`, an installer-only copy with each paragraph kept on one line so the rich-edit control owns all wrapping. The canonical `LICENSE` remains the file installed into `$INSTDIR`.
+  - **Verified**: packaging compiles cleanly and the installed legal file is unchanged.
 
 - ✅ **[windows-game-explorer] BUG-20 — Multi-Storefront Titles Displayed as Duplicate Rows in Catalogue**:
   - **Root Cause**: Titles owned across multiple storefronts (e.g. Steam and Xbox Game Pass) produced independent rows in the owned games catalogue.
@@ -47,7 +53,7 @@
 
 - ✅ **[windows-game-explorer] BUG-17 — Shell Extension Not Appearing in File Explorer (Shadow-Copy Staging Abandoned)**:
   - **Root Cause**: Shadow-copy staging attempted to copy `GameExplorerShell.dll` to `%LOCALAPPDATA%\GameExplorer\bin\` and register that path in `InProcServer32`, creating chicken-and-egg dependency on the service and pointing Explorer to a missing DLL when the service hadn't run.
-  - **Resolution**: Shadow-copy shell staging was abandoned. `InProcServer32` registers the DLL directly from the installation/build folder via standard `regsvr32`. Elevated and non-elevated registration is handled by `scripts/register.ps1` and `scripts/unregister.ps1`, accompanied by batch entry points `register.bat` and `unregister.bat`.
+  - **Resolution**: Shadow-copy shell staging was abandoned. `InProcServer32` registers the DLL directly from the installation/build folder via standard `regsvr32`. Elevated and non-elevated registration is handled by `scripts/register.ps1` and `scripts/unregister.ps1`, reached through the single `game-explorer.bat register|unregister` dispatcher.
 
 - ✅ **[windows-game-explorer] QUIRK-01 — Multi-line synopsis editor showed a native scroll bar outside its rounded frame**:
   - **Root Cause**: the multi-line `EDIT` control kept its `WS_VSCROLL` bar, which Windows paints in the non-client strip at the right edge. That strip is square, 16–17 px wide and outside the rounded frame drawn inside the client rect, so the synopsis looked like it had a foreign bar bolted onto an otherwise Fluent field.
