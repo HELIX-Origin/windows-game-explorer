@@ -1,7 +1,7 @@
 # HANDOFF.md — Windows Game Explorer Session Handoff
 
 **Last updated:** 2026-10-26
-**Current session status:** `v2.5.0` release gate passed — version stamped in `CMakeLists.txt` and the NSIS installer, docs reconciled to the shipped catalogue, `CHANGELOG.md` promoted to `[2.5.0]`, release notes written with final SHA256s · uncommitted on top of `origin/main` = `93eba3e` · `game-explorer.bat release` completed in one pass: 0 errors / 0 warnings under `/W4 /WX`, 61/61 unit tests, 0 PSScriptAnalyzer diagnostics, `dist\windows-game-explorer-v2.5.0-setup.exe` (1,813,439 bytes) + `-win64.zip` + `-ROMs-template.zip` · awaiting explicit authorization to commit, push, tag `v2.5.0` and publish the release.
+**Current session status:** `v2.5.0` released, tagged and published — release commit `c573ce5` on `origin/main`, tag `v2.5.0`, GitHub release with the setup EXE, portable ZIP and ROMs template (SHA256s verified in the release assets) · version stamped in `CMakeLists.txt` and the NSIS installer · `game-explorer.bat release` passed in one pass: 0 errors / 0 warnings under `/W4 /WX`, 61/61 unit tests, 0 PSScriptAnalyzer diagnostics · next planned work is M18 Windows 10 vs 11 shell compatibility research (`ARCH-01`); relocation and install-progress tracking are dropped.
 **Project:** windows-game-explorer (Windows Game Explorer)
 **Root:** projects/windows-game-explorer
 
@@ -88,7 +88,6 @@
   `A36A908E…5EF856E` (full values in `.github/releases/v2.5.0.md`).
 
 ### Next
-- Commit, push, tag `v2.5.0` and publish the release — pending explicit user authorization.
 - M18 (planned, unscheduled): Windows 10 vs 11 shell compatibility research (`ARCH-01`).
   Relocation/move and in-app install-progress tracking are dropped (user decision 2026-10-26) with
   install-location handling. The catalogue stays list-only by design (no detail pane, user decision
@@ -136,7 +135,7 @@
   (GTA V, Redout 2, Arcadegeddon, …) from 304 Windows assets minus UE/metadata gaps.
 
 ### State
-- Uncommitted on top of `93eba3e` (`origin/main`). Included in the `v2.5.0` release gate; commit/push/tag awaits explicit authorization.
+- Shipped in `v2.5.0` (`c573ce5`, tagged and published to `origin/main`).
 - Project version stamped `2.5.0`; `CHANGELOG.md` promoted to `[2.5.0] - 2026-10-26`.
 
 ### Next
@@ -178,7 +177,7 @@
   evidence; the populated-list capture is still outstanding from slice 2a.
 
 ### State
-- Uncommitted on top of `93eba3e` (`origin/main`). Included in the `v2.5.0` release gate; commit/push/tag awaits explicit authorization.
+- Shipped in `v2.5.0` (`c573ce5`, tagged and published to `origin/main`).
 - Project version stamped 2.5.0; `CHANGELOG.md` promoted to `[2.5.0]`.
 
 ### Next
@@ -575,11 +574,10 @@ Delivered universal achievement tracking across native storefronts (Steam, GOG, 
 
 ## 3) Next Immediate Priorities
 
-1. **Ship the `v2.5.0` release** — the release gate has passed (build, 61 tests, lint, package; artifacts
-   and SHA256s verified in `dist/`); commit, push, tag `v2.5.0` and publish the release once the user
-   authorizes it.
-2. **M18 (planned, unscheduled)** — Windows 10 vs 11 shell compatibility research (`ARCH-01`): minimum
+1. **M18 (planned, unscheduled)** — Windows 10 vs 11 shell compatibility research (`ARCH-01`): minimum
    Windows 10 build for in-process XAML Island hosting plus WinUI/DWM/tab behaviour documentation.
    Relocation/move and in-app install-progress tracking are dropped (user decision 2026-10-26). EA App /
    Battle.net / Amazon Games / Rockstar owned-uninstalled libraries stay installed-only until a
    sanctioned offline artefact exists. Details in `TODO.md`.
+2. **`v2.5.0` shipped** — commit `c573ce5`, tag `v2.5.0`, GitHub release published with the setup EXE,
+   portable ZIP and ROMs template.
