@@ -149,6 +149,19 @@ target_link_libraries(GameExplorerService PRIVATE
     Ole32
 )
 
+add_library(GameExplorerLoader STATIC
+    src/service/ExplorerLoader.cpp
+)
+target_include_directories(GameExplorerLoader PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src/service)
+target_link_libraries(GameExplorerLoader PUBLIC Advapi32)
+
+add_executable(GameExplorerWatcher WIN32
+    src/service/WatcherMain.cpp
+    src/shell/Resource.rc
+)
+target_link_libraries(GameExplorerWatcher PRIVATE GameExplorerLoader Shell32 User32)
+target_include_directories(GameExplorerWatcher PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src/shell)
+
 # ==============================================================================
 # Visual styles
 # ==============================================================================
@@ -157,7 +170,7 @@ target_link_libraries(GameExplorerService PRIVATE
 # Active visual styles are what give the native list box, editor and combo box the Fluent thin
 # scrollbars instead of the classic chunky ones.
 if(MSVC)
-    foreach(target GameExplorerShell GameExplorerStudio GameExplorerService)
+    foreach(target GameExplorerShell GameExplorerStudio GameExplorerService GameExplorerWatcher)
         target_link_options(${target} PRIVATE /MANIFEST:NO)
     endforeach()
 endif()

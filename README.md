@@ -23,7 +23,7 @@ Organize, browse, and launch your entire multi-platform game library with high-r
 
 ## 🌟 Key Capabilities
 
-- **Native File Explorer Integration**: In-process shell extension (`GameExplorerShell.dll`) hosting WinUI 3 XAML Islands with full Windows 11 tabbed UI support.
+- **Native File Explorer Integration**: In-process shell extension (`GameExplorerShell.dll`) hosting UWP XAML Islands; File Explorer retains the presentation native to the installed Windows version.
 - **Two-Section Organization**: Structured grouping into collapsible `▾ Installed Providers` and `▾ Games Library` sections.
 - **Multi-Viewport Presentation**: Seamless switching between 2:3 vertical Cover Art (SteamGridDB standard), 3.1:1 widescreen Hero Banners, and 1:1 Details icon lists.
 - **Storefront-First Discovery**: Automatically detects installed titles and native art from Steam, Epic Games, GOG Galaxy, Ubisoft Connect, EA App, Battle.net, Xbox/Game Pass, Itch.io, Amazon Games, and retro ROMs.
@@ -40,7 +40,8 @@ Detailed user guides, engineering specifications, and customization references a
 - **[Project Overview & Architecture](./docs/overview.md)** — Core design philosophy, system architecture, and supported platform breakdown.
 - **[Quick Start Guide](./docs/quick-start.md)** — Installation methods, navigation pane entry points, and first-time library setup.
 - **[Comprehensive User Guide](./docs/user-guide.md)** — Deep-dive manual for the Library Manager, Game Catalogue, Configuration, Artwork Discovery, ROMs, and cloud sync.
-- **[Developer & Technical Reference](./docs/developer-guide.md)** — WinUI 3 XAML Islands internals, C++20 core engine, SQLite schema, build gates, and test suites.
+- **[Developer & Technical Reference](./docs/developer-guide.md)** — UWP XAML Islands internals, C++20 core engine, SQLite schema, build gates, and test suites.
+- **[Windows Version Compatibility](./docs/research/windows-version-compatibility.md)** — Windows 10 1903 (build 18362) API floor, native Explorer presentation, and validation status.
 - **[Metadata & Customization Guide](./docs/metadata-customization.md)** — JSON schema specification for per-game overrides and manual imports.
 
 ---

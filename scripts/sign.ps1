@@ -17,7 +17,8 @@ $OutDir   = Join-Path $RepoRoot "build\$Configuration"
 $Targets = @(
     (Join-Path $OutDir "GameExplorerShell.dll"),
     (Join-Path $OutDir "GameExplorerStudio.exe"),
-    (Join-Path $OutDir "GameExplorerService.exe")
+    (Join-Path $OutDir "GameExplorerService.exe"),
+    (Join-Path $OutDir "GameExplorerWatcher.exe")
 )
 
 if ([string]::IsNullOrWhiteSpace($Thumbprint)) {

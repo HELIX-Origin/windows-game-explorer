@@ -147,23 +147,17 @@ HRESULT RegisterServer(HMODULE hModule) {
     SetRegistryValue(HKEY_CURRENT_USER, iconKey, L"", iconPath);
 
     // ShellFolder attributes: SFGAO_FOLDER | SFGAO_BROWSABLE | SFGAO_CANLINK (NO SFGAO_HASSUBFOLDER 0x80000000 and NO SFGAO_STREAM 0x40000000)
-    // Note: FolderValueFlags = 0 and AllowChildAliasRegistration = 1 ensures modern Windows 11 tabbed Explorer hosting
     const std::wstring shellFolderKey = clsidKey + L"\\ShellFolder";
     constexpr DWORD sfgaoAttributes = 0x20000000 | 0x08000000 | 0x00000004;
     SetRegistryDword(HKEY_CURRENT_USER, shellFolderKey, L"Attributes", sfgaoAttributes);
-    SetRegistryDword(HKEY_CURRENT_USER, shellFolderKey, L"FolderValueFlags", 0);
-    SetRegistryDword(HKEY_CURRENT_USER, shellFolderKey, L"AllowChildAliasRegistration", 1);
+    DeleteRegistryValue(HKEY_CURRENT_USER, shellFolderKey, L"FolderValueFlags");
+    DeleteRegistryValue(HKEY_CURRENT_USER, shellFolderKey, L"AllowChildAliasRegistration");
 
     // Register CLSID_GameCategorizer in HKCU
     const std::wstring catClsidKey = std::wstring(L"Software\\Classes\\CLSID\\") + SZ_CLSID_GAME_CATEGORIZER;
     SetRegistryValue(HKEY_CURRENT_USER, catClsidKey, L"", L"Game Explorer Categorizer");
     SetRegistryValue(HKEY_CURRENT_USER, catClsidKey + L"\\InProcServer32", L"", modulePath);
     SetRegistryValue(HKEY_CURRENT_USER, catClsidKey + L"\\InProcServer32", L"ThreadingModel", L"Apartment");
-
-    // Clean up any legacy FolderTypes key with Windows 10 ribbon associations
-    const std::wstring legacyFtKey = L"Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\FolderTypes\\{b689b0d0-76d3-4cbb-87f7-585d0e0ce070}";
-    DeleteRegistryKeyRecursive(HKEY_CURRENT_USER, legacyFtKey);
-    DeleteRegistryKeyRecursive(HKEY_LOCAL_MACHINE, legacyFtKey);
 
     // 2. Register into File Explorer Desktop NameSpace (Navigation Pane Games tab)
     const std::wstring nsKey = std::wstring(L"Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Desktop\\NameSpace\\") + SZ_CLSID_GAME_EXPLORER;
@@ -182,8 +176,8 @@ HRESULT RegisterServer(HMODULE hModule) {
     SetRegistryValue(HKEY_LOCAL_MACHINE, inprocKey, L"ThreadingModel", L"Apartment");
     SetRegistryValue(HKEY_LOCAL_MACHINE, iconKey, L"", iconPath);
     SetRegistryDword(HKEY_LOCAL_MACHINE, shellFolderKey, L"Attributes", sfgaoAttributes);
-    SetRegistryDword(HKEY_LOCAL_MACHINE, shellFolderKey, L"FolderValueFlags", 0);
-    SetRegistryDword(HKEY_LOCAL_MACHINE, shellFolderKey, L"AllowChildAliasRegistration", 1);
+    DeleteRegistryValue(HKEY_LOCAL_MACHINE, shellFolderKey, L"FolderValueFlags");
+    DeleteRegistryValue(HKEY_LOCAL_MACHINE, shellFolderKey, L"AllowChildAliasRegistration");
     SetRegistryValue(HKEY_LOCAL_MACHINE, nsKey, L"", SZ_GAME_EXPLORER_TITLE);
     SetRegistryDword(HKEY_LOCAL_MACHINE, L"Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\HideDesktopIcons\\NewStartPanel", SZ_CLSID_GAME_EXPLORER, 1);
     SetRegistryDword(HKEY_LOCAL_MACHINE, L"Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\HideDesktopIcons\\ClassicStartMenu", SZ_CLSID_GAME_EXPLORER, 1);
@@ -196,7 +190,7 @@ HRESULT RegisterServer(HMODULE hModule) {
     // Known Folder descriptions for 'shell:Games':
     // Register BOTH the canonical Windows SDK FOLDERID_Games ({CAC52C1A-B53D-4EDC-92D7-6B2E8AC19434})
     // and the custom FOLDERID_GameExplorer ({E1A11BB3-192F-4917-B2FC-5F0832341709}).
-    // This allows Win+R or address bar 'shell:Games' to resolve directly to the modern tabbed shell extension!
+    // File Explorer remains responsible for presenting the view in its native mode.
     auto registerFolderDesc = [&](HKEY root, const std::wstring& folderId) {
         const std::wstring fdKey = std::wstring(L"Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\FolderDescriptions\\") + folderId;
         SetRegistryValue(root, fdKey, L"Name", L"Games");
@@ -266,7 +260,6 @@ HRESULT UnregisterServer() {
     const std::wstring nsKey = std::wstring(L"Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Desktop\\NameSpace\\") + SZ_CLSID_GAME_EXPLORER;
     const std::wstring folderDescKeyCustom = std::wstring(L"Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\FolderDescriptions\\") + SZ_FOLDERID_GAME_EXPLORER;
     const std::wstring folderDescKeyCanonical = std::wstring(L"Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\FolderDescriptions\\") + SZ_FOLDERID_GAMES_CANONICAL;
-    const std::wstring legacyFtKey = L"Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\FolderTypes\\{b689b0d0-76d3-4cbb-87f7-585d0e0ce070}";
 
     // Clean up created Desktop & Start Menu shortcuts
     PWSTR desktopPath = nullptr;
@@ -321,7 +314,6 @@ HRESULT UnregisterServer() {
     // Delete HKCU registrations
     DeleteRegistryKeyRecursive(HKEY_CURRENT_USER, clsidKey);
     DeleteRegistryKeyRecursive(HKEY_CURRENT_USER, catClsidKey);
-    DeleteRegistryKeyRecursive(HKEY_CURRENT_USER, legacyFtKey);
     DeleteRegistryKeyRecursive(HKEY_CURRENT_USER, nsKey);
     DeleteRegistryKeyRecursive(HKEY_CURRENT_USER, folderDescKeyCustom);
     DeleteFolderDescIfOurs(HKEY_CURRENT_USER, SZ_FOLDERID_GAMES_CANONICAL);
@@ -332,7 +324,6 @@ HRESULT UnregisterServer() {
     // Delete HKLM registrations
     DeleteRegistryKeyRecursive(HKEY_LOCAL_MACHINE, clsidKey);
     DeleteRegistryKeyRecursive(HKEY_LOCAL_MACHINE, catClsidKey);
-    DeleteRegistryKeyRecursive(HKEY_LOCAL_MACHINE, legacyFtKey);
     DeleteRegistryKeyRecursive(HKEY_LOCAL_MACHINE, nsKey);
     DeleteRegistryKeyRecursive(HKEY_LOCAL_MACHINE, folderDescKeyCustom);
     DeleteFolderDescIfOurs(HKEY_LOCAL_MACHINE, SZ_FOLDERID_GAMES_CANONICAL);

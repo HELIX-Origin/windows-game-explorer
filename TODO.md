@@ -26,11 +26,44 @@
   - [x] Purge stale black-background `icon_prov_*.png` cache files from `%USERPROFILE%\Game Explorer\cache\art\`.
 
 ### 🔬 Architecture & Compatibility Research Workstream
-- [ ] **[windows-game-explorer] (projects/windows-game-explorer) ARCH-01: Research Windows 10 vs Windows 11 Build Compatibility for XAML Island Shell Extension Hosting**
+- [x] **[windows-game-explorer] (projects/windows-game-explorer) ARCH-01: Research Windows 10 vs Windows 11 Build Compatibility for XAML Island Shell Extension Hosting**
   - [x] Application manifest updated: removed legacy Windows 7, 8, and 8.1 supportedOS GUIDs from `resources/app.manifest` to eliminate misleading compatibility claims.
-  - [x] Installer OS check: added `WinVer.nsh` check in NSIS `.onInit` requiring at least Windows 10/11.
-  - [ ] Research minimum Windows 10 build compatibility for in-process XAML Island hosting inside `explorer.exe` (e.g. Build 18362 vs 19041+), noting that compilation and SDK link against Windows 11 (Windows SDK 10.0.26100.0).
-  - [ ] Document WinUI/XAML Island, DWM backdrop API, and File Explorer tab interactions across Windows 10 vs Windows 11 builds in `docs/research/windows-version-compatibility.md`.
+  - [x] Confirmed Windows 10 version 1903 (build 18362) as the documented UWP XAML hosting API floor; build 19041 is not required by the hosting API.
+  - [x] Documented the distinction between the XAML runtime floor, the Windows SDK 10.0.26100.0 build environment, optional DWM styling, and Windows 10/11 native Explorer presentation in `docs/research/windows-version-compatibility.md`.
+  - [x] Updated NSIS to reject builds below 18362.
+  - [x] Removed registration changes that deleted the OS Games folder type or set ShellFolder flags to influence Windows 11 tabbed Explorer behavior; re-registration removes the old app-written flags.
+  - [x] Confirmed a clean Windows 10 build 18362 Explorer-hosted runtime smoke test remains outstanding; the documented floor is not yet field-verified.
+
+### ⚡ Shell Performance & Explorer Lifecycle Workstream
+- [ ] **[windows-game-explorer] (projects/windows-game-explorer) PERF-01: Optimize Shell Integration**
+  - [x] Replace detached preload threads with one coalescing, joined worker; report scan failures instead of silently swallowing exceptions.
+  - [x] Replace sequential blocking directory reads with simultaneous notification/stop waits.
+  - [x] Centralize service protocol responses and diagnostic text in `src/service/ServiceMessages.h`, retaining existing protocol values.
+  - [ ] Record baseline shell view initialization, first usable render, refresh, and teardown times on representative Windows 10 and Windows 11 systems.
+  - [ ] Profile shell-view and service hot paths; optimize only identified bottlenecks and retain asynchronous/non-blocking Explorer behavior.
+  - [ ] Validate library rendering, XAML cleanup, refresh, and OS-native Explorer presentation after changes.
+  - [ ] Record before/after measurements and verification results; preserve `/W4 /WX` and full unit-test gates.
+
+- [ ] **[windows-game-explorer] HOST-01: Project-Owned Explorer Watcher/Loader**
+  - [x] Research Windhawk's loading architecture without adding Windhawk as a dependency or copying its source into this MIT project (`docs/research/explorer-watcher-architecture.md`).
+  - [x] Implement Explorer lifecycle tracking and loading with explicit user/session and executable identity checks, restart handling, one attachment per process instance, and a disable/rollback path (`GameExplorerWatcher.exe`, `GameExplorerLoader`, `scripts/watcher.ps1`).
+  - [x] Preserve namespace, categorizer, and shell-view COM activation while migrating loading; in-process COM activation verified with resident module lookup avoiding cold disk I/O.
+  - [ ] Verify first navigation, repeated navigation, multi-window/tab use, Explorer restart, and upgrade/uninstall before switching the default.
+
+- [ ] **[windows-game-explorer] (projects/windows-game-explorer) NAV-01: Hide Left Navigation Sidebar on Standalone / shell:games Invocations**
+  - [ ] Rationale (user directive): Remove left nav pane in standalone shell window (`shell:games` / shortcuts) to improve visual appearance and expand horizontal space for the installed games grid.
+  - [ ] Fix standalone launch regression: restore `FolderValueFlags = 0` and `AllowChildAliasRegistration = 1` in `Registration.cpp` and support `shell:::` prefix in `ShellFolder::ParseDisplayName`.
+  - [ ] Implement standalone invocation detection (`shell:games` / desktop & Start Menu shortcut launch vs standard in-Explorer navigation).
+  - [ ] Implement `IExplorerPaneVisibility::GetPaneState` returning `EPS_DEFAULT_OFF | EPS_FORCE` for `EP_NavPane` (`{cb316b22-25f7-42b8-8a09-540d23a43c2f}`) in standalone mode.
+  - [ ] Forward `IExplorerPaneVisibility` from `ShellFolder::CreateViewObject` to ensure early Explorer pane queries receive the suppressed navigation pane state.
+  - [ ] Verify dual-mode behavior: `shell:games` or shortcuts open with left nav hidden; navigating into Games within existing Explorer window preserves the navigation pane.
+
+- [ ] **[windows-game-explorer] (projects/windows-game-explorer) DET-01: Universal Installed Game Detection (Provider-Agnostic)**
+  - [ ] Rationale (user directive): Loosen installed game detection beyond hardcoded storefront clients so all installed games are discovered regardless of source, including standalone DRM-free titles, disc/retail installs, GOG offline installers, itch standalone folders, freeware, and custom local game directories.
+  - [ ] Implement Windows Registry Uninstall crawler scanning `HKLM` (64-bit & WOW6432Node) and `HKCU` uninstall keys for game entries with valid install locations and primary executables.
+  - [ ] Implement universal drive root scanner indexing common game paths (`C:\Games`, `D:\Games`, `%PROGRAMFILES%\Games`, etc.) with `FindPrimaryGameExecutable()` and blacklist filtering.
+  - [ ] Scan Start Menu game shortcuts resolving targets via `IShellLink` for installed local titles without a storefront client.
+  - [ ] Categorize discovered local titles under `PlatformType::Custom` / `Local` with extracted high-resolution icons (`EnsureExtractedIconPng`) and direct launchability.
 
 ### 🎮 Emulation & Provider Expansion Workstream
 - [x] **[windows-game-explorer] (projects/windows-game-explorer) EMU-01: Native Xemu & VICE Emulation Architecture Support**

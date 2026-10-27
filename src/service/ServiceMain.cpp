@@ -16,13 +16,14 @@
 #include "GameExplorerCore/PlatformLauncher.h"
 #include "GameExplorerCore/Settings.h"
 #include "GameExplorerCore/StorefrontScanner.h"
+#include "PreloadWorker.h"
+#include "ServiceMessages.h"
 
 namespace {
 
+namespace Messages = GameExplorer::ServiceMessages;
+
 constexpr const wchar_t* kServiceName = L"GameExplorerService";
-constexpr const wchar_t* kServiceDisplayName = L"Game Explorer Service";
-constexpr const wchar_t* kServiceDescription =
-    L"Windows Game Explorer background worker service for directory monitoring, warm caching, and metadata preloading.";
 constexpr const wchar_t* kPipeName = L"\\\\.\\pipe\\GameExplorerService";
 constexpr const wchar_t* kTaskName = L"GameExplorerService";
 
@@ -56,14 +57,6 @@ void ReportServiceStatus(DWORD currentState, DWORD win32ExitCode, DWORD waitHint
     }
 }
 
-void UnblockNamedPipe() {
-    HANDLE h = CreateFileW(kPipeName, GENERIC_READ | GENERIC_WRITE, 0, nullptr,
-                           OPEN_EXISTING, 0, nullptr);
-    if (h != INVALID_HANDLE_VALUE) {
-        CloseHandle(h);
-    }
-}
-
 DWORD WINAPI ServiceCtrlHandlerEx(DWORD dwControl, DWORD /*dwEventType*/, LPVOID /*lpEventData*/,
                                   LPVOID /*lpContext*/) {
     switch (dwControl) {
@@ -74,7 +67,6 @@ DWORD WINAPI ServiceCtrlHandlerEx(DWORD dwControl, DWORD /*dwEventType*/, LPVOID
         if (g_hStopEvent != nullptr) {
             SetEvent(g_hStopEvent);
         }
-        UnblockNamedPipe();
         return NO_ERROR;
 
     case SERVICE_CONTROL_INTERROGATE:
@@ -85,85 +77,153 @@ DWORD WINAPI ServiceCtrlHandlerEx(DWORD dwControl, DWORD /*dwEventType*/, LPVOID
     }
 }
 
-// Background pre-loading routine: scans installed and owned games directly in-memory
-// so that companion GUI pages and File Explorer shell view load instantly.
-void PreloadCache() {
+void LogPreloadError(std::exception_ptr error) {
     try {
-        // 1. Preload metadata JSON files
-        const auto metadataGames = GameExplorer::StorefrontScanner::LoadAllGamesFromMetadata();
-
-        // 2. Preload installed games across all storefronts
-        const auto installedGames = GameExplorer::StorefrontScanner::ScanAllInstalledGames();
-        g_preloadedInstalledCount = installedGames.size();
-
-        // 3. Preload all owned games across all storefronts in-memory
-        const auto ownedGames = GameExplorer::ScanAllOwnedGamesDirect();
-        g_preloadedOwnedCount = ownedGames.size();
+        std::rethrow_exception(error);
+    } catch (const std::exception& ex) {
+        const std::string message = std::string(Messages::kPreloadErrorPrefix) +
+                                    ex.what() + Messages::kNewline;
+        OutputDebugStringA(message.c_str());
     } catch (...) {
-        // Fail-safe: service worker continues running even if disk/API encounters errors
+        OutputDebugStringW(Messages::kUnknownPreloadError);
     }
 }
 
+void LogMonitorError(DWORD error) {
+    const std::wstring message = std::wstring(Messages::kMonitorErrorPrefix) +
+                                std::to_wstring(error) + Messages::kWin32ErrorSuffix;
+    OutputDebugStringW(message.c_str());
+}
+
+// Scans currently publish counts, not a shared cache for the shell or Studio.
+void PreloadCache() {
+    const auto installedGames = GameExplorer::StorefrontScanner::ScanAllInstalledGames();
+    const auto ownedGames = GameExplorer::ScanAllOwnedGamesDirect();
+    g_preloadedInstalledCount = installedGames.size();
+    g_preloadedOwnedCount = ownedGames.size();
+}
+
+void LogPipeError(DWORD error) {
+    const std::wstring message = std::wstring(Messages::kPipeErrorPrefix) +
+                                std::to_wstring(error) + Messages::kWin32ErrorSuffix;
+    OutputDebugStringW(message.c_str());
+}
+
+bool CompletePipeOperation(HANDLE pipe, OVERLAPPED& operation, BOOL completed, DWORD& transferred,
+                           DWORD timeout = 5000) {
+    if (completed) return true;
+    DWORD error = GetLastError();
+    if (error == ERROR_IO_PENDING) {
+        const HANDLE waits[] = { g_hStopEvent, operation.hEvent };
+        const DWORD wait = WaitForMultipleObjects(ARRAYSIZE(waits), waits, FALSE, timeout);
+        if (wait == WAIT_OBJECT_0 + 1) {
+            if (GetOverlappedResult(pipe, &operation, &transferred, FALSE)) return true;
+            error = GetLastError();
+        } else {
+            error = wait == WAIT_TIMEOUT ? ERROR_TIMEOUT :
+                    wait == WAIT_OBJECT_0 ? ERROR_OPERATION_ABORTED : GetLastError();
+            CancelIoEx(pipe, &operation);
+            // The stack OVERLAPPED and buffer must outlive completion of a cancelled operation.
+            DWORD ignored = 0;
+            GetOverlappedResult(pipe, &operation, &ignored, TRUE);
+        }
+    }
+    if (error != ERROR_BROKEN_PIPE && error != ERROR_NO_DATA && error != ERROR_OPERATION_ABORTED) {
+        LogPipeError(error);
+    }
+    return false;
+}
+
 // Background thread that listens on \\.\pipe\GameExplorerService for commands from client apps.
-void NamedPipeServerThread() {
+void NamedPipeServerThread(GameExplorer::PreloadWorker& preloadWorker) {
     SECURITY_ATTRIBUTES sa{};
     sa.nLength = sizeof(sa);
     sa.bInheritHandle = FALSE;
 
     // DACL allowing Authenticated Users (AU), Administrators (BA), System (SY), LocalService (LS).
-    ConvertStringSecurityDescriptorToSecurityDescriptorW(
+    if (!ConvertStringSecurityDescriptorToSecurityDescriptorW(
         L"D:(A;;GA;;;AU)(A;;GA;;;BA)(A;;GA;;;SY)(A;;GA;;;LS)",
         SDDL_REVISION_1,
         &sa.lpSecurityDescriptor,
-        nullptr);
+        nullptr)) {
+        LogPipeError(GetLastError());
+        return;
+    }
 
     while (g_running) {
         HANDLE hPipe = CreateNamedPipeW(
             kPipeName,
-            PIPE_ACCESS_DUPLEX,
-            PIPE_TYPE_MESSAGE | PIPE_READMODE_MESSAGE | PIPE_WAIT,
+            PIPE_ACCESS_DUPLEX | FILE_FLAG_OVERLAPPED,
+            PIPE_TYPE_MESSAGE | PIPE_READMODE_MESSAGE | PIPE_WAIT | PIPE_REJECT_REMOTE_CLIENTS,
             PIPE_UNLIMITED_INSTANCES,
             4096, 4096, 1000,
             sa.lpSecurityDescriptor != nullptr ? &sa : nullptr);
 
         if (hPipe == INVALID_HANDLE_VALUE) {
-            std::this_thread::sleep_for(std::chrono::milliseconds(250));
+            LogPipeError(GetLastError());
+            WaitForSingleObject(g_hStopEvent, 250);
             continue;
         }
 
-        const BOOL connected = ConnectNamedPipe(hPipe, nullptr) ? TRUE
-                                                                : (GetLastError() == ERROR_PIPE_CONNECTED);
+        OVERLAPPED operation{};
+        operation.hEvent = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+        if (operation.hEvent == nullptr) {
+            LogPipeError(GetLastError());
+            CloseHandle(hPipe);
+            break;
+        }
+        DWORD transferred = 0;
+        const BOOL connectResult = ConnectNamedPipe(hPipe, &operation);
+        const DWORD connectError = connectResult ? ERROR_SUCCESS : GetLastError();
+        const bool connected = connectError == ERROR_PIPE_CONNECTED ||
+            CompletePipeOperation(hPipe, operation, connectResult, transferred, INFINITE);
         if (!g_running) {
+            CloseHandle(operation.hEvent);
             CloseHandle(hPipe);
             break;
         }
         if (connected) {
             char buffer[512]{};
             DWORD bytesRead = 0;
-            if (ReadFile(hPipe, buffer, sizeof(buffer) - 1, &bytesRead, nullptr) && bytesRead > 0) {
+            ResetEvent(operation.hEvent);
+            const BOOL read = ReadFile(hPipe, buffer, sizeof(buffer) - 1, &bytesRead, &operation);
+            if (CompletePipeOperation(hPipe, operation, read, bytesRead) && bytesRead > 0) {
                 buffer[bytesRead] = '\0';
                 std::string request(buffer);
 
-                std::string response = "UNKNOWN";
-                if (request == "PING") {
-                    response = "PONG";
-                } else if (request == "STATUS") {
-                    response = "RUNNING";
-                } else if (request == "RESCAN" || request == "PRELOAD") {
-                    std::thread(PreloadCache).detach();
-                    response = "PRELOAD_STARTED";
-                } else if (request == "GET_COUNTS") {
-                    response = "INSTALLED=" + std::to_string(g_preloadedInstalledCount.load()) +
-                               ";OWNED=" + std::to_string(g_preloadedOwnedCount.load());
+                std::string response = Messages::kUnknownResponse;
+                if (request == Messages::kPingCommand) {
+                    response = Messages::kPongResponse;
+                } else if (request == Messages::kStatusCommand) {
+                    response = Messages::kRunningResponse;
+                } else if (request == Messages::kRescanCommand || request == Messages::kPreloadCommand) {
+                    // Retain the existing wire response; requests now share one bounded worker.
+                    response = preloadWorker.Request() ? Messages::kPreloadStartedResponse
+                                                       : Messages::kStoppingResponse;
+                } else if (request == Messages::kGetCountsCommand) {
+                    response = Messages::kInstalledCountPrefix + std::to_string(g_preloadedInstalledCount.load()) +
+                               Messages::kOwnedCountPrefix + std::to_string(g_preloadedOwnedCount.load());
                 }
 
                 DWORD bytesWritten = 0;
-                WriteFile(hPipe, response.c_str(), static_cast<DWORD>(response.size()),
-                          &bytesWritten, nullptr);
-                FlushFileBuffers(hPipe);
+                ResetEvent(operation.hEvent);
+                const BOOL written = WriteFile(hPipe, response.c_str(), static_cast<DWORD>(response.size()),
+                                               &bytesWritten, &operation);
+                if (CompletePipeOperation(hPipe, operation, written, bytesWritten)) {
+                    // Keep the response buffered until the one-request client closes, with a deadline.
+                    // FlushFileBuffers would wait indefinitely for a client that never reads.
+                    char ignored{};
+                    DWORD ignoredBytes = 0;
+                    ResetEvent(operation.hEvent);
+                    const BOOL disconnected = ReadFile(hPipe, &ignored, sizeof(ignored), &ignoredBytes, &operation);
+                    if (CompletePipeOperation(hPipe, operation, disconnected, ignoredBytes) && ignoredBytes != 0) {
+                        LogPipeError(ERROR_INVALID_DATA);
+                    }
+                }
             }
             DisconnectNamedPipe(hPipe);
         }
+        CloseHandle(operation.hEvent);
         CloseHandle(hPipe);
     }
 
@@ -173,7 +233,7 @@ void NamedPipeServerThread() {
 }
 
 // Background directory change monitoring loop.
-void DirectoryMonitorThread() {
+void DirectoryMonitorThread(GameExplorer::PreloadWorker& preloadWorker) {
     std::wstring steamExe = GameExplorer::PlatformLauncher::GetSteamExecutablePath();
     std::vector<std::wstring> watchPaths;
     if (!steamExe.empty()) {
@@ -187,51 +247,57 @@ void DirectoryMonitorThread() {
         watchPaths.push_back(std::wstring(progData) + L"\\GOG.com\\Galaxy\\storage");
     }
 
-    std::vector<HANDLE> dirHandles;
+    std::vector<HANDLE> waitHandles{ g_hStopEvent };
     for (const auto& path : watchPaths) {
-        if (std::filesystem::exists(path)) {
-            HANDLE h = CreateFileW(
-                path.c_str(),
-                FILE_LIST_DIRECTORY,
-                FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
-                nullptr,
-                OPEN_EXISTING,
-                FILE_FLAG_BACKUP_SEMANTICS,
-                nullptr);
-            if (h != INVALID_HANDLE_VALUE) {
-                dirHandles.push_back(h);
+        HANDLE notification = FindFirstChangeNotificationW(
+            path.c_str(), FALSE, FILE_NOTIFY_CHANGE_FILE_NAME | FILE_NOTIFY_CHANGE_LAST_WRITE);
+        if (notification != INVALID_HANDLE_VALUE) {
+            waitHandles.push_back(notification);
+        } else {
+            const DWORD error = GetLastError();
+            if (error != ERROR_FILE_NOT_FOUND && error != ERROR_PATH_NOT_FOUND) {
+                LogMonitorError(error);
             }
         }
     }
 
     while (g_running) {
-        if (g_hStopEvent != nullptr &&
-            WaitForSingleObject(g_hStopEvent, 3000) == WAIT_OBJECT_0) {
+        const DWORD result = WaitForMultipleObjects(
+            static_cast<DWORD>(waitHandles.size()), waitHandles.data(), FALSE, INFINITE);
+        if (result == WAIT_OBJECT_0) break;
+        if (result == WAIT_FAILED) {
+            LogMonitorError(GetLastError());
             break;
         }
-
-        // Periodic check to verify directory changes
-        for (HANDLE h : dirHandles) {
-            BYTE notifyBuffer[1024]{};
-            DWORD bytesReturned = 0;
-            if (ReadDirectoryChangesW(
-                    h,
-                    notifyBuffer,
-                    sizeof(notifyBuffer),
-                    FALSE,
-                    FILE_NOTIFY_CHANGE_FILE_NAME | FILE_NOTIFY_CHANGE_LAST_WRITE,
-                    &bytesReturned,
-                    nullptr,
-                    nullptr) && bytesReturned > 0) {
-                // If files changed in storefront manifest directory, trigger background preload
-                PreloadCache();
-            }
+        const size_t index = static_cast<size_t>(result - WAIT_OBJECT_0);
+        if (index >= waitHandles.size()) {
+            LogMonitorError(ERROR_INVALID_DATA);
+            break;
         }
+        if (!FindNextChangeNotification(waitHandles[index])) {
+            LogMonitorError(GetLastError());
+            FindCloseChangeNotification(waitHandles[index]);
+            waitHandles.erase(waitHandles.begin() + static_cast<std::ptrdiff_t>(index));
+        }
+        (void)preloadWorker.Request();
     }
 
-    for (HANDLE h : dirHandles) {
-        CloseHandle(h);
+    for (size_t i = 1; i < waitHandles.size(); ++i) {
+        FindCloseChangeNotification(waitHandles[i]);
     }
+}
+
+void RunWorkers() {
+    GameExplorer::PreloadWorker preloadWorker(PreloadCache, LogPreloadError);
+    (void)preloadWorker.Request();
+    std::thread pipeThread(NamedPipeServerThread, std::ref(preloadWorker));
+    std::thread monitorThread(DirectoryMonitorThread, std::ref(preloadWorker));
+
+    WaitForSingleObject(g_hStopEvent, INFINITE);
+    g_running = false;
+    pipeThread.join();
+    monitorThread.join();
+    preloadWorker.Stop();
 }
 
 VOID WINAPI ServiceMain(DWORD /*argc*/, LPWSTR* /*argv*/) {
@@ -252,19 +318,7 @@ VOID WINAPI ServiceMain(DWORD /*argc*/, LPWSTR* /*argv*/) {
     g_running = true;
     ReportServiceStatus(SERVICE_RUNNING, NO_ERROR, 0);
 
-    // Initial preloading on startup
-    std::thread preloadInit(PreloadCache);
-    preloadInit.detach();
-
-    std::thread pipeThread(NamedPipeServerThread);
-    std::thread monitorThread(DirectoryMonitorThread);
-
-    WaitForSingleObject(g_hStopEvent, INFINITE);
-
-    g_running = false;
-    UnblockNamedPipe();
-    if (pipeThread.joinable()) pipeThread.join();
-    if (monitorThread.joinable()) monitorThread.join();
+    RunWorkers();
 
     CloseHandle(g_hStopEvent);
     g_hStopEvent = nullptr;
@@ -283,7 +337,7 @@ bool InstallService() {
     SC_HANDLE service = CreateServiceW(
         scm,
         kServiceName,
-        kServiceDisplayName,
+        Messages::kDisplayName,
         SERVICE_ALL_ACCESS,
         SERVICE_WIN32_OWN_PROCESS,
         SERVICE_AUTO_START,
@@ -301,7 +355,7 @@ bool InstallService() {
 
     if (service != nullptr) {
         SERVICE_DESCRIPTIONW desc{};
-        desc.lpDescription = const_cast<wchar_t*>(kServiceDescription);
+        desc.lpDescription = const_cast<wchar_t*>(Messages::kDescription);
         ChangeServiceConfig2W(service, SERVICE_CONFIG_DESCRIPTION, &desc);
 
         // Configure restart on failure
@@ -417,19 +471,12 @@ int WINAPI wWinMain(HINSTANCE /*hInstance*/, HINSTANCE /*hPrevInstance*/, LPWSTR
     if (!StartServiceCtrlDispatcherW(serviceTable)) {
         // If not started by SCM, fallback to standalone run if --run was specified
         if (cmd.find(L"--run") != std::wstring::npos) {
-            g_running = true;
             g_hStopEvent = CreateEventW(nullptr, TRUE, FALSE, nullptr);
-            std::thread preloadInit(PreloadCache);
-            preloadInit.detach();
-            std::thread pipeThread(NamedPipeServerThread);
-            std::thread monitorThread(DirectoryMonitorThread);
-            if (g_hStopEvent != nullptr) {
-                WaitForSingleObject(g_hStopEvent, INFINITE);
-            }
-            g_running = false;
-            if (pipeThread.joinable()) pipeThread.join();
-            if (monitorThread.joinable()) monitorThread.join();
-            if (g_hStopEvent != nullptr) CloseHandle(g_hStopEvent);
+            if (g_hStopEvent == nullptr) return static_cast<int>(GetLastError());
+            g_running = true;
+            RunWorkers();
+            CloseHandle(g_hStopEvent);
+            g_hStopEvent = nullptr;
             return 0;
         }
         return static_cast<int>(GetLastError());

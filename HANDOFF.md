@@ -1,9 +1,25 @@
 # HANDOFF.md — Windows Game Explorer Session Handoff
 
-**Last updated:** 2026-10-26
-**Current session status:** `v2.5.0` released, tagged and published — release commit `c573ce5` on `origin/main`, tag `v2.5.0`, GitHub release with the setup EXE, portable ZIP and ROMs template (SHA256s verified in the release assets) · version stamped in `CMakeLists.txt` and the NSIS installer · `game-explorer.bat release` passed in one pass: 0 errors / 0 warnings under `/W4 /WX`, 61/61 unit tests, 0 PSScriptAnalyzer diagnostics · next planned work is M18 Windows 10 vs 11 shell compatibility research (`ARCH-01`); relocation and install-progress tracking are dropped.
+**Last updated:** 2026-10-27
+**Current session status:** `v2.5.0` remains the latest release. M18 compatibility research is complete: the documented UWP XAML hosting API floor is Windows 10 version 1903 (build 18362), and registration now leaves Explorer presentation to the OS instead of changing folder-type or tab-host flags. The installer enforces the build floor. Explorer-hosted runtime validation on build 18362 remains outstanding; see `docs/research/windows-version-compatibility.md`.
 **Project:** windows-game-explorer (Windows Game Explorer)
 **Root:** projects/windows-game-explorer
+
+**M19 active scope (user-directed, 2026-10-27):** performance optimization (`PERF-01`), project-owned Windhawk-inspired
+Explorer watcher/loader (`HOST-01`) without Windhawk dependency, and navigation sidebar suppression on standalone
+`shell:games` invocations (`NAV-01`) to eliminate unneeded navigation clutter and maximize horizontal canvas space for the installed games grid.
+Keep unfinished items and concrete blockers visible; do not mark the milestone complete from a successful build alone.
+
+**M19 implementation progress:**
+- **PERF-01 (Preload & Service Workers)**: `GameExplorerService` uses one coalescing, joined preload worker (`PreloadWorker.h`) for startup, IPC rescan, and directory notifications. Directory monitoring waits on notifications and stop together. Centralized constants in `ServiceMessages.h`. Deterministic regressions cover burst coalescing, serialization, failure recovery, stop rejection, and shutdown.
+- **HOST-01 (Project-Owned Explorer Lifecycle Watcher/Loader)**:
+  - Core motivation clarified (user directive): simpler method to add the games library shell extension to File Explorer without the flakiness of `regsvr32` direct injection and to reduce the chances of it being broken by Windows updates.
+  - Architecture research documented in `docs/research/explorer-watcher-architecture.md`: user-session scoped daemon (`GameExplorerWatcher.exe`), target validation (SID, session, architecture, explorer path), remote thread `LoadLibraryW`, anti-tamper revision checks, clean rollback (`--disable`, `--stop`), and preservation of in-process COM discovery.
+  - Implementation: `src/service/ExplorerLoader.cpp`, `WatcherMain.cpp`, `WatcherMessages.h`, `scripts/watcher.ps1`, and single-dispatcher CLI `game-explorer.bat watcher [enable|disable|stop|inspect|watch]`.
+  - Testing & packaging: 7 automated loader tests in `tests/TestExplorerLoader.cpp` (74/74 test suite pass). Portable ZIP and NSIS setup package `GameExplorerWatcher.exe` and `scripts\watcher.ps1` with upgrade/uninstall lifecycle hooks.
+- **NAV-01 (Standalone Navigation Sidebar Suppression)**:
+  - Planned and scoped: suppress `EP_NavPane` in `IExplorerPaneVisibility::GetPaneState` when launched via `shell:games` or desktop/start menu shortcuts. Preserves standard navigation sidebar when browsing via existing Explorer tabs. Maximizes installed games grid width.
+- **Pending verification**: live interactive Explorer session smoke testing (navigation, multi-tab, restart, update survival, standalone sidebar suppression).
 
 > Permanent, git-tracked session-state ledger for `windows-game-explorer`. Maintained **incrementally** — refresh at every
 > workstream state change, fully rewrite at session end. New session: read this file right after `AGENTS.md`,
@@ -88,7 +104,7 @@
   `A36A908E…5EF856E` (full values in `.github/releases/v2.5.0.md`).
 
 ### Next
-- M18 (planned, unscheduled): Windows 10 vs 11 shell compatibility research (`ARCH-01`).
+- M18 (complete): Windows 10 vs 11 shell compatibility research (`ARCH-01`); Windows 10 build 18362 is the documented API floor, with end-to-end testing outstanding.
   Relocation/move and in-app install-progress tracking are dropped (user decision 2026-10-26) with
   install-location handling. The catalogue stays list-only by design (no detail pane, user decision
   2026-10-26).
@@ -142,8 +158,9 @@
 - EA App / Battle.net / Amazon Games / Rockstar owned-uninstalled libraries remain installed-only: no
   verified offline artefact exists and no sanctioned endpoint is available without the app handling
   auth. Playnite (LiteDB) and Heroic caches stay deferred aggregators.
-- Next planned: M18 Windows 10 vs 11 shell compatibility research (`ARCH-01`). Install progress tracking
-  and library relocation are dropped (user decision 2026-10-26) with install-location handling. No
+- M18 is complete. The remaining M18 validation gap is a live Explorer-hosted smoke test on Windows
+  10 build 18362; see `docs/research/windows-version-compatibility.md`. Install progress tracking and
+  library relocation are dropped (user decision 2026-10-26) with install-location handling. No
   per-title detail pane — the catalogue is intentionally list-only.
 
 ---
@@ -574,10 +591,9 @@ Delivered universal achievement tracking across native storefronts (Steam, GOG, 
 
 ## 3) Next Immediate Priorities
 
-1. **M18 (planned, unscheduled)** — Windows 10 vs 11 shell compatibility research (`ARCH-01`): minimum
-   Windows 10 build for in-process XAML Island hosting plus WinUI/DWM/tab behaviour documentation.
-   Relocation/move and in-app install-progress tracking are dropped (user decision 2026-10-26). EA App /
-   Battle.net / Amazon Games / Rockstar owned-uninstalled libraries stay installed-only until a
-   sanctioned offline artefact exists. Details in `TODO.md`.
+1. **M18 complete** — Windows 10 version 1903 (build 18362) is the documented UWP XAML hosting API
+   floor. Explorer presentation remains OS-controlled; the NSIS installer enforces the floor.
+   End-to-end testing on build 18362 remains outstanding. Details in `TODO.md` and
+   `docs/research/windows-version-compatibility.md`.
 2. **`v2.5.0` shipped** — commit `c573ce5`, tag `v2.5.0`, GitHub release published with the setup EXE,
    portable ZIP and ROMs template.

@@ -9,6 +9,8 @@ add_executable(GameExplorerTests
     TestImageValidator.cpp
     TestSynopsisFormatter.cpp
     TestThemeScroll.cpp
+    TestPreloadWorker.cpp
+    TestExplorerLoader.cpp
 )
 
 target_include_directories(GameExplorerTests PRIVATE
@@ -24,6 +26,11 @@ target_link_libraries(GameExplorerTests PRIVATE
     Ole32
     Advapi32
     Comctl32
+    GameExplorerLoader
 )
 
 add_test(NAME GameExplorerUnitTests COMMAND GameExplorerTests)
+
+add_executable(GameExplorerLoaderHost LoaderHost.cpp)
+add_library(GameExplorerLoaderFixture SHARED LoaderFixture.cpp)
+add_dependencies(GameExplorerTests GameExplorerLoaderHost GameExplorerLoaderFixture)

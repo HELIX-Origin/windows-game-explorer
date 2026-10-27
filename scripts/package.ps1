@@ -27,7 +27,7 @@ if ((-not (Test-Path -LiteralPath $SidebarBmp)) -or (-not (Test-Path -LiteralPat
         & $artScript
     }
 }
-$RequiredFiles = @("GameExplorerShell.dll", "GameExplorerStudio.exe", "GameExplorerService.exe")
+$RequiredFiles = @("GameExplorerShell.dll", "GameExplorerStudio.exe", "GameExplorerService.exe", "GameExplorerWatcher.exe")
 foreach ($file in $RequiredFiles) {
     $fullPath = Join-Path $BinDir $file
     if (-not (Test-Path -LiteralPath $fullPath)) {
@@ -82,12 +82,14 @@ $PortableFiles = @(
     @{ Source = (Join-Path $BinDir "GameExplorerShell.dll");       Target = "GameExplorerShell.dll" },
     @{ Source = (Join-Path $BinDir "GameExplorerStudio.exe");      Target = "GameExplorerStudio.exe" },
     @{ Source = (Join-Path $BinDir "GameExplorerService.exe");     Target = "GameExplorerService.exe" },
+    @{ Source = (Join-Path $BinDir "GameExplorerWatcher.exe");     Target = "GameExplorerWatcher.exe" },
     @{ Source = (Join-Path $RepoRoot "LICENSE");                   Target = "LICENSE" },
     @{ Source = (Join-Path $RepoRoot "assets\game-explorer-icon.ico"); Target = "game-explorer-icon.ico" },
     @{ Source = (Join-Path $RepoRoot "game-explorer.bat");         Target = "game-explorer.bat" },
     @{ Source = (Join-Path $RepoRoot "scripts\_common.ps1");       Target = "scripts\_common.ps1" },
     @{ Source = (Join-Path $RepoRoot "scripts\register.ps1");      Target = "scripts\register.ps1" },
-    @{ Source = (Join-Path $RepoRoot "scripts\unregister.ps1");    Target = "scripts\unregister.ps1" }
+    @{ Source = (Join-Path $RepoRoot "scripts\unregister.ps1");    Target = "scripts\unregister.ps1" },
+    @{ Source = (Join-Path $RepoRoot "scripts\watcher.ps1");       Target = "scripts\watcher.ps1" }
 )
 foreach ($entry in $PortableFiles) {
     Copy-Item -LiteralPath $entry.Source -Destination (Join-Path $StagingDir $entry.Target) -Force

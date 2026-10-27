@@ -2,7 +2,7 @@
 
 > Authoritative conventions for **Windows Game Explorer** (`projects/windows-game-explorer`).
 > Follows the v2.0.0 architecture: completely native to Windows (C++20 Win32 + COM Shell Extension).
-> Recreates and modernizes the classic Windows 7/Vista Game Explorer directly inside Windows 11 File Explorer.
+> Recreates and modernizes the classic Windows 7/Vista Game Explorer inside Windows 10 1903+ and Windows 11 File Explorer.
 
 ---
 
@@ -14,11 +14,12 @@ Windows Game Explorer is fundamentally an authentic, rich, visual **Game Library
 > **Generic Shortcuts Folder Degradation is Strictly Prohibited.**
 > Falling back to vanilla Windows Explorer list views (`SHCreateShellFolderView` / `CDefView`) without proper Game Explorer categorization, vertical box art thumbnails, and game properties reduces the virtual folder to nothing more than a plain folder of file shortcuts. Any implementation that results in a generic shortcuts folder is classified as a design regression and is rejected.
 
-The shell integration must deliver an authentic game library experience:
+The shell integration must deliver an authentic game library experience while allowing Windows to
+control Explorer chrome, tabs, and presentation:
 - Two explicit collapsible sections (`▾ Game Providers (N)` and `▾ Games (N)`) powered by `ICategoryProvider` and `ICategorizer`.
 - Dedicated visual presentation (tall ~2:3 box art covers for games and authentic client icons for storefront providers).
 - Persistent Details / Preview integration featuring complete game metadata (title, platform, rating, developer, release date, disk footprint) and one-click launch controls.
-- Active system accent colorization and dark/light mode synchronization with Windows 11 DWM.
+- Active system accent colorization and dark/light mode synchronization with the installed Windows version.
 
 ---
 
@@ -37,7 +38,7 @@ When a shell crash occurs (e.g. `0xc00000fd` `STATUS_STACK_OVERFLOW` in `ntdll.d
 
 ## 3. Official Microsoft Shell Contracts for Game Explorer Revival
 
-Recreating the authentic Windows 7 Game Explorer inside modern Windows 11 requires implementing the standard Microsoft Shell COM interfaces:
+Recreating the authentic Windows 7 Game Explorer inside Windows 10 1903+ and Windows 11 requires implementing the standard Microsoft Shell COM interfaces:
 - **`FOLDERTYPEID_Games` (`{b689b0d0-76d3-4cbb-87f7-585d0e0ce070}`):** The canonical Windows folder type for games, defining default columns (Name, Platform, Developer, Release Date, Rating, Size) and tile/icon presentation.
 - **`ICategoryProvider` & `ICategorizer`:** Groups items by `PKEY_ItemTypeText` into `▾ Game Providers` (`itemKind = 0`) and `▾ Games` (`itemKind = 1`).
 - **`IThumbnailProvider` & `IShellItemImageFactory`:** Supplies high-resolution vertical game box art (~2:3 / 600×900) and storefront logos as bitmaps so File Explorer renders game covers directly in Icon and Tile views.

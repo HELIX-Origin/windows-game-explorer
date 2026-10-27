@@ -5,7 +5,7 @@ Thanks for your interest in improving **Windows Game Explorer**! This guide cove
 > By participating you agree to our [Code of Conduct](./CODE_OF_CONDUCT.md). For security issues,
 > follow [SECURITY.md](./SECURITY.md) — **do not** open a public issue.
 
-Windows Game Explorer is a native C++20 Win32 application and Windows File Explorer Shell Namespace Extension (`GameExplorerShell.dll`, `GameExplorerStudio.exe`). It revives the classic Windows 7/Vista Game Explorer directly inside Windows 11 File Explorer with two collapsible sections (`▾ Game Providers` and `▾ Games`), high-resolution vertical box art, rich properties, and automated storefront discovery.
+Windows Game Explorer is a native C++20 Win32 application and Windows File Explorer Shell Namespace Extension (`GameExplorerShell.dll`, `GameExplorerStudio.exe`). It revives the classic Windows 7/Vista Game Explorer inside Windows 10 version 1903+ and Windows 11 File Explorer, using the presentation native to each OS, with two collapsible sections (`▾ Game Providers` and `▾ Games`), high-resolution vertical box art, rich properties, and automated storefront discovery.
 
 ---
 

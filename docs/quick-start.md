@@ -14,7 +14,7 @@ Windows Game Explorer is distributed in two official formats: an automated insta
 3. The setup automatically:
    - Installs the shell extension (`GameExplorerShell.dll`) and Game Explorer Studio (`GameExplorerStudio.exe`) to `%LOCALAPPDATA%\Programs\Windows Game Explorer\`.
    - Registers the COM shell extension in the Windows Registry (`HKEY_CURRENT_USER\Software\Classes\CLSID\...`).
-   - Pins **Games** directly under File Explorer's navigation pane tree (alongside native Windows 11 *Home* and *Gallery*).
+   - Adds **Games** to File Explorer's navigation pane; Explorer positions and presents it according to the installed Windows version.
 
 ### Option B: Portable ZIP Package
 1. Download `windows-game-explorer-v2.5.0-win64.zip`.
@@ -37,8 +37,8 @@ You can open Windows Game Explorer using any of the following methods:
 
 ```mermaid
 flowchart LR
-    Start["Navigation Pane / Run Dialog<br/>(Games / Shell GUID)"] --> Explorer["Windows 11 File Explorer"]
-    Explorer --> Viewport["Game Explorer Viewport<br/>(WinUI 3 XAML Island)"]
+    Start["Navigation Pane / Run Dialog<br/>(Games / Shell GUID)"] --> Explorer["File Explorer (native OS presentation)"]
+    Explorer --> Viewport["Game Explorer Viewport<br/>(UWP XAML Island)"]
     Viewport --> Providers["▾ Installed Providers"]
     Viewport --> Games["▾ Games Library"]
     Viewport --> Sidepane["Inspector Sidepane<br/>(Art, Synopsis, Achievements)"]
