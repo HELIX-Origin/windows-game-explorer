@@ -2,8 +2,8 @@
 
 Completely native Windows game library and File Explorer integration — C++20 Win32 application
 and Windows Shell Namespace Extension. Recreates the classic Windows 7/Vista Game Explorer (`shell:Games`, `FOLDERTYPEID_Games`)
-inside Windows 10 version 1903+ and Windows 11 File Explorer using each OS's native presentation, with two collapsible sections (`▾ Game Providers` and `▾ Games`),
-high-resolution box art, rich properties, and automated multi-store discovery. MIT license.
+inside Windows 11 File Explorer with two collapsible sections (`▾ Game Providers` and `▾ Games`),
+high-resolution box art, rich properties, responsive dynamic window sizing, and automated multi-store discovery. MIT license.
 
 ## Architecture at a glance
 
@@ -20,7 +20,7 @@ high-resolution box art, rich properties, and automated multi-store discovery. M
 | Command / Tool | Purpose |
 |---|---|
 | `game-explorer.bat build [Release\|Debug]` | Native C++20 compilation with `/W4 /WX` (warnings as errors) |
-| `game-explorer.bat test [Release\|Debug]` | Run native C++ unit and integration test suite (`GameExplorerTests.exe`, 61 tests) |
+| `game-explorer.bat test [Release\|Debug]` | Run native C++ unit and integration test suite (`GameExplorerTests.exe`, 87 tests) |
 | `game-explorer.bat lint` | PSScriptAnalyzer zero-warning gate for `scripts\*.ps1` |
 | `game-explorer.bat package [Release\|Debug]` | Package portable ZIP and compile dual-mode NSIS installer (`dist/`) |
 | `game-explorer.bat release` | Build, test, lint, then package in one pass |

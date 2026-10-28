@@ -10,7 +10,7 @@ During the Windows Vista and Windows 7 era, Windows shipped with a dedicated, sy
 
 In modern Windows versions, Game Explorer was deprecated and eventually removed, leaving users dependent on fragmented, heavy, web-based launchers (Steam, Epic Games Launcher, Ubisoft Connect, EA App, Battle.net, GOG Galaxy) or cluttered desktop shortcuts.
 
-**Windows Game Explorer** revives this classic capability natively inside Windows 10 version 1903 and later and Windows 11. Instead of creating another heavy electron application, it integrates directly into **File Explorer** as an in-process native C++ shell extension (`GameExplorerShell.dll`). It embeds **UWP XAML controls via XAML Islands** and leaves Explorer's window chrome and presentation to the installed OS.
+**Windows Game Explorer** revives this classic capability natively inside Windows 11 File Explorer. Instead of creating another heavy electron application, it integrates directly into **File Explorer** as an in-process native C++ shell extension (`GameExplorerShell.dll`). It embeds **UWP XAML controls via XAML Islands** with fully responsive dynamic sizing across any window dimensions, and automatically collapses the left navigation pane and status bar in standalone `shell:games` windows.
 
 ---
 

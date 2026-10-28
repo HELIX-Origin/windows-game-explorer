@@ -7,7 +7,7 @@
 ## 📥 Installation
 
 > [!NOTE]
-> **Windows Compatibility Notice**: Windows 11 (Build 22000+) is the primary, fully verified target environment. Windows 10 (1903+ / Build 18362+) provides the theoretical UWP XAML hosting API floor, but Windows 10 shell integration remains currently untested on physical hardware; File Explorer navigation pane registration is not guaranteed on Windows 10.
+> **Windows Compatibility Notice**: Windows 11 (Build 22000+) is the supported target environment. Windows 10 is officially dropped from the installer and unverified following end-of-life status.
 
 Windows Game Explorer is distributed in two official formats: an automated installer and a portable standalone archive.
 

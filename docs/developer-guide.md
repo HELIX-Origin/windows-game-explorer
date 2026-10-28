@@ -282,78 +282,110 @@ Execute the full suite through the dispatcher (or the underlying script):
 # equivalent: pwsh -NoProfile -File scripts/test.ps1 -Configuration Release
 ```
 
-### Coverage (61 Dedicated Unit Tests)
+### Coverage (87 Dedicated Unit Tests)
 
-**Database (4)**
+**Database (5)**
 1. `DatabaseInitializationAndSchema` — table creation, indexes, and automated schema migrations.
 2. `DatabaseUpsertAndQueryGame` — CRUD operations for `GameItem` records.
 3. `DatabaseKeyValueSettingsPersistence` — dynamic settings storage.
 4. `DatabaseAchievementUpsertAndProgress` — composite-key achievement batch upserts and unlock percentages.
+5. `DatabaseDeleteGameByAppId` — single-title deletion cascading to achievements and metadata.
 
-**Storefront discovery, metadata, storage and text (12)**
-5. `ScannerMountedDrivesDiscovery` — multi-drive mounting and path resolution.
-6. `ScannerBlacklistExecutableFilter` — exclusions for launcher helpers (`agent.exe`, `battlenet.exe`, etc.).
-7. `PerGameMetadataSerializationAndPriority` — JSON serialization and override precedence.
-8. `LaunchMethodMetadataRoundTrip` — launch-method overrides survive metadata serialization.
-9. `CustomLocalGameLifecycle` — adding, querying, and removing custom standalone games.
-10. `ScannerScanAllPrunesObsoleteGames` — pruning uninstalled games while preserving favorites.
-11. `ScannerCleanRomTitleAndEmulatedScan` — title cleaning and leading-article inversion.
-12. `ScannerUbisoftDetectionAndArtwork` — Ubisoft configuration-cache parsing and CDN URL generation.
-13. `StorageOneDriveDirectoryCreationAndSync` — OneDrive `backups/`, `metadata/`, `art/` creation.
-14. `TextSanitizationAndEntityDecoding` — HTML entities, CP1252 mojibake fixes, and emoji cleanup.
-15. `ItchArtworkProtectionAndStrictTitleMatching` — itch.io artwork preservation and strict title matching.
-16. `ArtworkSourcingPolicyForStoreVersusLocalGames` — store-artwork exclusivity policy.
+**Storefront discovery, smart scan heuristics, metadata and text (18)**
+6. `ScannerMountedDrivesDiscovery` — multi-drive mounting and candidate search path resolution.
+7. `ScannerBlacklistExecutableFilter` — exclusions for launcher helpers (`agent.exe`, `battlenet.exe`, etc.).
+8. `ScannerCommonGameInstallationPaths` — path heuristics for standard gaming directories.
+9. `ScannerKnownGameEngineDetection` — signature verification for Unity, Unreal, Godot, GameMaker, RPG Maker, Ren'Py, Source.
+10. `PerGameMetadataSerializationAndPriority` — JSON serialization and override precedence.
+11. `LaunchMethodMetadataRoundTrip` — launch-method overrides survive metadata serialization.
+12. `CustomLocalGameLifecycle` — adding, querying, and removing custom standalone games.
+13. `ScannerScanAllPrunesObsoleteGames` — pruning uninstalled games while preserving favorites.
+14. `ScannerCleanRomTitleAndEmulatedScan` — title cleaning and leading-article inversion.
+15. `ScannerUbisoftDetectionAndArtwork` — Ubisoft configuration-cache parsing and CDN URL generation.
+16. `StorageOneDriveDirectoryCreationAndSync` — OneDrive `backups/`, `metadata/`, `art/` creation.
+17. `TextSanitizationAndEntityDecoding` — HTML entities, CP1252 mojibake fixes, and emoji cleanup.
+18. `ItchArtworkProtectionAndStrictTitleMatching` — itch.io artwork preservation and strict title matching.
+19. `ArtworkSourcingPolicyForStoreVersusLocalGames` — store-artwork exclusivity policy.
+20. `ScannerUniversalInstalledGameDetection` — provider-agnostic local install discovery.
+21. `ScannerBenchmarkPerformanceSpeed` — sub-millisecond execution benchmark across game libraries.
+22. `ScannerSmartScanSessionGateAndPerformance` — scan-session debouncing and cached metadata reuse.
+23. `ScannerPrunesNonGameMetadataOnLoad` — automatic purge of non-game metadata entries.
 
 **Owned-games catalogue (21)**
-17. `OwnedGames_TokenMatchIsWholeTokenCaseInsensitive` — whole-token, case-insensitive search matching.
-18. `OwnedGames_SearchMatchesTitleCaseInsensitive` — title search casing.
-19. `OwnedGames_SortTitleDropsLeadingArticles` — article-insensitive title sorting.
-20. `OwnedGames_FilterCombinesEveryActiveField` — combined filter fields.
-21. `OwnedGames_SortUsesSelectedKeyThenTitle` — stable sort key with title tie-break.
-22. `OwnedGames_PagingSlicesAndClamps` — page slicing and bounds clamping.
-23. `OwnedGames_MarkInstalledFollowsLibrary` — install flags follow the installed library.
-24. `OwnedGames_SteamJsonParsesGamesAndSkipsEmptyName` — Steam JSON parsing and empty-name skipping.
-25. `OwnedGames_SteamJsonHandlesEmptyLibraryAndGarbage` — malformed and empty Steam payloads.
-26. `OwnedGames_NormalizeTitleKeyStripsPunctuationAndLeadingArticles` — canonical title keys.
-27. `OwnedGames_PlatformListsAreParsedFromStorefrontJson` — storefront platform lists.
-28. `OwnedGames_PcGateNeedsWindowsEvidence` — Windows-installable evidence requirement.
-29. `OwnedGames_GogOsCompatibilityNeedsWindows` — GOG OS compatibility gating.
-30. `OwnedGames_SteamStoreBrowseMarksOnlyNonWindowsApps` — Steam browse platform marking.
-31. `OwnedGames_WindowsGateDropsOnlyNonWindowsSources` — per-source Windows gate.
-32. `OwnedGames_MatchesStoreChecksBothPrimaryAndAllSources` — primary and merged source matching.
-33. `OwnedGames_ExtractBaseTitleStripsCommonEditionSuffixes` — edition suffixes split from titles.
-34. `OwnedGames_NormalizeTitleKeyCollapsesCrossEditionDuplicates` — cross-edition deduplication.
-35. `OwnedGames_UbisoftConfigurationCacheResolvesTitles` — Ubisoft cache title resolution.
-36. `OwnedGames_UbisoftOwnershipIdsAreLowercasedAndDeduped` — Ubisoft ownership ID normalization.
-37. `OwnedGames_LegendaryAssetsMapToEpicOwnedGames` — legendary asset mapping to Epic rows.
+24. `OwnedGames_TokenMatchIsWholeTokenCaseInsensitive` — whole-token, case-insensitive search matching.
+25. `OwnedGames_SearchMatchesTitleCaseInsensitive` — title search casing.
+26. `OwnedGames_SortTitleDropsLeadingArticles` — article-insensitive title sorting.
+27. `OwnedGames_FilterCombinesEveryActiveField` — compound multi-field filter queries.
+28. `OwnedGames_SortUsesSelectedKeyThenTitle` — multi-column tie-breaker sorting.
+29. `OwnedGames_PagingSlicesAndClamps` — windowed page slicing and bound clamping.
+30. `OwnedGames_MarkInstalledFollowsLibrary` — cross-referencing local installed state against owned titles.
+31. `OwnedGames_SteamJsonParsesGamesAndSkipsEmptyName` — robust Steam Store API response parsing.
+32. `OwnedGames_SteamJsonHandlesEmptyLibraryAndGarbage` — malformed payload resilience.
+33. `OwnedGames_NormalizeTitleKeyStripsPunctuationAndLeadingArticles` — canonical title key normalization.
+34. `OwnedGames_PlatformListsAreParsedFromStorefrontJson` — multi-platform OS availability extraction.
+35. `OwnedGames_PcGateNeedsWindowsEvidence` — Windows PC platform verification gate.
+36. `OwnedGames_GogOsCompatibilityNeedsWindows` — GOG OS compatibility gating.
+37. `OwnedGames_SteamStoreBrowseMarksOnlyNonWindowsApps` — Steam browse platform marking.
+38. `OwnedGames_WindowsGateDropsOnlyNonWindowsSources` — per-source Windows gate.
+39. `OwnedGames_MatchesStoreChecksBothPrimaryAndAllSources` — primary and merged source matching.
+40. `OwnedGames_ExtractBaseTitleStripsCommonEditionSuffixes` — edition suffixes split from titles.
+41. `OwnedGames_NormalizeTitleKeyCollapsesCrossEditionDuplicates` — cross-edition deduplication.
+42. `OwnedGames_UbisoftConfigurationCacheResolvesTitles` — Ubisoft cache title resolution.
+43. `OwnedGames_UbisoftOwnershipIdsAreLowercasedAndDeduped` — Ubisoft ownership ID normalization.
+44. `OwnedGames_LegendaryAssetsMapToEpicOwnedGames` — legendary asset mapping to Epic rows.
 
-**Achievements, settings and platform launching (6)**
-38. `AchievementEngineProviderDispatchAndCaching` — provider dispatch and local badge caching.
-39. `SettingsDefaultsAndLayoutModes` — configuration defaults and theme detection.
-40. `ThemeControls_CheckAndRadioToggleStateRetention` — themed check/radio state retention.
-41. `PlatformEnumToStringAndBack` — enum conversion round-trips.
-42. `PlatformLauncherSteamPathQuery` — registry discovery for platform launchers.
-43. `PlatformLauncherEmulatorDiscovery` — automatic emulator discovery.
+**Achievements, settings, theme controls and platform launching (6)**
+45. `PlatformEnumToStringAndBack` — enum conversion round-trips.
+46. `PlatformLauncherSteamPathQuery` — registry discovery for platform launchers.
+47. `PlatformLauncherEmulatorDiscovery` — automatic emulator discovery.
+48. `SettingsDefaultsAndLayoutModes` — configuration defaults and theme detection.
+49. `ThemeControls_CheckAndRadioToggleStateRetention` — themed check/radio state retention.
+50. `AchievementEngineProviderDispatchAndCaching` — provider dispatch and local badge caching.
 
 **Artwork validation, synopsis formatting and scrolling (18)**
-44. `ImageValidatorSlotDimensionsAndAspectRatios` — aspect-ratio boundaries for every slot.
-45. `ImageValidatorAssetPreservationAndNonDestructiveValidation` — originals never overwritten or cropped.
-46. `SynopsisFormatterPlainTextPassThrough` — plain synopses render unchanged.
-47. `SynopsisFormatterHeadingsAndBullets` — headings and bullets become rich text.
-48. `SynopsisFormatterInlineEmphasis` — bold/italic/underline runs and line breaks.
-49. `SynopsisFormatterPreservesUnderscoreWordsAndEscapes` — snake_case words survive emphasis parsing.
-50. `SynopsisFormatterStripsMarkup` — residual markup stripped from output.
-51. `SynopsisFormatterPreservesLineBreaks` — explicit line breaks survive formatting.
-52. `SynopsisFormatterNumberedQuotesAndRules` — numbered lists, quotes and horizontal rules.
-53. `SynopsisFormatterCodeAndLinks` — inline code and links.
-54. `SynopsisFormatterTablesAndAutolinks` — tables and autolinks.
-55. `SynopsisFormatterKeepsImageMarkupLiteral` — image markup stays literal.
-56. `ThemeScroll_HiddenWhenContentFits` — scroll rail hides when content fits.
-57. `ThemeScroll_ThumbTracksContentRatio` — thumb length tracks content ratio.
-58. `ThemeScroll_ThumbNeverCollapses` — thumb keeps a usable minimum length.
-59. `ThemeScroll_ScrollPositionClamped` — offsets stay inside the content range.
-60. `ThemeScroll_DragMapsPointerToOffset` — pointer drag maps to content offsets.
-61. `ThemeScroll_DragWithoutOverflowIsNoOp` — dragging is inert without overflow.
+51. `ImageValidatorSlotDimensionsAndAspectRatios` — aspect-ratio boundaries for every slot.
+52. `ImageValidatorAssetPreservationAndNonDestructiveValidation` — originals never overwritten or cropped.
+53. `SynopsisFormatterPlainTextPassThrough` — plain synopses render unchanged.
+54. `SynopsisFormatterHeadingsAndBullets` — headings and bullets become rich text.
+55. `SynopsisFormatterInlineEmphasis` — bold/italic/underline runs and line breaks.
+56. `SynopsisFormatterPreservesUnderscoreWordsAndEscapes` — snake_case words survive emphasis parsing.
+57. `SynopsisFormatterStripsMarkup` — residual markup stripped from output.
+58. `SynopsisFormatterPreservesLineBreaks` — explicit line breaks survive formatting.
+59. `SynopsisFormatterNumberedQuotesAndRules` — numbered lists, quotes and horizontal rules.
+60. `SynopsisFormatterCodeAndLinks` — inline code and links.
+61. `SynopsisFormatterTablesAndAutolinks` — tables and autolinks.
+62. `SynopsisFormatterKeepsImageMarkupLiteral` — image markup stays literal.
+63. `ThemeScroll_HiddenWhenContentFits` — scroll rail hides when content fits.
+64. `ThemeScroll_ThumbTracksContentRatio` — thumb length tracks content ratio.
+65. `ThemeScroll_ThumbNeverCollapses` — thumb keeps a usable minimum length.
+66. `ThemeScroll_ScrollPositionClamped` — offsets stay inside the content range.
+67. `ThemeScroll_DragMapsPointerToOffset` — pointer drag maps to content offsets.
+68. `ThemeScroll_DragWithoutOverflowIsNoOp` — dragging is inert without overflow.
+
+**Preload worker and background service execution (6)**
+69. `PreloadWorker_RejectsMissingCallbacks` — validation of valid dispatch function pointers.
+70. `PreloadWorker_IdleStopRejectsRequests` — graceful worker teardown and rejection of stale queries.
+71. `PreloadWorker_CoalescesBurstAndSerializesScans` — debounce bursts into serialized scans.
+72. `PreloadWorker_ReportsErrorsAndAcceptsSubsequentWork` — worker thread recovery after exceptions.
+73. `PreloadWorker_DestructionJoinsActiveScan` — deterministic join on destructor.
+74. `PreloadWorker_StopWaitsForActiveScanAndDiscardsPendingWork` — clean queue flushing.
+
+**Shell loader & process injection boundaries (7)**
+75. `ExplorerLoader_RequiresExactExplorerImage` — verification of explorer.exe binary path.
+76. `ExplorerLoader_RejectsOtherUsersSessionsAndArchitectures` — cross-session process isolation.
+77. `ExplorerLoader_RejectsMissingIdentityAndSelf` — process handle validation.
+78. `ExplorerLoader_ReadsCurrentProcessIdentityAndRejectsItAsTarget` — self-target rejection.
+79. `ExplorerLoader_LoadsModuleIntoIsolatedHostOnlyOnce` — idempotent DLL injection.
+80. `ExplorerLoader_ReportsMissingModuleAndCanRecover` — missing DLL reporting and graceful fallback.
+81. `ExplorerLoader_CancellationPreventsLoading` — asynchronous cancellation token enforcement.
+
+**Updates and localization (6)**
+82. `UpdateChecker_SemVerComparison` — SemVer comparison parsing (e.g. `v2.6.0` vs `v2.5.0`).
+83. `UpdateChecker_ParseReleaseJsonWithValidAsset` — GitHub API release JSON parsing and asset matching.
+84. `UpdateChecker_ParseReleaseJsonWhenUpToDate` — release checker no-op when on current release.
+85. `UpdateChecker_ParseReleaseJsonMalformed` — malformed API response handling.
+86. `LocalizationEngine_StringTableLoading` — Win32 string resource table lookup.
+87. `LocalizationEngine_IndirectStringFormat` — SHLoadIndirectString formatting.
 
 ---
 

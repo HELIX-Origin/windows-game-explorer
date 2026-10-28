@@ -5,11 +5,11 @@
 <p align="center">
   <a href="https://github.com/HELIX-Origin/windows-game-explorer/releases"><img src="https://img.shields.io/github/v/release/HELIX-Origin/windows-game-explorer?include_prereleases&label=Release&color=blue" alt="Release" height="20" /></a>
   <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="License: MIT" height="20" /></a>
-  <img src="https://img.shields.io/badge/Platform-Windows%2010%20%2F%2011-0078D4?logo=windows" alt="Platform: Windows 10 / 11" height="20" />
+  <img src="https://img.shields.io/badge/Platform-Windows%2011-0078D4?logo=windows" alt="Platform: Windows 11" height="20" />
   <img src="https://img.shields.io/badge/C%2B%2B-20-blue.svg" alt="C++20" height="20" />
 </p>
 
-**A native C++20 Windows Shell Extension reviving the classic Windows 7/Vista Game Explorer experience directly inside Windows 10 & 11 File Explorer.**
+**A native C++20 Windows Shell Extension reviving the classic Windows 7/Vista Game Explorer experience directly inside Windows 11 File Explorer.**
 
 Organize, browse, and launch your entire multi-platform game library with high-resolution vertical box art, responsive widescreen hero banners, an inspector sidepane, and automated storefront detection—with zero external scrapers required.
 
@@ -23,7 +23,8 @@ Organize, browse, and launch your entire multi-platform game library with high-r
 
 ## 🌟 Key Capabilities
 
-- **Native File Explorer Integration**: In-process shell extension (`GameExplorerShell.dll`) hosting UWP XAML Islands; File Explorer retains the presentation native to the installed Windows version.
+- **Native File Explorer Integration**: In-process shell extension (`GameExplorerShell.dll`) hosting UWP XAML Islands with fully responsive dynamic sizing across any window dimensions and screen resolutions.
+- **Standalone Dynamic Window Layout**: Automatically collapses the Left Navigation Pane and bottom status bar in standalone `shell:games` windows while preserving the full navigation pane in File Explorer tab mode.
 - **Two-Section Organization**: Structured grouping into collapsible `▾ Installed Providers` and `▾ Games Library` sections.
 - **Multi-Viewport Presentation**: Seamless switching between 2:3 vertical Cover Art (SteamGridDB standard), 3.1:1 widescreen Hero Banners, and 1:1 Details icon lists.
 - **Storefront-First Discovery**: Automatically detects installed titles and native art from Steam, Epic Games, GOG Galaxy, Ubisoft Connect, EA App, Battle.net, Xbox/Game Pass, Itch.io, Amazon Games, and retro ROMs.
@@ -41,7 +42,7 @@ Detailed user guides, engineering specifications, and customization references a
 - **[Quick Start Guide](./docs/quick-start.md)** — Installation methods, navigation pane entry points, and first-time library setup.
 - **[Comprehensive User Guide](./docs/user-guide.md)** — Deep-dive manual for the Library Manager, Game Catalogue, Configuration, Artwork Discovery, ROMs, and cloud sync.
 - **[Developer & Technical Reference](./docs/developer-guide.md)** — UWP XAML Islands internals, C++20 core engine, SQLite schema, build gates, and test suites.
-- **[Windows Version Compatibility](./docs/research/windows-version-compatibility.md)** — Windows 10 1903 (build 18362) API floor, native Explorer presentation, and validation status.
+- **[Windows Version Compatibility](./docs/research/windows-version-compatibility.md)** — Windows 11 target architecture and historical compatibility analysis.
 - **[Metadata & Customization Guide](./docs/metadata-customization.md)** — JSON schema specification for per-game overrides and manual imports.
 
 ---
@@ -49,8 +50,7 @@ Detailed user guides, engineering specifications, and customization references a
 ## ⚡ Quick Start & Development
 
 ### Prerequisites
-- Windows 11 (Build 22000+) — **Primary field-verified platform**
-- Windows 10 (1903+ / Build 18362+) — *Note: Windows 10 shell integration is currently untested on hardware; File Explorer navigation pane registration and shell extension hosting cannot be guaranteed on Windows 10 without field verification.*
+- Windows 11 (Build 22000+) — **Primary supported platform**
 - Visual Studio 2022 / Build Tools (MSVC v143+ with C++20)
 - CMake 3.25+
 
@@ -58,7 +58,7 @@ Detailed user guides, engineering specifications, and customization references a
 ```powershell
 # One dispatcher owns every workflow command
 .\game-explorer.bat build Release     # Fast incremental build (/W4 /WX zero-warning gate)
-.\game-explorer.bat test Release      # Run the 61-test automated C++ unit test suite
+.\game-explorer.bat test Release      # Run the 87-test automated C++ unit test suite
 .\game-explorer.bat release           # Build, test, lint, and package installer + portable ZIPs
 .\game-explorer.bat help              # List every command and option
 ```

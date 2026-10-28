@@ -32,6 +32,16 @@
 
 ## ✅ Resolved Bugs & Historical Fixes
 
+- ✅ **[windows-game-explorer] BUG-23 — Fluent 3D Controller Face Button Color Inversion & Grip Shadows**:
+  - **Root Cause**: The original 3D controller icon generated inverted face button colors (A=Yellow, Y=Green instead of standard Y=Yellow, B=Red, X=Blue, A=Green) and included two greyish-white floor shadow ovals beneath the controller handles that clashed with light backgrounds.
+  - **Resolution**: Re-rendered the 3D controller asset with standard physical gamepad face button coloring, removed the grip shadows, and recompiled into multi-layer ICO and BMP installer assets.
+  - **Verified**: Visually confirmed with zero artifacts across icon layers and dialog banners.
+
+- ✅ **[windows-game-explorer] BUG-22 — Standalone shell:games Window Content Stalled at Initial Parent Size Without Dynamic Resizing**:
+  - **Root Cause**: During standalone launch, `DesktopWindowXamlSource` (`m_hwndXamlIsland`) was initialized to parent bounds before `ExplorerFrame.dll` reparented `m_hwndView` into `CtrlNotifySink`. When `m_hwndXamlIsland`'s Win32 rect already matched target dimensions, subsequent `SetWindowPos` calls were treated as no-ops by Windows and did not dispatch `WM_SIZE` to `DesktopWindowContentBridge`, causing the XAML Island viewport to stall at initial dimensions.
+  - **Resolution**: Implemented a 1px size delta in `LibraryViewHost::Resize` guaranteeing `DesktopWindowContentBridge` receives `WM_SIZE` on layout changes, coupled with dynamic resizable window styles (`WS_CAPTION | WS_THICKFRAME | WS_MINIMIZEBOX | WS_MAXIMIZEBOX | WS_SYSMENU`) and synchronized child layout in `ViewSinkSubclassProc`.
+  - **Verified**: Empirically verified via `PrintWindow` captures across initial launch, shrunk (1100×700), enlarged (1550×850), and maximized window states.
+
 - ✅ **[windows-game-explorer] BUG-21 — Installer License Page Added Hard Breaks on Top of Rich-Edit Wrapping**:
   - **Root Cause**: `MUI_PAGE_LICENSE` read the canonical `LICENSE`, whose MIT text is hard-wrapped at 78 columns. The NSIS rich-edit control then wrapped the already-broken lines to the dialog width, producing uneven, stacked line breaks.
   - **Resolution**: the installer now reads `installer/LICENSE.txt`, an installer-only copy with each paragraph kept on one line so the rich-edit control owns all wrapping. The canonical `LICENSE` remains the file installed into `$INSTDIR`.
