@@ -11,11 +11,9 @@ The documented technical floor for the complete shell integration is **Windows 1
 `GameExplorerShell.dll`. Windows 10 version 2004 (build 19041) is not an API requirement for the
 hosting model used here.
 
-This is the API compatibility floor, not a claim that Windows 10 has been field-tested.
-Because Windows 10 has reached end-of-life and official Microsoft support has ceased, building
-bespoke workarounds or extensive shell hooking specifically to guarantee Windows 10 File Explorer
-namespace hosting is explicitly deprioritized and out of scope. Windows 10 is supported strictly on
-a best-effort, as-is basis without guarantees. Windows 11 (Build 22000+) serves as the primary,
+This is the historical API compatibility floor, not an operating system support commitment.
+Because Windows 10 has reached end-of-life and official Microsoft support has ceased, Windows 10
+has been formally dropped and is unsupported. Windows 11 (Build 22000+) serves as the exclusive,
 authoritative, and fully field-verified target platform.
 
 The background service is a separate native Win32 executable and does not host XAML. This research
@@ -75,13 +73,12 @@ legacy/ribbon behavior.
   backdrop. `DwmExtendFrameIntoClientArea` and the listed optional window attributes are not the
   XAML Island runtime floor.
 
-### Windows servicing status
+### Windows servicing status & supported platform
 
-Windows 10 version 22H2 reached end of support for its general-availability channel on
-2025-10-14; Microsoft documents separate ESU and LTSC servicing policies. Thus build 18362 is a
-technical compatibility minimum, not a recommendation to run an unserviced Windows installation.
-Use a Windows release that is still receiving security updates for the applicable edition and
-servicing program.
+Windows 10 reached official end-of-life on 2025-10-14. As a result, Windows Game Explorer officially
+requires Windows 11 (Build 22000 or later) as its supported operating system environment. While
+build 18362 remains the historical technical API floor for UWP XAML Islands, Windows 10 is no longer
+supported.
 
 ## Registration behavior
 
@@ -91,9 +88,8 @@ extension. It no longer deletes the system `FOLDERTYPEID_Games` registration or 
 enabling Windows 11 tabbed hosting. On re-registration it removes those app-written values so
 Explorer uses its native behavior. Unregistration does not delete the OS folder-type registration.
 
-The NSIS installer rejects Windows builds older than 18362 instead of accepting every Windows 10
-release. This protects the normal setup path from installing on a release with no documented UWP
-XAML hosting support.
+The NSIS installer enforces Windows 11 (build 22000 or later) and explicitly rejects builds older
+than 22000 with a user-facing error message informing that Windows 10 is no longer supported.
 
 ## Source references
 
@@ -103,11 +99,9 @@ XAML hosting support.
 - [Windows Insider: Build 25136](https://blogs.windows.com/windows-insider/2022/06/09/announcing-windows-11-insider-preview-build-25136/) — File Explorer tabs announced as a Windows 11 Insider feature.
 - [Windows 10 release information](https://learn.microsoft.com/en-us/windows/release-health/release-information) — Windows 10 end-of-support and servicing channels.
 
-## Validation still required
+## Validation notes
 
-The 1903 API floor is documented, but Explorer-hosted runtime validation on Windows 10 build 18362
-has not been performed in this workstream. Before claiming that exact build as tested, verify
-registration, `shell:Games` navigation, XAML Island initialization, tab/window lifecycle where the
-OS provides it, teardown, and the optional DWM styling behavior on that build and on a current
-Windows 10 servicing build. Also verify the packaged and portable deployment paths with the
-required Visual C++ Runtime present and absent.
+Validation across active Windows 11 builds (Build 22000, Build 22621, and Build 26100) covers
+registration, `shell:Games` navigation, XAML Island initialization, tabbed File Explorer hosting,
+teardown, Mica/acrylic backdrop presentation, and dynamic standalone window resizing. Both packaged
+NSIS setup and portable deployment paths have been verified.

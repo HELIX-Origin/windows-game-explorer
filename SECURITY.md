@@ -6,8 +6,8 @@ We take the security of **Windows Game Explorer** seriously — for the shell ex
 
 | Version | Supported |
 | --- | --- |
-| 2.0.x | ✅ Active |
-| < 2.0 | ❌ No longer supported |
+| 2.6.x | ✅ Active |
+| < 2.6 | ❌ No longer supported |
 
 Only the latest release receives security fixes. See the [Releases page](https://github.com/HELIX-Origin/windows-game-explorer/releases) for the current version.
 
@@ -27,7 +27,7 @@ Please include:
 3. Minimal steps to reproduce.
 4. Impact assessment and — if you have one — a suggested fix.
 
-We aim to acknowledge reports within **5 business days** and to ship a fix for confirmed issues in a reasonable window depending on severity. Security fixes are noted in [CHANGELOG.md](./CHANGELOG.md).
+We will try to review and respond to reports as time and capacity permit, but we make no assumptions or promises regarding response times or fixed turnaround windows. Confirmed security fixes will be documented in [CHANGELOG.md](./CHANGELOG.md).
 
 ## 🎯 Scope
 

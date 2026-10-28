@@ -2,7 +2,7 @@
 
 > Authoritative conventions for **Windows Game Explorer** (`projects/windows-game-explorer`).
 > Follows the v2.0.0 architecture: completely native to Windows (C++20 Win32 + COM Shell Extension).
-> Recreates and modernizes the classic Windows 7/Vista Game Explorer inside Windows 10 1903+ and Windows 11 File Explorer.
+> Recreates and modernizes the classic Windows 7/Vista Game Explorer inside Windows 11 File Explorer.
 
 ---
 
@@ -42,7 +42,7 @@ When a shell bug, layout issue, or crash occurs (e.g. `0xc00000fd` `STATUS_STACK
 
 ## 3. Official Microsoft Shell Contracts for Game Explorer Revival
 
-Recreating the authentic Windows 7 Game Explorer inside Windows 10 1903+ and Windows 11 requires implementing the standard Microsoft Shell COM interfaces:
+Recreating the authentic Windows 7 Game Explorer inside Windows 11 requires implementing the standard Microsoft Shell COM interfaces:
 - **`FOLDERTYPEID_Games` (`{b689b0d0-76d3-4cbb-87f7-585d0e0ce070}`):** The canonical Windows folder type for games, defining default columns (Name, Platform, Developer, Release Date, Rating, Size) and tile/icon presentation.
 - **`ICategoryProvider` & `ICategorizer`:** Groups items by `PKEY_ItemTypeText` into `▾ Game Providers` (`itemKind = 0`) and `▾ Games` (`itemKind = 1`).
 - **`IThumbnailProvider` & `IShellItemImageFactory`:** Supplies high-resolution vertical game box art (~2:3 / 600×900) and storefront logos as bitmaps so File Explorer renders game covers directly in Icon and Tile views.
@@ -59,7 +59,7 @@ Recreating the authentic Windows 7 Game Explorer inside Windows 10 1903+ and Win
 - **`GameExplorerStudio.exe` (Game Explorer Studio):**
   - A single Win32 GUI window with a Fluent tab strip, one message loop and one Start menu shortcut. The shell extension launches it with `--tab=manager` or `--tab=config`.
   - **Library Manager page (`src/manager/`):** Dedicated to managing the games in the library, adding local/custom games (`.exe`, `.lnk`, `.bat`, ROMs), picking vertical box art and icons, and editing game metadata (`%USERPROFILE%\Game Explorer\metadata\<appId>.json`).
-  - **Game Catalogue page (`src/studio/CataloguePage.cpp`):** Owned-games catalogue page, currently an explicit placeholder.
+  - **Game Catalogue page (`src/studio/CataloguePage.cpp`):** Owned-games catalogue page with search, filter, and delegated storefront install controls.
   - **Configuration page (`src/config/`):** Integration settings with pill window controls, Fluent rounded cards, and system accent styling — namespace registration, library layout preference, storefront integration toggles, achievement auto-sync, API credentials, and OneDrive cloud sync.
 - **Core Engine & Indexer (`src/core/`):**
   - Multi-store manifest crawlers and parser modules (Steam `.acf` & `librarycache`, Epic `.item`, GOG Registry, Battle.net, EA App, Ubisoft Connect, itch.io `butler.db`).

@@ -1,7 +1,7 @@
 # HANDOFF.md — Windows Game Explorer Session Handoff
 
 **Last updated:** 2026-10-27
-**Current session status:** `v2.5.0` released. Active development branch: `dev/m18-m19-explorer` in main workspace repository. M19 active:
+**Current session status:** `v2.6.0` released and tagged on `main`. Standalone dynamic sizing, 87 unit tests, and comprehensive repository-wide markdown documentation audit delivered:
 - **DYNAMIC-WINDOW-SIZING (Pure Dynamic Layout & Resizability Synchronization)**:
   - Fixed standalone `explorer.exe shell:games` window to utilize **100% dynamic sizing and resizability** (`WS_CAPTION | WS_THICKFRAME | WS_MINIMIZEBOX | WS_MAXIMIZEBOX | WS_SYSMENU`) with fluid layout on the XAML root grid, scroll viewer, and responsive wrapping grids (zero hardcoded sizes or fixed maximum columns).
   - Standalone mode hides the Left Navigation Pane (`NamespaceTreeControl`) and bottom status bar (`msctls_statusbar32`) while resizing `m_hwndViewSink` and `m_hwndView` to the full client area (`0, 0, fullW, fullH`) without dark bars or clipping.

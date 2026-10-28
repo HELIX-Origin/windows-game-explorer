@@ -64,7 +64,7 @@ The **Library Manager** page of Game Explorer Studio is dedicated to fine-graine
 
 ### Three-Column Interface Overview
 - **Column 1 — Games Library**: Search and list all cataloged games across installed storefronts and standalone imports. Features a prominent `[ 📁 Browse... ]` button to instantly import local executables.
-- **Column 2 — Game Properties & Live Preview**: Real-time 2:3 vertical box art preview frame and full metadata fields (Title, Developer, Publisher, Release Date, Genres, Rating, Executable Path, Launch Arguments, Working Directory, Cover Art Path, Hero Art Path, Details Art Path, Icon Path, and Synopsis).
+- **Column 2 — Game Properties & Live Preview**: Real-time 2:3 vertical box art preview frame and full metadata fields (Title, Developer, Publisher, Release Date, Genres, Rating, Executable Path, Launch Arguments, Working Directory, Cover Art Path, Hero Art Path, Icon Path, and Synopsis).
 - **Column 3 — Artwork Discovery Gallery**: Visual image search gallery integrating SteamGridDB, Steam Store, IGDB, and supplemental Web image discovery. Automatically resizes across monitors and expands columns dynamically on window maximize.
 
 ---
@@ -105,8 +105,7 @@ When a game is selected in Column 1, the gallery automatically queries online pr
   - **Box Art (~2:3 Cover)**: Tall vertical covers (SteamGridDB standard 600x900).
   - **Hero Banner (~3.1:1 Widescreen)**: Panoramic landscape backgrounds (1920x620 / 960x310).
   - **Icon / Logo (1:1 Square)**: Square icons and transparent logo PNGs (256x256+).
-  - **Details / Screenshots (16:9 Widescreen)**: 1080p landscape game screenshots and details previews.
-- **Resolution Filters**: Filter results by exact target resolutions (`600x900`, `300x450`, `1920x620`, `1920x1080`, `256x256+`).
+- **Resolution Filters**: Filter results by exact target resolutions (`600x900`, `300x450`, `1920x620`, `256x256+`).
 
 ---
 
@@ -119,7 +118,6 @@ If the primary metadata providers don't yield the artwork you want, use the **In
 2. Click **`[ 🔍 Web Search ]`**.
 3. Image candidates are retrieved natively via WinHttp and displayed directly in the gallery viewport.
 4. Web search operates **100% internally**—it never pops open external browser windows.
-5. Also discovers Patreon campaign art (`patreonusercontent.com`) for indie and crowd-funded releases.
 
 ---
 
@@ -136,7 +134,6 @@ Under the web search bar, check **"Disable SafeSearch (Unblock NSFW)"**:
 2. Click **`[ Apply Selected Artwork ▾ ]`** and select the destination slot:
    - **Apply as Box Art (~2:3 Cover)**
    - **Apply as Hero Banner (~3.1:1 Widescreen)**
-   - **Apply as Details Art**
    - **Apply as Icon / Logo**
 3. The selected high-resolution image is downloaded into your local cache (`%USERPROFILE%\Game Explorer\cache\art\`), the corresponding path is updated in Column 2, and the change is immediately saved to the database.
 4. The live preview box and any open File Explorer views refresh instantaneously.
@@ -276,7 +273,7 @@ The scanner automatically inspects all mounted drives (`C:`, `D:`, `E:`, etc.) f
 %USERPROFILE%\ROMs\<System>\*.rom
 ```
 
-A clean, pre-structured folder hierarchy is available as a distribution asset (`windows-game-explorer-v2.1.1-ROMs-template.zip`), covering 20+ consoles:
+A clean, pre-structured folder hierarchy is available as a distribution asset (`windows-game-explorer-v2.6.0-ROMs-template.zip`), covering 20+ consoles:
 ```text
 ROMs/
 ├── GBA/             # Game Boy Advance (.gba, .zip)
@@ -311,6 +308,8 @@ When launching a ROM, Windows Game Explorer automatically discovers and dispatch
 | **Nintendo DS** | melonDS | `melonDS.exe "<rom>"` |
 | **Nintendo 3DS** | Citra | `citra-qt.exe "<rom>"` |
 | **Dreamcast / Saturn** | Flycast | `flycast.exe "<rom>"` |
+| **Original Xbox** | Xemu | `xemu.exe -full-screen -dvd_path "<rom>"` |
+| **Commodore 64 / 128** | VICE | `x64sc.exe` / `x64.exe -autostart "<rom>"` |
 | **Universal Multi-System**| RetroArch | `retroarch.exe -L <core> "<rom>"` |
 
 If a dedicated emulator executable is not found, execution seamlessly falls back to Windows system file associations.

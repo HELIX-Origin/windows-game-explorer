@@ -103,7 +103,7 @@ projects/windows-game-explorer/
 
 ## 2. UWP XAML Islands Shell Architecture
 
-Windows Game Explorer uses the UWP XAML hosting API (`DesktopWindowXamlSource`) from its native C++ shell view inside the active File Explorer process (`explorer.exe`). Windows 10 version 1903 (build 18362) is the documented API floor; the OS retains control of Explorer's chrome and presentation.
+Windows Game Explorer uses the UWP XAML hosting API (`DesktopWindowXamlSource`) from its native C++ shell view inside the active File Explorer process (`explorer.exe`). While Windows 10 version 1903 (build 18362) was the documented XAML Islands API floor, Windows Game Explorer targets Windows 11 (Build 22000+) exclusively as its supported operating system environment.
 
 ```mermaid
 flowchart TD
@@ -165,8 +165,8 @@ A modular architecture with runtime dispatch across platforms:
 
 ### `ImageValidator`
 Ensures artwork assets match target aspect ratios without destructive stretching:
-- **Aspect Ratio Validation**: Validates whether an image fits the SteamGridDB standard 2:3 vertical cover ratio (`0.58 <= ratio <= 0.82`), 3.1:1 widescreen hero ratio (`1.30 <= ratio <= 3.60`), or 1:1 square ratio.
-- **Non-Destructive Preservation**: Source artwork is never forcibly cropped or overwritten. Original storefront assets are stored in `detailsArtPath` so native resolutions remain accessible in the Details pane.
+- **Aspect Ratio Validation**: Validates whether an image fits the SteamGridDB standard 2:3 vertical cover ratio (`0.45 <= ratio <= 1.15`), 3.1:1 / 16:9 widescreen hero ratio (`1.20 <= ratio <= 4.50`), or 1:1 square icon ratio (`0.75 <= ratio <= 1.33`).
+- **Non-Destructive Preservation**: Source artwork is never forcibly cropped or overwritten. Artificial cropping is disabled to avoid damaging resolution or cropping off key visual elements; authentic native aspect assets are retrieved from metadata providers or supplied via custom metadata.
 
 ---
 
@@ -223,7 +223,7 @@ erDiagram
 ## 5. Build Pipelines & Quality Gates
 
 ### Compiler Requirements
-- **Operating System**: Windows 10 or Windows 11 development environment
+- **Operating System**: Windows 11 (Build 22000+) development environment
 - **Compiler**: Visual Studio 2022 (MSVC v143+) or Visual Studio 2026 Build Tools
 - **C++ Standard**: C++20 (`/std:c++20 /permissive-`)
 - **Windows SDK**: Version 10.0.22000.0 or later (current build environment targets 10.0.26100.0; this is not the runtime minimum)

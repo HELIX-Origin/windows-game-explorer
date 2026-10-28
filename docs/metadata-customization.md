@@ -40,9 +40,7 @@ Each `<appId>.json` contains the following structured attributes:
   "coverArtPath": "C:\\Users\\User\\Game Explorer\\cache\\art\\mygame_cover.jpg",
   "coverArtUrl": "https://example.com/art/cover.jpg",
   "heroArtPath": "C:\\Users\\User\\Game Explorer\\cache\\art\\mygame_hero.jpg",
-  "heroArtUrl": "https://example.com/art/hero.jpg",
-  "detailsArtPath": "C:\\Users\\User\\Game Explorer\\cache\\art\\mygame_details.jpg",
-  "detailsArtUrl": "https://example.com/art/details.jpg"
+  "heroArtUrl": "https://example.com/art/hero.jpg"
 }
 ```
 
@@ -65,10 +63,9 @@ Each `<appId>.json` contains the following structured attributes:
 | `iconPath` / `iconUrl` | String | Local file path and remote CDN link for the square 1:1 icon (Details View). |
 | `coverArtPath` / `coverArtUrl` | String | Local file path and remote CDN link for tall box art (~2:3 aspect ratio, Cover Art view). |
 | `heroArtPath` / `heroArtUrl` | String | Local file path and remote CDN link for wide banner art (~3.1:1 / ~16:9 aspect ratio, Hero Banner view). |
-| `detailsArtPath` / `detailsArtUrl` | String | Local file path and remote CDN link for Details sidepane presentation art or animated preview GIF. |
 
 > [!NOTE]
-> All four image types (Icon, Cover, Hero, Details) are maintained in the JSON. When you switch presentation view modes in the Configuration page or view game properties, your images render instantly from cache without re-querying external APIs.
+> All three primary image types (Icon, Cover, Hero) are maintained in the JSON. When you switch presentation view modes in the Configuration page or view game properties, your images render instantly from cache without re-querying external APIs.
 
 ### Synopsis formatting (GitHub Flavored Markdown)
 
