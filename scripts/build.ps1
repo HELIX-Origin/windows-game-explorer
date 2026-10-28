@@ -44,15 +44,22 @@ if ($Clean -and (Test-Path -LiteralPath $BuildDir)) {
 # Unlock or rename in-use binaries so MSVC LINK never hits LNK1104
 Get-Process -Name "GameExplorerStudio" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
 Get-Process -Name "GameExplorerService" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+Get-Process -Name "GameExplorerWatcher" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+Stop-Service -Name "GameExplorerService" -Force -ErrorAction SilentlyContinue
+
 $OutConfigurationDir = Join-Path $BuildDir $Configuration
-$LockedDll = Join-Path $OutConfigurationDir "GameExplorerShell.dll"
-if (Test-Path -LiteralPath $LockedDll) {
-    $randomOld = "$LockedDll.$([guid]::NewGuid().ToString('N')).old"
-    try {
-        Move-Item -LiteralPath $LockedDll -Destination $randomOld -Force -ErrorAction Stop
-    } catch {
-        Stop-Process -Name explorer -Force -ErrorAction SilentlyContinue
-        Start-Sleep -Milliseconds 1500
+foreach ($binary in @("GameExplorerShell.dll", "GameExplorerService.exe", "GameExplorerWatcher.exe")) {
+    $lockedFile = Join-Path $OutConfigurationDir $binary
+    if (Test-Path -LiteralPath $lockedFile) {
+        $randomOld = "$lockedFile.$([guid]::NewGuid().ToString('N')).old"
+        try {
+            Move-Item -LiteralPath $lockedFile -Destination $randomOld -Force -ErrorAction Stop
+        } catch {
+            if ($binary -eq "GameExplorerShell.dll") {
+                Stop-Process -Name explorer -Force -ErrorAction SilentlyContinue
+                Start-Sleep -Milliseconds 1500
+            }
+        }
     }
 }
 

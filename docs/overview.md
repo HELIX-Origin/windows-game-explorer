@@ -31,7 +31,7 @@ flowchart TD
     subgraph CompanionApps["Game Explorer Studio (GameExplorerStudio.exe)"]
         TabStrip["Fluent Tab Strip<br/>(one window, one message loop)"]
         ManagerApp["Library Manager Page<br/>(Artwork Discovery & Editor)"]
-        CatalogueApp["Game Catalogue Page<br/>(Owned Games List & Install Delegation)"]
+        CatalogueApp["Game Catalogue Page<br/>(Owned Games List, Details & Alerts)"]
         ConfigApp["Configuration Page<br/>(Settings & Storefront Scans)"]
         TabStrip --> ManagerApp
         TabStrip --> CatalogueApp
@@ -115,7 +115,11 @@ In File Explorer, the namespace is organized into two distinct, collapsible sect
 
 ### Owned-Games Catalogue
 
-Alongside the installed library, Game Explorer Studio hosts a **Game Catalogue** page that lists every game the user owns on a supported storefront, installed or not, in one filterable and paged list. Rows are assembled from the Steam Web API or local Steam client, Epic manifests and an optional read-only legendary cache, and read-only client databases for GOG Galaxy, itch.io, Xbox, and Ubisoft Connect, plus the installed-store scanners. A centralized Windows-installable gate removes titles that cannot run on Windows, and multi-store or multi-edition ownership collapses into a single row with the edition kept in the source label. The page is a list only — it has no details pane, never launches a game, and never manages install folders; the **Install** action hands the request to the storefront's own client, while playing stays in the File Explorer Games view.
+Alongside the installed library, Game Explorer Studio hosts a **Game Catalogue** page that lists every game the user owns on a supported storefront, installed or not, in one filterable and paged list. Rows are assembled from the Steam Web API or local Steam client, Epic manifests and an optional read-only legendary cache, and read-only client databases for GOG Galaxy, itch.io, Xbox, and Ubisoft Connect, plus the installed-store scanners. A centralized Windows-installable gate removes titles that cannot run on Windows, and multi-store or multi-edition ownership collapses into a single row with the edition kept in the source label.
+
+Selecting a row fills a details pane with the title's identity, play facts, synopsis and one card per owned edition. Each edition card reports its install state, its installed build when the storefront exposes one, an update verdict, and a single **Store page** action. The page remains a catalogue: it never launches a game and never manages install folders. The **Install** action hands the request to the storefront's own client, while playing stays in the File Explorer Games view.
+
+A bell in the catalogue header collects the alerts the background service collects once per sign-in — newer builds for installed editions, recent news from the signed-in user's own storefront feeds, and GamerPower free games and deals (with the required attribution link). Update verdicts come from the storefront the game was installed through: Steam's official keyless `ISteamApps/UpToDateCheck` endpoint and GOG Galaxy's local latest-build cache are authoritative, while Epic and Xbox report the installed version and explicitly say the comparison is unsupported rather than guessing.
 
 ---
 

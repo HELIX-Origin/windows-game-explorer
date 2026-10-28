@@ -4,7 +4,7 @@
 Unicode true
 
 !define APP_NAME "Windows Game Explorer"
-!define APP_VERSION "2.6.0"
+!define APP_VERSION "2.7.0"
 !define APP_PUBLISHER "HELIX Origin"
 !define APP_URL "https://github.com/HELIX-Origin/windows-game-explorer"
 !define APP_EXE_STUDIO "GameExplorerStudio.exe"

@@ -62,6 +62,10 @@ struct GameItem {
     uint64_t diskSizeBytes{ 0 };
     uint32_t playtimeMinutes{ 0 };
     int64_t lastPlayedTimestamp{ 0 };
+
+    // Build identity published by the storefront's local manifest (Steam `buildid`, GOG
+    // `buildId`, Epic `AppVersionString`). Empty when the storefront does not record one.
+    std::wstring buildId;
 };
 
 struct AchievementItem {

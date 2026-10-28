@@ -6,8 +6,8 @@ We take the security of **Windows Game Explorer** seriously — for the shell ex
 
 | Version | Supported |
 | --- | --- |
-| 2.6.x | ✅ Active |
-| < 2.6 | ❌ No longer supported |
+| 2.7.x | ✅ Active |
+| < 2.7 | ❌ No longer supported |
 
 Only the latest release receives security fixes. See the [Releases page](https://github.com/HELIX-Origin/windows-game-explorer/releases) for the current version.
 

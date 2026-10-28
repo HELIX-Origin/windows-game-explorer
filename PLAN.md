@@ -30,6 +30,41 @@
 
 ## ✅ Completed Sprints
 
+### Sprint 41: [windows-game-explorer] — Catalogue Details Pane, Per-Game Update Checker, In-View Notification Flyout & Studio Overhaul (`v2.7.0`)
+
+> **Status: completed (`v2.7.0`).** The catalogue gained a real details pane, an honest per-storefront update verdict, an in-view Games tab notification bell flyout, unblocked Metadata Manager Add & Remove, scroll drawing artifact fixes, and a responsive 2-column configuration layout.
+
+- **CAT-02 — Details pane**:
+  - Scrolling right-hand pane (1120 px+) with identity, developer/publisher, release date, rating, genres, tags, playtime, last played, install size, family state, synopsis, and one card per owned edition.
+  - Each edition card shows install state, installed build, update verdict, and exactly one **Store page** button.
+  - Per-store **Play** and per-store **Install** buttons removed: playing belongs to the File Explorer Games view, installing is the single footer **Install** menu. Supersedes the "no detail pane" decision of 2026-10-26 per the 2026-10-28 user directive.
+  - Narrow windows keep the full-width list with the same footer actions.
+- **GameUpdates — honest per-storefront verdicts**:
+  - Steam: keyless official `ISteamApps/UpToDateCheck` compared with the installed `buildid` from `appmanifest_<appId>.acf`.
+  - GOG Galaxy: installed `buildId` from `goggame-*.info` vs `ImportedLatestBuildIds`; `NotSupported` when Galaxy never imported the title.
+  - Epic/Xbox: installed version reported, verdict `NotSupported` (no public comparison endpoint).
+  - Uninstalled editions and missing build ids never touch the network; malformed payloads are failures, not "up to date".
+  - Cached in `%USERPROFILE%\Game Explorer\updates.json`.
+- **Notifications — bell feed**:
+  - Kinds: `GameUpdate`, `News`, `FreeGame`, `Promotion`.
+  - Storefront news limited to 30 days from the signed-in user's own feeds (Steam per-app community announcements, GOG.com news, Epic blog, Xbox Wire), each with its own switch.
+  - GamerPower free games and deals/loot/beta keys, with the required attribution hyperlink back to GamerPower.com.
+  - Dedupe by stable id, newest first, read state in `notifications-seen.json`.
+- **Service refresh**:
+  - `RunAsConsoleUser` impersonation so user paths resolve under the LocalSystem service; the pass is skipped when no console user is signed in.
+  - One pass at service start, one per interactive logon (`SERVICE_CONTROL_SESSIONCHANGE` + `WTS_SESSION_LOGON`), and one per `CHECK_UPDATES`; `GET_UPDATES_STATUS` reports `RUNNING`/`IDLE`; `PreloadWorker` allows at most one pending refresh.
+  - File-based handoff (`updates.json`, `notifications.json`) instead of a shared in-memory cache.
+- **Bell UI and Configuration**:
+  - Custom `GameExplorerCatalogueBell` / `GameExplorerCatalogueBellPanel` child windows, `9+` badge, wheel/keyboard/scrollbar/thumb scrolling, row open, **Mark all read**, dismiss on outside click, ESC, close cross or bell toggle.
+  - **Game Catalogue Notification Bell** card in Configuration (index 5) with update master, per-store news switches, GamerPower switches, **Check for alerts now** and a last-refresh/count label.
+  - Configuration page now scrolls as one surface.
+- **Verification**: 112/112 unit tests (25 new), zero errors / zero warnings under `/W4 /WX`; service target linked in a separate CMake tree; bell and Configuration captured at 1400×1000 with pixel probes and OCR.
+- **Documentation restructure**:
+  - `docs/` split into audience trees: `docs/user/` (hub, installation, quick start, user guide, configuration, notifications, metadata customization, troubleshooting, FAQ) and `docs/developer/` (hub, developer guide, service & IPC, catalogue internals, testing, `research/` with the five architecture records).
+  - `docs/README.md` rewritten as the split entry point with a reading-path map; `docs/overview.md` stays the product overview.
+  - Every repo-wide docs reference repointed (`README.md`, `AGENTS.md`, `BUGS.md`, `TODO.md`, `PLAN.md`, `ROADMAP.md`, `CHANGELOG.md`, `HANDOFF.md`, source comments); links, heading anchors, code fences and LF endings verified across the tree.
+- **Outstanding**: deploy the rebuilt service (elevated stop → rebuild → re-register) to verify a real service-side pass, and exercise the GOG comparison on a GOG machine.
+
 ### Sprint 39: [windows-game-explorer] — M19 Dynamic Standalone Sizing, Fluent Iconography & Multi-Drive Discovery (`v2.6.0`)
 
 > **Status: completed (`v2.6.0`).** Delivered pure dynamic window sizing (`WS_CAPTION | WS_THICKFRAME | WS_MINIMIZEBOX | WS_MAXIMIZEBOX | WS_SYSMENU`), automatic navigation pane and status bar suppression on standalone windows, authentic Windows 11 Fluent 3D controller iconography, multi-drive heuristics, and cross-storefront artwork validation.
@@ -80,15 +115,13 @@
   - Regenerated installer graphics (`sidebar.bmp`, `header.bmp`) via `scripts/generate-installer-art.ps1`.
 - **Windows 10 Compatibility Policy (User Directive)**:
   - Windows 10 is discontinued/EOL; developing custom shell-hooking workarounds to guarantee Windows 10 File Explorer navigation pane integration is explicitly deprioritized and out of scope.
-  - Windows 10 support is maintained strictly on a best-effort, as-is basis with clear documentation across `README.md`, `docs/quick-start.md`, and the NSIS installer. Windows 11 (Build 22000+) is the authoritative, fully verified platform.
+  - Windows 10 support is maintained strictly on a best-effort, as-is basis with clear documentation across `README.md`, `docs/user/quick-start.md`, and the NSIS installer. Windows 11 (Build 22000+) is the authoritative, fully verified platform.
 - **Out of scope**: downloads, DRM bypasses, forcing Windows 10/11 Explorer modes, and unmeasured
   speculative optimization. Keep implementation 100% independent, clean, and self-contained.
 - **Quality Gate**: Baseline and post-change performance evidence, watcher/loader regression tests,
   zero-warning build (`MSVC /W4 /WX`), and all unit tests passing.
 
----
-
-## ✅ Completed Sprints
+### Earlier Sprints (summarised)
 
 - ✅ **Sprint 38: [windows-game-explorer] — M18 Windows 10 vs 11 Compatibility Research**: Established Windows 10 version 1903 (build 18362) as the documented UWP XAML hosting API floor (19041 is not required); documented the SDK/runtime distinction, optional DWM styling, Explorer-owned native presentation and outstanding oldest-build validation; updated the installer build gate; removed registration logic that deleted the OS Games folder type or configured Windows 11 tabbed-host flags.
 - ✅ **Sprint 37: [windows-game-explorer] — M17 Owned-Games Catalogue Completion, Windows Gate, Edition Merge & Unified CLI (`v2.5.0`)**: Completed the Game Catalogue as a single paged list (search, storefront/state/genre/tag/year/rating/playtime/family filters, six sort keys, 12/24/48/96 page sizes, Reset filters, delegated Install and Store page actions) with no details pane; added the Ubisoft Connect read-only owned library (59 verified titles) and optional read-only legendary Epic cache (250 verified titles); centralized the Windows-installable gate across every source and added edition-aware title normalization and cross-edition deduplication; retired install-folder management in favour of storefront-delegated installs; shipped the single `game-explorer.bat` dispatcher with `scripts/lint.ps1` PSScriptAnalyzer gate, removed the stale tag-triggered release workflow, and fixed installer license wrapping (0 errors, 0 warnings `/W4 /WX`, 61/61 unit tests, 0 PSScriptAnalyzer diagnostics).

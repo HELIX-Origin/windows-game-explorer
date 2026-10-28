@@ -3,6 +3,8 @@ add_executable(GameExplorerTests
     TestDatabase.cpp
     TestStorefrontScanner.cpp
     TestOwnedGames.cpp
+    TestGameUpdates.cpp
+    TestNotifications.cpp
     TestPlatformLauncher.cpp
     TestSettings.cpp
     TestAchievementEngine.cpp

@@ -6,9 +6,15 @@
 namespace GameExplorer {
 
 std::filesystem::path Storage::GetUserRootPath() {
+    // When running interactively or elevated from a user session, USERPROFILE points to the active user.
+    // If the process or thread is running as LocalSystem (systemprofile), fall back to the thread token's
+    // FOLDERID_Profile so impersonated console user profiles resolve correctly.
     wchar_t userProfile[MAX_PATH] = { 0 };
     if (GetEnvironmentVariableW(L"USERPROFILE", userProfile, MAX_PATH) > 0) {
-        return std::filesystem::path(userProfile) / L"Game Explorer";
+        std::wstring up(userProfile);
+        if (up.find(L"systemprofile") == std::wstring::npos) {
+            return std::filesystem::path(userProfile) / L"Game Explorer";
+        }
     }
 
     PWSTR pPath = nullptr;
@@ -16,6 +22,10 @@ std::filesystem::path Storage::GetUserRootPath() {
         std::filesystem::path root(pPath);
         CoTaskMemFree(pPath);
         return root / L"Game Explorer";
+    }
+
+    if (userProfile[0] != L'\0') {
+        return std::filesystem::path(userProfile) / L"Game Explorer";
     }
 
     return std::filesystem::current_path() / L"Game Explorer";

@@ -117,9 +117,16 @@ public:
     static std::wstring CleanRomTitle(const std::wstring& rawName);
     static std::vector<std::filesystem::path> GetDiscoveredRomsDirectories();
 
-    // Manual addition and removal of custom local game executables
-    static bool AddCustomLocalGame(const std::wstring& executablePath, const std::wstring& customTitle = L"");
+    // Manual addition and removal of game entries from Game Explorer
+    static bool AddCustomLocalGame(const std::wstring& executablePath, const std::wstring& customTitle = L"", std::wstring* outAppId = nullptr);
+    static bool RemoveGame(const std::wstring& appId);
     static bool RemoveCustomLocalGame(const std::wstring& appId);
+    static bool IsGameRemoved(const std::wstring& appId);
+    static bool AddRemovedGame(const std::wstring& appId);
+    static bool ClearRemovedGames();
+    static std::filesystem::path RemovedGamesPath();
+    static bool LoadRemovedGameIds(std::vector<std::wstring>& out);
+    static bool SaveRemovedGameIds(const std::vector<std::wstring>& ids);
 
     // Utility & filtering helpers
     static bool IsBlacklistedExecutable(const std::wstring& filename);

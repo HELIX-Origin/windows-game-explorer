@@ -19,7 +19,7 @@
 
 1. **Core Value Proposition**: Completely native to Windows. Recreates the classic Windows 7/Vista Game Explorer (`shell:Games`, `FOLDERTYPEID_Games`) inside Windows 10 version 1903+ and Windows 11 File Explorer as a native Virtual Shell Namespace Extension (C++20, Win32 APIs, COM), using each OS's native Explorer presentation. Built with a dedicated dual-component architecture:
    - **`GameExplorerShell.dll`**: In-process File Explorer shell extension presenting two collapsible sections (`▾ Game Providers (N)` and `▾ Games (N)`) with vertical ~2:3 box art and rich properties.
-   - **`GameExplorerStudio.exe`**: The single companion GUI, one custom-chrome window with three tabs — **Library Manager** (library management, local/custom games, box art/icons, metadata editing, artwork discovery), **Game Catalogue** (paged list of every owned storefront game with search/filter/sort toolbar and delegated storefront installs), and **Configuration** (shell integration registration, layout mode preference, storefront integration toggles, API credentials, OneDrive cloud sync). It also owns `--register` / `--unregister` / `--reset-cache`.
+   - **`GameExplorerStudio.exe`**: The single companion GUI, one custom-chrome window with three tabs — **Library Manager** (library management, local/custom games, box art/icons, metadata editing, artwork discovery), **Game Catalogue** (paged list of every owned storefront game with search/filter/sort toolbar, a details pane with owned-edition cards and update verdicts, a notification bell, and delegated storefront installs), and **Configuration** (shell integration registration, layout mode preference, notification-alert switches, API credentials, OneDrive cloud sync). It also owns `--register` / `--unregister` / `--reset-cache`.
 2. **Design Principles**:
    - **Automated Storefront-First Discovery (No External Scrapers)**: Automatically detects and indexes titles and storefront providers directly from installed storefronts on disk (Steam, Epic Games, GOG Galaxy, Battle.net, EA App, Ubisoft Connect, itch.io) without manual XML/GDF registration or external third-party scrapers (IGDB, SteamGridDB, VNDB).
    - **Authentic Two-Section Categorization**: Implements `ICategoryProvider` and `ICategorizer` on `PKEY_ItemTypeText` to group installed storefront clients under `▾ Game Providers` and installed game titles under `▾ Games`.
@@ -36,8 +36,9 @@
 | **M15** | Windows Game Explorer Shell Extension & Native Re-Architecture | Shell extension & Win32 apps | ✅ Released | `v2.0.0` | Native C++20 Win32 COM virtual namespace extension (`GameExplorerShell.dll`), two-section categorization (`Installed Providers` & `Games Library`), 17-platform scanner, `GameExplorerConfig.exe`, and `GameExplorerManager.exe` |
 | **M16** | Universal Multi-Source Achievement Tracking & Multi-Viewport Artwork Engine | Core, Shell & Config | ✅ Delivered | `v2.2.0` | Hybrid native storefront + external tracker integration (RetroAchievements, Steam Web API, GOG Galaxy), VNDB Kana API provider, itch storefront scraping, multi-viewport aspect ratio fitting, cache purge & rebuild engine, in-place scroll preservation, write-only OneDrive backup, config UI, and Inspector trophy rendering |
 | **M17** | Unified Tabbed GUI & Game Catalogue for All Owned Games | Unified companion GUI & Service | ✅ Released | `v2.5.0` | Unified companion app `GameExplorerStudio.exe` (Library Manager, Game Catalogue, Configuration), paged owned-games catalogue with search/filter/sort and delegated installs (Steam, GOG, itch, Xbox, Ubisoft Connect, Epic via optional legendary), Windows-installable gate, edition-aware multi-store deduplication, `GameExplorerService.exe` background service, single `game-explorer.bat` dispatcher, and Windows 10/11 platform bounds |
-| **M18** | Windows 10 vs 11 Shell Compatibility Research | Shell extension & Studio | ✅ Complete | TBD | Windows 10 version 1903 (build 18362) is the documented UWP XAML hosting API floor; Explorer retains each OS's native presentation; see `docs/research/windows-version-compatibility.md` |
+| **M18** | Windows 10 vs 11 Shell Compatibility Research | Shell extension & Studio | ✅ Complete | TBD | Windows 10 version 1903 (build 18362) is the documented UWP XAML hosting API floor; Explorer retains each OS's native presentation; see `docs/developer/research/windows-version-compatibility.md` |
 | **M19** | Shell Performance, Dynamic Resizing & Fluent Iconography | Shell extension, service & scanner | ✅ Released | `v2.6.0` | Standalone responsive dynamic window sizing, automatic navigation pane and status bar suppression, authentic Windows 11 Fluent 3D controller iconography, multi-drive discovery, and storefront-validated artwork |
+| **M20** | Catalogue Details Pane, Per-Game Update Checker, Notification Flyout & Studio Overhaul | Studio, core, shell & service | ✅ Released | `v2.7.0` | Read-only catalogue details pane with owned-edition cards, honest per-storefront update verdicts, background-service alert pass, Games tab in-view notification bell flyout, unblocked Metadata Manager Add & Remove, scroll drawing artifact fixes, and responsive 2-column configuration layout |
 
 ---
 
@@ -50,21 +51,30 @@
 > The extension leaves Explorer's mode and chrome to the OS, does not delete the OS Games folder
 > type, and no longer writes app-specific flags intended to favor Windows 11 tabbed hosting. The
 > installer rejects older builds. Explorer-hosted validation on build 18362 remains outstanding;
-> findings and the support caveat are in [`docs/research/windows-version-compatibility.md`](./docs/research/windows-version-compatibility.md).
+> findings and the support caveat are in [`docs/developer/research/windows-version-compatibility.md`](./docs/developer/research/windows-version-compatibility.md).
 
 ---
 
-## 🚧 Proposed Milestones
+## 🎯 Active Milestones
 
-### [windows-game-explorer] — Milestone M19: Shell Performance & Explorer Lifecycle
+### [windows-game-explorer] — Milestone M20: Catalogue Details Pane, Per-Game Update Checker & Notification Bell (active)
 
-> User-directed scope: optimize performance (`PERF-01`), build an independent project-owned Explorer watcher/loader
-> (`HOST-01`) with zero external dependencies, and suppress the left navigation sidebar when launched standalone via `shell:games`
-> or shortcuts (`NAV-01`) to maximize installed games grid canvas space. Watcher-managed lifecycle
-> loading is the architectural focus. Preserve COM namespace activation, native
-> Explorer presentation, multi-user isolation, and reversible installation.
-> The active workstreams remain tracked in [`TODO.md`](./TODO.md)
-> and Sprint 39 in [`PLAN.md`](./PLAN.md); blockers must not be reported as completed features.
+> User-directed scope (2026-10-28): the Game Catalogue details pane must be an installer-facing
+> inspector — richer per-game metadata and one **Store page** action per owned edition, with the
+> redundant per-store **Play** and **Install** buttons removed (playing belongs to the File Explorer
+> Games view, installing to the single footer **Install** menu). Installed editions must be checked
+> against the build their own storefront publishes, and a startup notification bell must surface
+> update alerts, storefront news from the signed-in user's own feeds, and GamerPower free games and
+> promotions with the required attribution link. Alerts are generated once per session, not polled.
+> Delivery state, verification evidence and the remaining service-deployment gap are tracked in
+> [`PLAN.md`](./PLAN.md) Sprint 41, [`TODO.md`](./TODO.md) `CAT-03`, and
+> [`HANDOFF.md`](./HANDOFF.md) section 0. Documentation is split by audience:
+> [`docs/user/notifications.md`](./docs/user/notifications.md),
+> [`docs/user/configuration.md`](./docs/user/configuration.md) and
+> [`docs/user/user-guide.md`](./docs/user/user-guide.md) for players;
+> [`docs/developer/service-and-ipc.md`](./docs/developer/service-and-ipc.md),
+> [`docs/developer/catalogue-internals.md`](./docs/developer/catalogue-internals.md) and
+> [`docs/developer/testing.md`](./docs/developer/testing.md) for maintainers.
 
 ---
 
@@ -103,7 +113,7 @@
 > instantly. Because neither `LocalService` nor a scheduled task has the interactive user's profile,
 > every write is routed to the owning session's `%USERPROFILE%\Game Explorer\` through the service↔client
 > IPC handshake — the service never assumes `%USERPROFILE%` is its own. Options considered and rejected
-> are recorded in [`docs/research/startup-background-service.md`](./docs/research/startup-background-service.md).
+> are recorded in [`docs/developer/research/startup-background-service.md`](./docs/developer/research/startup-background-service.md).
 >
 > Deliverables are tracked as `SVC-01` in [`TODO.md`](./TODO.md).
 

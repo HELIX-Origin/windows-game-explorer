@@ -49,7 +49,7 @@ Each `<appId>.json` contains the following structured attributes:
 | Field | Type | Description |
 | :--- | :--- | :--- |
 | `appId` | String | Unique identifier (e.g. `steam_730`, `epic_Fortnite`, `custom_1792812000`). |
-| `title` | String | Display name shown in File Explorer and the details drawer. |
+| `title` | String | Display name shown in File Explorer and the Game Catalogue details pane. |
 | `platform` | String | Store or origin (`Steam`, `Epic Games`, `GOG`, `itch.io`, `Battle.net`, `Ubisoft`, `Rockstar Games`, `EA App`, `Amazon Games`, `Xbox`, `Standalone`). |
 | `description` | String | Game synopsis, plot summary, or player notes. |
 | `score` | String | User rating, critic score, or ESRB/PEGI rating (e.g. `95%`, `E10+`, `Overwhelmingly Positive`). |
@@ -111,8 +111,8 @@ storefront-supplied synopsis containing a stray asterisk still renders as readab
 
 For games installed outside supported storefronts (indie visual novels, standalone itch.io downloads, legacy CD-ROM installations, fan games, or portable executables):
 
-1. Open Game Explorer Studio on the **Configuration** page (`GameExplorerStudio.exe --tab=config`).
-2. In the **Storefront Discovery & Manual Local Games** card, click **"➕ Add Local Game..."**.
+1. Open **Game Explorer Studio → Library Manager**.
+2. In Column 1, click **"📁 Browse..."**.
 3. In the file dialog, select any `.exe`, `.bat`, `.cmd`, or `.lnk` shortcut.
 4. The system automatically creates a dedicated `custom_<timestamp>.json` file in your metadata folder.
 5. In File Explorer, the game appears immediately in your library with instant launch capabilities.

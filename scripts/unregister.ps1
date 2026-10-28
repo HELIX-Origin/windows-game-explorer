@@ -41,6 +41,20 @@ Stop-Process -Name 'GameExplorerStudio' -Force -ErrorAction SilentlyContinue
 Stop-Service -Name 'GameExplorerService' -Force -ErrorAction SilentlyContinue
 Stop-Process -Name 'GameExplorerService' -Force -ErrorAction SilentlyContinue
 
+# Locate and uninstall GameExplorerService.exe
+$serviceCandidates = @(
+    (Join-Path $PSScriptRoot '..\GameExplorerService.exe'),
+    (Join-Path $PSScriptRoot '..\build\Release\GameExplorerService.exe'),
+    (Join-Path $PSScriptRoot '..\Release\GameExplorerService.exe')
+)
+foreach ($candidate in $serviceCandidates) {
+    if (Test-Path -LiteralPath $candidate) {
+        $ServiceExe = (Resolve-Path -LiteralPath $candidate).Path
+        Start-Process -FilePath $ServiceExe -ArgumentList @('--uninstall') -Wait -ErrorAction SilentlyContinue
+        break
+    }
+}
+
 if ($DllPath -and (Test-Path -LiteralPath $DllPath)) {
     Write-Host ('Target DLL : {0}' -f $DllPath) -ForegroundColor White
     Write-Host 'Unregistering the Windows Shell extension with regsvr32...' -ForegroundColor White

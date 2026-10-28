@@ -38,6 +38,25 @@ std::wstring Trim(const std::wstring& text) {
     return text.substr(first, last - first);
 }
 
+// Extracts a plausible four-digit release year from a storefront date string such as
+// "2015-05-19", "May 19, 2015" or "2015". Returns 0 when the text carries no usable year.
+int YearFromReleaseDate(const std::wstring& text) {
+    for (size_t i = 0; i + 4 <= text.size(); ++i) {
+        bool digits = true;
+        int value = 0;
+        for (size_t j = 0; j < 4; ++j) {
+            const wchar_t ch = text[i + j];
+            if (std::iswdigit(ch) == 0) {
+                digits = false;
+                break;
+            }
+            value = value * 10 + (ch - L'0');
+        }
+        if (digits && value > 1980 && value < 2100) return value;
+    }
+    return 0;
+}
+
 int CompareText(const std::wstring& left, const std::wstring& right) {
     const int result = _wcsicmp(left.c_str(), right.c_str());
     return result < 0 ? -1 : (result > 0 ? 1 : 0);
@@ -971,6 +990,52 @@ std::vector<OwnedGame> ScanGogOwnedGamesGalaxy() {
         }
         sqlite3_finalize(stmt);
     }
+
+    // GOG Galaxy records the newest build it has seen for a product locally. Comparing it with the
+    // build id in the installed `goggame-*.info` manifest gives the catalogue a real update check
+    // without any web call. `ImportedLatestBuildIds` is the client's own table; older clients only
+    // cache release build manifests in `Builds`, so fall back to the newest one.
+    std::unordered_map<std::wstring, std::wstring> latestBuilds;
+    {
+        const char* latestSql = "SELECT productId, buildId FROM ImportedLatestBuildIds;";
+        sqlite3_stmt* latestStmt = nullptr;
+        if (sqlite3_prepare_v2(db, latestSql, -1, &latestStmt, nullptr) == SQLITE_OK) {
+            while (sqlite3_step(latestStmt) == SQLITE_ROW) {
+                const unsigned char* idText = sqlite3_column_text(latestStmt, 0);
+                const unsigned char* buildText = sqlite3_column_text(latestStmt, 1);
+                if (idText == nullptr || buildText == nullptr) continue;
+                latestBuilds.emplace(Utf8ToWide(reinterpret_cast<const char*>(idText)),
+                                     Utf8ToWide(reinterpret_cast<const char*>(buildText)));
+            }
+            sqlite3_finalize(latestStmt);
+        }
+    }
+    if (latestBuilds.empty()) {
+        const char* buildsSql = "SELECT productId, manifest FROM Builds ORDER BY createdAt DESC;";
+        sqlite3_stmt* buildsStmt = nullptr;
+        if (sqlite3_prepare_v2(db, buildsSql, -1, &buildsStmt, nullptr) == SQLITE_OK) {
+            while (sqlite3_step(buildsStmt) == SQLITE_ROW) {
+                const unsigned char* idText = sqlite3_column_text(buildsStmt, 0);
+                const unsigned char* manifestText = sqlite3_column_text(buildsStmt, 1);
+                if (idText == nullptr || manifestText == nullptr) continue;
+                const std::wstring productId =
+                    Utf8ToWide(reinterpret_cast<const char*>(idText));
+                if (productId.empty() || latestBuilds.count(productId) != 0) continue;
+                const std::wstring manifest =
+                    Utf8ToWide(reinterpret_cast<const char*>(manifestText));
+                const std::wstring buildId = JsonString(manifest, L"build_id", 0, manifest.size());
+                if (!buildId.empty()) latestBuilds.emplace(productId, buildId);
+            }
+            sqlite3_finalize(buildsStmt);
+        }
+    }
+    for (OwnedGame& game : games) {
+        const auto it = latestBuilds.find(game.productId);
+        if (it != latestBuilds.end() && !game.sources.empty()) {
+            game.sources.front().latestBuildId = it->second;
+        }
+    }
+
     sqlite3_close(db);
     return games;
 }
@@ -1866,6 +1931,8 @@ std::vector<OwnedGame> ScanAllOwnedGamesDirect(const std::wstring& steamApiKey,
                             if (exSrc.installUri.empty() && !newSrc.installUri.empty()) exSrc.installUri = newSrc.installUri;
                             if (exSrc.storePageUrl.empty() && !newSrc.storePageUrl.empty()) exSrc.storePageUrl = newSrc.storePageUrl;
                             if (exSrc.editionLabel.empty() && !newSrc.editionLabel.empty()) exSrc.editionLabel = newSrc.editionLabel;
+                            if (exSrc.installedBuildId.empty() && !newSrc.installedBuildId.empty()) exSrc.installedBuildId = newSrc.installedBuildId;
+                            if (exSrc.latestBuildId.empty() && !newSrc.latestBuildId.empty()) exSrc.latestBuildId = newSrc.latestBuildId;
                         }
                         break;
                     }
@@ -1901,6 +1968,9 @@ std::vector<OwnedGame> ScanAllOwnedGamesDirect(const std::wstring& steamApiKey,
             }
 
             if (existing.coverArtUrl.empty() && !game.coverArtUrl.empty()) existing.coverArtUrl = game.coverArtUrl;
+            if (existing.developer.empty() && !game.developer.empty()) existing.developer = game.developer;
+            if (existing.publisher.empty() && !game.publisher.empty()) existing.publisher = game.publisher;
+            if (existing.releaseDate.empty() && !game.releaseDate.empty()) existing.releaseDate = game.releaseDate;
             if (game.playtimeMinutes > 0) existing.playtimeMinutes = game.playtimeMinutes;
             if (game.lastPlayedTimestamp > 0) existing.lastPlayedTimestamp = game.lastPlayedTimestamp;
             if (game.installSizeBytes > 0 && existing.installSizeBytes == 0) existing.installSizeBytes = game.installSizeBytes;
@@ -1936,6 +2006,10 @@ std::vector<OwnedGame> ScanAllOwnedGamesDirect(const std::wstring& steamApiKey,
             og.installSizeBytes = item.diskSizeBytes;
             og.playtimeMinutes = item.playtimeMinutes;
             og.lastPlayedTimestamp = item.lastPlayedTimestamp;
+            og.developer = item.developer;
+            og.publisher = item.publisher;
+            og.releaseDate = item.releaseDate;
+            og.releaseYear = YearFromReleaseDate(item.releaseDate);
             og.genres = item.genres;
             og.rating = item.rating;
             og.synopsis = item.synopsis;
@@ -1969,7 +2043,7 @@ std::vector<OwnedGame> ScanAllOwnedGamesDirect(const std::wstring& steamApiKey,
             }
 
             og.sources.push_back({ storeKey, storeName, og.productId, og.installUri,
-                                   og.storePageUrl, editionLabel, true, true });
+                                   og.storePageUrl, editionLabel, true, true, item.buildId, {} });
             addOrUpdate(std::move(og));
         }
     };

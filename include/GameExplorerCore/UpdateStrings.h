@@ -2,7 +2,7 @@
 
 namespace GameExplorer::UpdateStrings {
 
-inline constexpr wchar_t kCurrentVersion[] = L"2.5.0";
+inline constexpr wchar_t kCurrentVersion[] = L"2.7.0";
 inline constexpr wchar_t kGitHubApiHost[] = L"api.github.com";
 inline constexpr wchar_t kGitHubLatestReleasePath[] = L"/repos/HELIX-Origin/windows-game-explorer/releases/latest";
 inline constexpr wchar_t kUserAgent[] = L"WindowsGameExplorer-UpdateChecker/1.0";

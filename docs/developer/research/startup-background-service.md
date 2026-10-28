@@ -42,7 +42,7 @@ user profile, so:
   but any operation that needs the user's token is executed by the client on request.
 
 The IPC surface, privilege boundary, and per-user routing are tracked as `SVC-01` in
-[`TODO.md`](../../TODO.md).
+[`TODO.md`](../../../TODO.md).
 
 ---
 

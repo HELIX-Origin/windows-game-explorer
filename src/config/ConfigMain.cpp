@@ -6,6 +6,7 @@
 #include <dwmapi.h>
 #include <filesystem>
 #include <algorithm>
+#include <string>
 #include <vector>
 #include <thread>
 #include <atomic>
@@ -21,6 +22,10 @@
 #include "GameExplorerCore/StudioPages.h"
 #include "GameExplorerCore/UpdateChecker.h"
 #include "GameExplorerCore/UpdateStrings.h"
+#include "GameExplorerCore/Notifications.h"
+#include "GameExplorerCore/ServiceClient.h"
+#include "GameExplorerCore/ServiceProtocol.h"
+#include "GameExplorerCore/ThemeScroll.h"
 
 #pragma comment(lib, "dwmapi.lib")
 
@@ -131,7 +136,7 @@ void EnsureConfigWindowClass(HINSTANCE instance) {
     wc.lpfnWndProc = ConfigWndProc;
     wc.hInstance = instance;
     wc.hCursor = LoadCursorW(nullptr, IDC_ARROW);
-    wc.hbrBackground = g_hBgBrush;
+    wc.hbrBackground = nullptr;
     wc.lpszClassName = CONFIG_WINDOW_CLASS;
     RegisterClassExW(&wc);
     registered = true;
@@ -176,6 +181,20 @@ constexpr int IDC_BTN_CHECK_UPDATES      = 2051;
 constexpr int IDC_BTN_INSTALL_UPDATE     = 2052;
 constexpr int IDC_BTN_RELEASE_NOTES      = 2053;
 
+// Notification bell sources. Each one is independently switchable so update alerts can stay on
+// while store marketing is muted.
+constexpr int IDC_CHK_NOTIFY_UPDATES     = 2060;
+constexpr int IDC_CHK_NOTIFY_NEWS        = 2061;
+constexpr int IDC_CHK_NOTIFY_STEAM       = 2062;
+constexpr int IDC_CHK_NOTIFY_GOG         = 2063;
+constexpr int IDC_CHK_NOTIFY_EPIC        = 2064;
+constexpr int IDC_CHK_NOTIFY_XBOX        = 2065;
+constexpr int IDC_CHK_NOTIFY_FREE        = 2066;
+constexpr int IDC_CHK_NOTIFY_PROMOTIONS  = 2067;
+constexpr int IDC_BTN_CHECK_NOTIFICATIONS = 2068;
+constexpr int IDC_LBL_NOTIFY_STATUS      = 2069;
+constexpr int WM_APP_NOTIFY_CHECK_DONE   = WM_APP + 63;
+
 HWND g_hwndLblIntegrationStatus = nullptr;
 HWND g_hwndBtnScanLibrary       = nullptr;
 std::atomic<bool> g_isScanning{ false };
@@ -209,6 +228,27 @@ HWND g_hwndBtnCheckUpdates  = nullptr;
 HWND g_hwndBtnInstallUpdate = nullptr;
 HWND g_hwndBtnReleaseNotes  = nullptr;
 
+// Notification bell settings (Game Catalogue header bell).
+HWND g_hwndChkNotifyUpdates    = nullptr;
+HWND g_hwndChkNotifyNews       = nullptr;
+HWND g_hwndChkNotifySteam      = nullptr;
+HWND g_hwndChkNotifyGog        = nullptr;
+HWND g_hwndChkNotifyEpic       = nullptr;
+HWND g_hwndChkNotifyXbox       = nullptr;
+HWND g_hwndChkNotifyFree       = nullptr;
+HWND g_hwndChkNotifyPromotions = nullptr;
+HWND g_hwndBtnCheckNotifications = nullptr;
+HWND g_hwndLblNotifyStatus     = nullptr;
+std::atomic<bool> g_isCheckingNotifications{ false };
+
+// Vertical page scrolling. The Configuration page is taller than the Studio viewport, so it
+// scrolls as one surface: cards, controls and the painted scrollbar all use the same offset.
+int g_scrollPos = 0;
+int g_contentHeight = 0;
+bool g_scrollDragging = false;
+int g_scrollGrabOffset = 0;
+bool g_scrollHover = false;
+
 // Controls that only need to exist for layout (no command handling) still need a stable handle
 // so the page can be re-flowed whenever the Studio frame resizes it.
 HWND g_hwndBtnOpenExplorer     = nullptr;
@@ -228,8 +268,8 @@ HWND g_hwndLblFallbackHelp     = nullptr;
 
 // Card geometry is computed on every resize and shared by the layout and paint paths, so the
 // rounded card panels and the controls inside them can never drift apart.
-constexpr int CARD_COUNT = 6;
-constexpr int CARD_HEIGHTS[CARD_COUNT] = { 100, 148, 106, 186, 122, 102 };
+constexpr int CARD_COUNT = 7;
+constexpr int CARD_HEIGHTS[CARD_COUNT] = { 100, 148, 106, 186, 122, 150, 102 };
 constexpr int CARD_GAP = 12;
 constexpr int PAGE_MARGIN = 20;
 constexpr int CARD_PADDING = 16;
@@ -239,24 +279,125 @@ RECT g_cardRects[CARD_COUNT]{};
 RECT g_saveRect{};
 RECT g_resetCacheRect{};
 
-void ComputeConfigLayout(int w) {
-    const int left = PAGE_MARGIN;
-    const int right = (std::max)(left + MIN_CARD_WIDTH, w - PAGE_MARGIN);
+// Defined below; the scroll helpers re-flow the page after changing the offset.
+void LayoutConfigControls(HWND hwnd);
 
-    int y = g_titleBarHeight + 12;
-    for (int i = 0; i < CARD_COUNT; ++i) {
-        g_cardRects[i] = RECT{ left, y, right, y + CARD_HEIGHTS[i] };
-        y += CARD_HEIGHTS[i] + CARD_GAP;
+void ComputeConfigLayout(int w, int viewportHeight) {
+    const bool twoColumns = (w >= 1000);
+
+    if (twoColumns) {
+        const int colW = (w - PAGE_MARGIN * 2 - CARD_GAP) / 2;
+        const int leftColLeft = PAGE_MARGIN;
+        const int leftColRight = leftColLeft + colW;
+        const int rightColLeft = leftColRight + CARD_GAP;
+        const int rightColRight = rightColLeft + colW;
+
+        int yLeft = g_titleBarHeight + 12;
+        // Left column: Card 0, 1, 2, 6
+        const int leftCards[] = { 0, 1, 2, 6 };
+        for (int idx : leftCards) {
+            g_cardRects[idx] = RECT{ leftColLeft, yLeft, leftColRight, yLeft + CARD_HEIGHTS[idx] };
+            yLeft += CARD_HEIGHTS[idx] + CARD_GAP;
+        }
+
+        int yRight = g_titleBarHeight + 12;
+        // Right column: Card 3, 4, 5
+        const int rightCards[] = { 3, 4, 5 };
+        for (int idx : rightCards) {
+            g_cardRects[idx] = RECT{ rightColLeft, yRight, rightColRight, yRight + CARD_HEIGHTS[idx] };
+            yRight += CARD_HEIGHTS[idx] + CARD_GAP;
+        }
+
+        const int bottomY = (std::max)(yLeft, yRight) + 4;
+        g_saveRect = RECT{ leftColLeft, bottomY, leftColLeft + 190, bottomY + 38 };
+        g_resetCacheRect = RECT{ leftColLeft + 200, bottomY, leftColLeft + 390, bottomY + 38 };
+        g_contentHeight = bottomY + 38 + PAGE_MARGIN;
+    } else {
+        const int left = PAGE_MARGIN;
+        const int right = (std::max)(left + MIN_CARD_WIDTH, w - PAGE_MARGIN);
+
+        int y = g_titleBarHeight + 12;
+        for (int i = 0; i < CARD_COUNT; ++i) {
+            g_cardRects[i] = RECT{ left, y, right, y + CARD_HEIGHTS[i] };
+            y += CARD_HEIGHTS[i] + CARD_GAP;
+        }
+
+        g_saveRect = RECT{ left, y, left + 190, y + 38 };
+        g_resetCacheRect = RECT{ left + 200, y, left + 390, y + 38 };
+        g_contentHeight = g_saveRect.bottom + PAGE_MARGIN;
     }
 
-    g_saveRect = RECT{ left, y, left + 190, y + 38 };
-    g_resetCacheRect = RECT{ left + 200, y, left + 390, y + 38 };
+    // The page is taller than the Studio viewport on smaller displays, so every rectangle is
+    // shifted by the scroll offset. Content height stays independent of that offset.
+    g_scrollPos = (std::clamp)(g_scrollPos, 0,
+                               ThemeScroll::MaxScroll(g_contentHeight, viewportHeight));
+    const int offset = -g_scrollPos;
+    if (offset != 0) {
+        for (RECT& rect : g_cardRects) {
+            rect.top += offset;
+            rect.bottom += offset;
+        }
+        g_saveRect.top += offset;
+        g_saveRect.bottom += offset;
+        g_resetCacheRect.top += offset;
+        g_resetCacheRect.bottom += offset;
+    }
+}
+
+// Scrollbar geometry for the current client area, shared by paint and hit-testing.
+ThemeScroll::Metrics ConfigScrollMetrics(HWND hwnd) {
+    RECT client{};
+    GetClientRect(hwnd, &client);
+    return ThemeScroll::Compute(client, g_contentHeight, client.bottom, g_scrollPos);
+}
+
+// Moves the page by `delta` pixels (positive scrolls down) and re-flows the child controls.
+void ScrollConfigBy(HWND hwnd, int delta, bool absolute = false) {
+    RECT client{};
+    GetClientRect(hwnd, &client);
+    const int maxScroll = ThemeScroll::MaxScroll(g_contentHeight, client.bottom);
+    const int next = (std::clamp)(absolute ? delta : g_scrollPos + delta, 0, maxScroll);
+    if (next == g_scrollPos) return;
+
+    g_scrollPos = next;
+    LayoutConfigControls(hwnd);
+    RedrawWindow(hwnd, nullptr, nullptr,
+                 RDW_INVALIDATE | RDW_ALLCHILDREN | RDW_ERASE | RDW_UPDATENOW);
+}
+
+void InvalidateScrollBarArea(HWND hwnd) {
+    RECT client{};
+    GetClientRect(hwnd, &client);
+    RECT bar{ client.right - ThemeScroll::kBarWidth - 2, 0, client.right, client.bottom };
+    InvalidateRect(hwnd, &bar, FALSE);
+}
+
+// Returns true when the point lands on the scrollbar; `onThumb` distinguishes the box from the
+// track so a drag can start instead of a page step.
+bool ScrollBarHitTest(HWND hwnd, int x, int y, bool& onThumb, bool& onRail) {
+    onThumb = false;
+    onRail = false;
+    const ThemeScroll::Metrics metrics = ConfigScrollMetrics(hwnd);
+    if (!metrics.needed) return false;
+
+    RECT thumb = metrics.thumb;
+    InflateRect(&thumb, ThemeScroll::kThumbWidth / 2, 2);
+    RECT rail = metrics.rail;
+    InflateRect(&rail, 2, 0);
+
+    const POINT pt{ x, y };
+    onThumb = PtInRect(&thumb, pt) != FALSE;
+    onRail = PtInRect(&rail, pt) != FALSE;
+    return onThumb || onRail;
 }
 
 /**
  * Re-flows every control into the card geometry for the current client width. Called after the
  * controls are created and again on every WM_SIZE, so the page stretches with the Studio frame
  * instead of staying pinned to its original 640px column.
+ *
+ * Uses BeginDeferWindowPos with SWP_NOCOPYBITS and clips controls to viewport visibility
+ * to ensure that scrolling never produces artifact ghosting or stale pixels from sibling cards.
  */
 void LayoutConfigControls(HWND hwnd) {
     RECT client{};
@@ -264,93 +405,145 @@ void LayoutConfigControls(HWND hwnd) {
     const int width = client.right - client.left;
     if (width <= 0) return;
 
-    ComputeConfigLayout(width);
+    ComputeConfigLayout(width, client.bottom);
 
-    auto place = [](HWND control, int x, int y, int cx, int cy) {
+    HDWP hdwp = BeginDeferWindowPos(45);
+
+    auto place = [&](HWND control, int x, int y, int cx, int cy) {
         if (control == nullptr || !IsWindow(control)) return;
-        SetWindowPos(control, nullptr, x, y, (std::max)(1, cx), (std::max)(1, cy),
-                     SWP_NOZORDER | SWP_NOACTIVATE);
+        const bool inView = (y + cy > 0 && y < client.bottom);
+        const UINT flags = SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOCOPYBITS |
+                           (inView ? SWP_SHOWWINDOW : SWP_HIDEWINDOW);
+        if (hdwp != nullptr) {
+            hdwp = DeferWindowPos(hdwp, control, nullptr, x, y, (std::max)(1, cx), (std::max)(1, cy), flags);
+        } else {
+            SetWindowPos(control, nullptr, x, y, (std::max)(1, cx), (std::max)(1, cy), flags);
+        }
     };
     auto placeRect = [&place](HWND control, const RECT& rect) {
         place(control, rect.left, rect.top, rect.right - rect.left, rect.bottom - rect.top);
     };
 
+    // Card 0: shell integration (Left column)
     const RECT card0 = g_cardRects[0];
+    const int innerLeft0 = card0.left + CARD_PADDING;
+    const int innerWidth0 = (card0.right - CARD_PADDING) - innerLeft0;
+    const int half0 = (innerWidth0 - 12) / 2;
+    place(g_hwndLblIntegrationStatus, innerLeft0, card0.top + 34, innerWidth0, 20);
+    place(g_hwndBtnOpenExplorer, innerLeft0, card0.top + 58, half0, 32);
+    place(g_hwndBtnScanLibrary, innerLeft0 + half0 + 12, card0.top + 58, innerWidth0 - half0 - 12, 32);
+
+    // Card 1: layout choice + Manager entry point (Left column)
     const RECT card1 = g_cardRects[1];
+    const int innerLeft1 = card1.left + CARD_PADDING;
+    const int innerWidth1 = (card1.right - CARD_PADDING) - innerLeft1;
+    place(g_hwndRadLayoutCover, innerLeft1, card1.top + 32, innerWidth1, 22);
+    place(g_hwndRadLayoutHero, innerLeft1, card1.top + 56, innerWidth1, 22);
+    place(g_hwndRadLayoutDetails, innerLeft1, card1.top + 80, innerWidth1, 22);
+    place(g_hwndBtnLaunchManager, innerLeft1, card1.top + 112, (std::min)(235, innerWidth1), 32);
+
+    // Card 2: OneDrive sync + metadata folder actions (Left column)
     const RECT card2 = g_cardRects[2];
+    const int innerLeft2 = card2.left + CARD_PADDING;
+    const int innerWidth2 = (card2.right - CARD_PADDING) - innerLeft2;
+    place(g_hwndChkOneDrive, innerLeft2, card2.top + 34, innerWidth2, 22);
+    const int actionWidth2 = (innerWidth2 - 16) / 3;
+    place(g_hwndBtnOpenMetadataDir, innerLeft2, card2.top + 64, actionWidth2, 30);
+    place(g_hwndBtnOpenOneDriveDir, innerLeft2 + actionWidth2 + 8, card2.top + 64, actionWidth2, 30);
+    place(g_hwndBtnSyncOneDrive, innerLeft2 + (actionWidth2 + 8) * 2, card2.top + 64,
+          innerWidth2 - (actionWidth2 + 8) * 2, 30);
+
+    // Card 6: application updates and releases (Left column)
+    const RECT card6 = g_cardRects[6];
+    const int innerLeft6 = card6.left + CARD_PADDING;
+    const int innerWidth6 = (card6.right - CARD_PADDING) - innerLeft6;
+    place(g_hwndLblUpdateStatus, innerLeft6, card6.top + 34, innerWidth6, 20);
+    const int updateBtnW6 = (innerWidth6 - 16) / 3;
+    place(g_hwndBtnCheckUpdates, innerLeft6, card6.top + 58, updateBtnW6, 32);
+    place(g_hwndBtnInstallUpdate, innerLeft6 + updateBtnW6 + 8, card6.top + 58, updateBtnW6, 32);
+    place(g_hwndBtnReleaseNotes, innerLeft6 + (updateBtnW6 + 8) * 2, card6.top + 58,
+          innerWidth6 - (updateBtnW6 + 8) * 2, 32);
+
+    // Card 3: achievement credentials (Right column)
     const RECT card3 = g_cardRects[3];
-    const RECT card4 = g_cardRects[4];
-
-    const int innerLeft = card0.left + CARD_PADDING;
-    const int innerWidth = (card0.right - CARD_PADDING) - innerLeft;
-    const int half = (innerWidth - 12) / 2;
-
-    // Card 0: shell integration.
-    place(g_hwndLblIntegrationStatus, innerLeft, card0.top + 34, innerWidth, 20);
-    place(g_hwndBtnOpenExplorer, innerLeft, card0.top + 58, half, 32);
-    place(g_hwndBtnScanLibrary, innerLeft + half + 12, card0.top + 58, innerWidth - half - 12, 32);
-
-    // Card 1: layout choice + Manager entry point.
-    place(g_hwndRadLayoutCover, innerLeft, card1.top + 32, innerWidth, 22);
-    place(g_hwndRadLayoutHero, innerLeft, card1.top + 56, innerWidth, 22);
-    place(g_hwndRadLayoutDetails, innerLeft, card1.top + 80, innerWidth, 22);
-    place(g_hwndBtnLaunchManager, innerLeft, card1.top + 112, 235, 32);
-
-    // Card 2: OneDrive sync + metadata folder actions.
-    place(g_hwndChkOneDrive, innerLeft, card2.top + 34, innerWidth, 22);
-    const int actionWidth = (innerWidth - 16) / 3;
-    place(g_hwndBtnOpenMetadataDir, innerLeft, card2.top + 64, actionWidth, 30);
-    place(g_hwndBtnOpenOneDriveDir, innerLeft + actionWidth + 8, card2.top + 64, actionWidth, 30);
-    place(g_hwndBtnSyncOneDrive, innerLeft + (actionWidth + 8) * 2, card2.top + 64,
-          innerWidth - (actionWidth + 8) * 2, 30);
-
-    // Card 3: achievement credentials (two label/field rows that share the row width).
+    const int innerLeft3 = card3.left + CARD_PADDING;
+    const int innerWidth3 = (card3.right - CARD_PADDING) - innerLeft3;
     const int fieldH = ThemeControls::kFieldHeight;
+    const int half3 = (innerWidth3 - 12) / 2;
+
     const int row1Y = card3.top + 32;
-    const int steamIdLabelW = 76;
-    const int steamIdEditW = 140;
-    const int steamIdEditX = innerLeft + innerWidth - steamIdEditW;
-    const int steamIdLabelX = steamIdEditX - 4 - steamIdLabelW;
-    const int steamKeyEditX = innerLeft + 140;
-    place(g_hwndLblSteamKey, innerLeft, row1Y + 4, 136, 20);
-    place(g_hwndEdtSteamKey, steamKeyEditX, row1Y, steamIdLabelX - 8 - steamKeyEditX, fieldH);
-    place(g_hwndLblSteamId, steamIdLabelX, row1Y + 4, steamIdLabelW, 20);
-    place(g_hwndEdtSteamId, steamIdEditX, row1Y, steamIdEditW, fieldH);
+    const int steamKeyEditX = innerLeft3 + 134;
+    place(g_hwndLblSteamKey, innerLeft3, row1Y + 4, 130, 20);
+    place(g_hwndEdtSteamKey, steamKeyEditX, row1Y, (std::max)(60, (innerLeft3 + half3) - steamKeyEditX), fieldH);
+
+    const int steamIdX = innerLeft3 + half3 + 12;
+    const int steamIdEditX = steamIdX + 76;
+    place(g_hwndLblSteamId, steamIdX, row1Y + 4, 72, 20);
+    place(g_hwndEdtSteamId, steamIdEditX, row1Y, (std::max)(60, (innerLeft3 + innerWidth3) - steamIdEditX), fieldH);
 
     const int row2Y = card3.top + 64;
-    const int raKeyEditX = innerLeft + 460;
-    place(g_hwndLblRaUser, innerLeft, row2Y + 4, 148, 20);
-    place(g_hwndEdtRaUser, innerLeft + 152, row2Y, 130, fieldH);
-    place(g_hwndLblRaKey, innerLeft + 290, row2Y + 4, 166, 20);
-    place(g_hwndEdtRaKey, raKeyEditX, row2Y, innerLeft + innerWidth - raKeyEditX, fieldH);
+    const int raUserEditX = innerLeft3 + 140;
+    place(g_hwndLblRaUser, innerLeft3, row2Y + 4, 136, 20);
+    place(g_hwndEdtRaUser, raUserEditX, row2Y, (std::max)(60, (innerLeft3 + half3) - raUserEditX), fieldH);
 
-    place(g_hwndLblAchHelp, innerLeft, card3.top + 98, innerWidth, 20);
-    place(g_hwndChkAutoAchievements, innerLeft, card3.top + 124, innerWidth, 22);
-    place(g_hwndBtnSyncAchievements, innerLeft, card3.top + 152, 260, 32);
+    const int raKeyX = innerLeft3 + half3 + 12;
+    const int raKeyEditX = raKeyX + 154;
+    place(g_hwndLblRaKey, raKeyX, row2Y + 4, 150, 20);
+    place(g_hwndEdtRaKey, raKeyEditX, row2Y, (std::max)(60, (innerLeft3 + innerWidth3) - raKeyEditX), fieldH);
 
-    // Card 4: optional fallback metadata providers.
-    const int sgdbEditX = innerLeft + 154;
-    place(g_hwndLblSgdbKey, innerLeft, card4.top + 36, 150, 20);
-    place(g_hwndEdtSgdbKey, sgdbEditX, card4.top + 32, innerLeft + innerWidth - sgdbEditX, fieldH);
+    place(g_hwndLblAchHelp, innerLeft3, card3.top + 98, innerWidth3, 20);
+    place(g_hwndChkAutoAchievements, innerLeft3, card3.top + 124, innerWidth3, 22);
+    place(g_hwndBtnSyncAchievements, innerLeft3, card3.top + 152, (std::min)(260, innerWidth3), 32);
 
-    const int igdbSecretEditX = innerLeft + 424;
-    place(g_hwndLblIgdbId, innerLeft, card4.top + 68, 116, 20);
-    place(g_hwndEdtIgdbClientId, innerLeft + 120, card4.top + 64, 160, fieldH);
-    place(g_hwndLblIgdbSecret, innerLeft + 290, card4.top + 68, 130, 20);
+    // Card 4: fallback artwork & metadata providers (Right column)
+    const RECT card4 = g_cardRects[4];
+    const int innerLeft4 = card4.left + CARD_PADDING;
+    const int innerWidth4 = (card4.right - CARD_PADDING) - innerLeft4;
+    const int half4 = (innerWidth4 - 12) / 2;
+
+    const int sgdbEditX = innerLeft4 + 154;
+    place(g_hwndLblSgdbKey, innerLeft4, card4.top + 36, 150, 20);
+    place(g_hwndEdtSgdbKey, sgdbEditX, card4.top + 32, (std::max)(60, innerLeft4 + innerWidth4 - sgdbEditX), fieldH);
+
+    const int igdbIdEditX = innerLeft4 + 116;
+    place(g_hwndLblIgdbId, innerLeft4, card4.top + 68, 112, 20);
+    place(g_hwndEdtIgdbClientId, igdbIdEditX, card4.top + 64, (std::max)(60, (innerLeft4 + half4) - igdbIdEditX), fieldH);
+
+    const int igdbSecX = innerLeft4 + half4 + 12;
+    const int igdbSecretEditX = igdbSecX + 130;
+    place(g_hwndLblIgdbSecret, igdbSecX, card4.top + 68, 126, 20);
     place(g_hwndEdtIgdbClientSecret, igdbSecretEditX, card4.top + 64,
-          innerLeft + innerWidth - igdbSecretEditX, fieldH);
-    place(g_hwndLblFallbackHelp, innerLeft, card4.top + 98, innerWidth, 20);
+          (std::max)(60, (innerLeft4 + innerWidth4) - igdbSecretEditX), fieldH);
+    place(g_hwndLblFallbackHelp, innerLeft4, card4.top + 98, innerWidth4, 20);
 
-    // Card 5: updates and releases.
+    // Card 5: notification bell sources (Right column)
     const RECT card5 = g_cardRects[5];
-    place(g_hwndLblUpdateStatus, innerLeft, card5.top + 34, innerWidth, 20);
-    const int updateBtnW = (innerWidth - 16) / 3;
-    place(g_hwndBtnCheckUpdates, innerLeft, card5.top + 58, updateBtnW, 32);
-    place(g_hwndBtnInstallUpdate, innerLeft + updateBtnW + 8, card5.top + 58, updateBtnW, 32);
-    place(g_hwndBtnReleaseNotes, innerLeft + (updateBtnW + 8) * 2, card5.top + 58, innerWidth - (updateBtnW + 8) * 2, 32);
+    const int innerLeft5 = card5.left + CARD_PADDING;
+    const int innerWidth5 = (card5.right - CARD_PADDING) - innerLeft5;
+    place(g_hwndChkNotifyUpdates, innerLeft5, card5.top + 32, innerWidth5, 22);
 
+    const int storeNewsX = innerLeft5 + 138;
+    place(g_hwndChkNotifyNews, innerLeft5, card5.top + 56, 134, 22);
+    place(g_hwndChkNotifySteam, storeNewsX, card5.top + 56, 70, 22);
+    place(g_hwndChkNotifyGog, storeNewsX + 74, card5.top + 56, 62, 22);
+    place(g_hwndChkNotifyEpic, storeNewsX + 140, card5.top + 56, 58, 22);
+    place(g_hwndChkNotifyXbox, storeNewsX + 202, card5.top + 56, 64, 22);
+
+    place(g_hwndChkNotifyFree, innerLeft5, card5.top + 80, 220, 22);
+    place(g_hwndChkNotifyPromotions, innerLeft5 + 228, card5.top + 80,
+          (std::max)(60, innerWidth5 - 228), 22);
+
+    place(g_hwndBtnCheckNotifications, innerLeft5, card5.top + 108, 170, 30);
+    place(g_hwndLblNotifyStatus, innerLeft5 + 178, card5.top + 114,
+          (std::max)(60, innerWidth5 - 178), 20);
+
+    // Save & Reset Cache buttons
     placeRect(g_hwndBtnSave, g_saveRect);
     placeRect(g_hwndBtnResetCache, g_resetCacheRect);
+
+    if (hdwp != nullptr) {
+        EndDeferWindowPos(hdwp);
+    }
 }
 
 bool IsIntegrationEnabled() {
@@ -398,6 +591,65 @@ void LaunchGameExplorerManager(HWND hwndParent) {
                  static_cast<WPARAM>(Studio::Tab::Manager), 0);
 }
 
+// Per-store news toggles only matter while the storefront news master switch is on.
+void UpdateNotificationToggleStates() {
+    const bool newsOn =
+        g_hwndChkNotifyNews != nullptr &&
+        SendMessageW(g_hwndChkNotifyNews, BM_GETCHECK, 0, 0) == BST_CHECKED;
+    for (HWND control : { g_hwndChkNotifySteam, g_hwndChkNotifyGog, g_hwndChkNotifyEpic,
+                          g_hwndChkNotifyXbox }) {
+        if (control != nullptr) EnableWindow(control, newsOn ? TRUE : FALSE);
+    }
+}
+
+// Shows when the background service last filled the bell cache, so the button never looks inert.
+void UpdateNotificationStatusLabel() {
+    if (g_hwndLblNotifyStatus == nullptr) return;
+
+    NotificationFeed feed;
+    std::wstring text = L"No refresh yet \u2014 the service fills this at sign-in.";
+    if (LoadNotificationFeed(feed, NotificationFeedPath()) && !feed.generatedAt.empty()) {
+        text = L"Last refresh: " + feed.generatedAt + L" \u00B7 " +
+               std::to_wstring(feed.items.size()) + L" alerts";
+    }
+    SetWindowTextW(g_hwndLblNotifyStatus, text.c_str());
+}
+
+// Asks the background service for one notification pass, then waits for it to finish. The service
+// owns the network work; this page only triggers it and reloads the cached feed when it is done.
+void StartNotificationCheck(HWND hwnd) {
+    if (g_isCheckingNotifications.exchange(true)) return;
+
+    if (g_hwndBtnCheckNotifications != nullptr) {
+        EnableWindow(g_hwndBtnCheckNotifications, FALSE);
+    }
+    if (g_hwndLblNotifyStatus != nullptr) {
+        SetWindowTextW(g_hwndLblNotifyStatus, L"Checking storefronts and GamerPower...");
+    }
+
+    std::thread([hwnd]() {
+        std::string response;
+        const bool started =
+            ServiceClient::Send(ServiceProtocol::kCheckUpdatesCommand, response) &&
+            response == ServiceProtocol::kCheckStartedResponse;
+
+        if (started) {
+            // The refresh is a one-shot worker; poll its status instead of keeping a timer.
+            for (int attempt = 0; attempt < 120; ++attempt) {
+                std::string status;
+                if (!ServiceClient::Send(ServiceProtocol::kGetUpdatesStatusCommand, status)) break;
+                if (status == ServiceProtocol::kIdleResponse) break;
+                Sleep(500);
+            }
+        }
+
+        g_isCheckingNotifications = false;
+        if (IsWindow(hwnd)) {
+            PostMessageW(hwnd, WM_APP_NOTIFY_CHECK_DONE, started ? 1 : 0, 0);
+        }
+    }).detach();
+}
+
 void LoadConfigValues() {
     const auto s = SettingsManager::Load();
 
@@ -417,6 +669,22 @@ void LoadConfigValues() {
     if (g_hwndEdtSgdbKey != nullptr)  SetWindowTextW(g_hwndEdtSgdbKey, s.steamGridDbApiKey.c_str());
     if (g_hwndEdtIgdbClientId != nullptr)     SetWindowTextW(g_hwndEdtIgdbClientId, s.igdbClientId.c_str());
     if (g_hwndEdtIgdbClientSecret != nullptr) SetWindowTextW(g_hwndEdtIgdbClientSecret, s.igdbClientSecret.c_str());
+
+    auto setCheck = [](HWND control, bool value) {
+        if (control != nullptr) {
+            SendMessageW(control, BM_SETCHECK, value ? BST_CHECKED : BST_UNCHECKED, 0);
+        }
+    };
+    setCheck(g_hwndChkNotifyUpdates, s.notifyGameUpdates);
+    setCheck(g_hwndChkNotifyNews, s.notifyNews);
+    setCheck(g_hwndChkNotifySteam, s.notifySteamNews);
+    setCheck(g_hwndChkNotifyGog, s.notifyGogNews);
+    setCheck(g_hwndChkNotifyEpic, s.notifyEpicNews);
+    setCheck(g_hwndChkNotifyXbox, s.notifyXboxNews);
+    setCheck(g_hwndChkNotifyFree, s.notifyFreeGames);
+    setCheck(g_hwndChkNotifyPromotions, s.notifyPromotions);
+    UpdateNotificationToggleStates();
+    UpdateNotificationStatusLabel();
 
     UpdateIntegrationStatusUI();
 }
@@ -499,6 +767,20 @@ void SaveConfigValues(HWND hwndParent) {
         GetWindowTextW(g_hwndEdtIgdbClientSecret, buf, 512);
         s.igdbClientSecret = buf;
     }
+
+    auto isChecked = [](HWND control) {
+        return control != nullptr &&
+               SendMessageW(control, BM_GETCHECK, 0, 0) == BST_CHECKED;
+    };
+    s.notifyGameUpdates = isChecked(g_hwndChkNotifyUpdates);
+    s.notifyNews = isChecked(g_hwndChkNotifyNews);
+    s.notifySteamNews = isChecked(g_hwndChkNotifySteam);
+    s.notifyGogNews = isChecked(g_hwndChkNotifyGog);
+    s.notifyEpicNews = isChecked(g_hwndChkNotifyEpic);
+    s.notifyXboxNews = isChecked(g_hwndChkNotifyXbox);
+    s.notifyFreeGames = isChecked(g_hwndChkNotifyFree);
+    s.notifyPromotions = isChecked(g_hwndChkNotifyPromotions);
+
     if (SettingsManager::Save(s)) {
         if (s.enableOneDriveBackup) {
             Storage::SyncToOneDrive();
@@ -508,6 +790,23 @@ void SaveConfigValues(HWND hwndParent) {
         MessageBoxW(hwndParent, L"Integration settings successfully saved to Windows Game Explorer.", L"Windows Game Explorer", MB_OK | MB_ICONINFORMATION);
     } else {
         MessageBoxW(hwndParent, L"Failed to save settings. Please ensure write access.", L"Error", MB_OK | MB_ICONERROR);
+    }
+}
+
+LRESULT CALLBACK ConfigChildWheelProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam,
+                                      UINT_PTR /*id*/, DWORD_PTR /*ref*/) {
+    if (msg == WM_MOUSEWHEEL) {
+        // Child controls consume the wheel themselves; forwarding keeps the page scrolling no
+        // matter which control the pointer is over.
+        SendMessageW(GetParent(hwnd), msg, wParam, lParam);
+        return 0;
+    }
+    return DefSubclassProc(hwnd, msg, wParam, lParam);
+}
+
+void ForwardWheelToPage(HWND control) {
+    if (control != nullptr) {
+        SetWindowSubclass(control, ConfigChildWheelProc, 1, 0);
     }
 }
 
@@ -536,23 +835,26 @@ LRESULT CALLBACK ConfigWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPara
         // Controls are created once then positioned by LayoutConfigControls(), so the initial
         // layout and every resize share exactly one geometry implementation.
         auto makeStatic = [&](const wchar_t* text, int id) -> HWND {
-            HWND control = CreateWindowExW(0, L"STATIC", text, WS_CHILD | WS_VISIBLE, 0, 0, 10, 10, hwnd,
+            HWND control = CreateWindowExW(0, L"STATIC", text, WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS, 0, 0, 10, 10, hwnd,
                 id != 0 ? reinterpret_cast<HMENU>(static_cast<INT_PTR>(id)) : nullptr, nullptr, nullptr);
             SendMessageW(control, WM_SETFONT, reinterpret_cast<WPARAM>(g_hFont), TRUE);
+            ForwardWheelToPage(control);
             return control;
         };
         auto makeButton = [&](const wchar_t* text, int id, DWORD style, HFONT font) -> HWND {
-            HWND control = CreateWindowExW(0, L"BUTTON", text, WS_CHILD | WS_VISIBLE | style, 0, 0, 10, 10, hwnd,
+            HWND control = CreateWindowExW(0, L"BUTTON", text, WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS | style, 0, 0, 10, 10, hwnd,
                 reinterpret_cast<HMENU>(static_cast<INT_PTR>(id)), nullptr, nullptr);
             SendMessageW(control, WM_SETFONT, reinterpret_cast<WPARAM>(font), TRUE);
+            ForwardWheelToPage(control);
             return control;
         };
         auto makeEdit = [&](int id, bool password) -> HWND {
             HWND control = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", L"",
-                WS_CHILD | WS_VISIBLE | ES_AUTOHSCROLL | (password ? ES_PASSWORD : 0u), 0, 0, 10, 10, hwnd,
+                WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS | ES_AUTOHSCROLL | (password ? ES_PASSWORD : 0u), 0, 0, 10, 10, hwnd,
                 reinterpret_cast<HMENU>(static_cast<INT_PTR>(id)), nullptr, nullptr);
             SendMessageW(control, WM_SETFONT, reinterpret_cast<WPARAM>(g_hFont), TRUE);
             ThemeControls::ApplyFieldFrame(control);
+            ForwardWheelToPage(control);
             return control;
         };
         auto makeCheck = [&](const wchar_t* text, int id, DWORD style) -> HWND {
@@ -620,7 +922,22 @@ LRESULT CALLBACK ConfigWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPara
         g_hwndLblFallbackHelp = makeStatic(
             L"Optional fallbacks when storefronts lack native box art. Keys are stored locally.", 0);
 
-        // Card 5: Application Updates & Releases
+        // Card 5: Game Catalogue notification bell.
+        g_hwndChkNotifyUpdates = makeCheck(L"Game update alerts (installed editions with a newer build)",
+                                           IDC_CHK_NOTIFY_UPDATES, 0);
+        g_hwndChkNotifyNews = makeCheck(L"Storefront news", IDC_CHK_NOTIFY_NEWS, 0);
+        g_hwndChkNotifySteam = makeCheck(L"Steam", IDC_CHK_NOTIFY_STEAM, 0);
+        g_hwndChkNotifyGog = makeCheck(L"GOG", IDC_CHK_NOTIFY_GOG, 0);
+        g_hwndChkNotifyEpic = makeCheck(L"Epic", IDC_CHK_NOTIFY_EPIC, 0);
+        g_hwndChkNotifyXbox = makeCheck(L"Xbox", IDC_CHK_NOTIFY_XBOX, 0);
+        g_hwndChkNotifyFree = makeCheck(L"Free full games (GamerPower)", IDC_CHK_NOTIFY_FREE, 0);
+        g_hwndChkNotifyPromotions = makeCheck(L"Deals, loot && beta keys (GamerPower)",
+                                             IDC_CHK_NOTIFY_PROMOTIONS, 0);
+        g_hwndBtnCheckNotifications = makeButton(L"Check for alerts now", IDC_BTN_CHECK_NOTIFICATIONS,
+                                                  BS_OWNERDRAW, g_hFontBold);
+        g_hwndLblNotifyStatus = makeStatic(L"No refresh yet.", IDC_LBL_NOTIFY_STATUS);
+
+        // Card 6: Application Updates & Releases
         const std::wstring initialVer = std::wstring(UpdateStrings::kCurrentVersionLabel) + L" v" +
                                         UpdateChecker::GetCurrentVersion() + L" \u2014 " + UpdateStrings::kStatusUpToDate;
         g_hwndLblUpdateStatus = makeStatic(initialVer.c_str(), IDC_LBL_UPDATE_STATUS);
@@ -647,7 +964,16 @@ LRESULT CALLBACK ConfigWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPara
     case WM_SIZE:
         if (wParam != SIZE_MINIMIZED) {
             LayoutConfigControls(hwnd);
-            InvalidateRect(hwnd, nullptr, TRUE);
+            RedrawWindow(hwnd, nullptr, nullptr,
+                         RDW_INVALIDATE | RDW_ALLCHILDREN | RDW_ERASE | RDW_UPDATENOW);
+        }
+        return 0;
+
+    case WM_SHOWWINDOW:
+        if (wParam == TRUE) {
+            LayoutConfigControls(hwnd);
+            RedrawWindow(hwnd, nullptr, nullptr,
+                         RDW_INVALIDATE | RDW_ALLCHILDREN | RDW_ERASE | RDW_UPDATENOW);
         }
         return 0;
 
@@ -704,9 +1030,37 @@ LRESULT CALLBACK ConfigWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPara
     }
 
     case WM_MOUSEMOVE: {
-        if (g_pageMode) break;
         const int x = GET_X_LPARAM(lParam);
         const int y = GET_Y_LPARAM(lParam);
+
+        if (g_scrollDragging) {
+            RECT client{};
+            GetClientRect(hwnd, &client);
+            const ThemeScroll::Metrics metrics = ConfigScrollMetrics(hwnd);
+            const int next = ThemeScroll::PositionForThumbDrag(metrics, y, g_scrollGrabOffset,
+                                                               g_contentHeight, client.bottom);
+            ScrollConfigBy(hwnd, next, true);
+            return 0;
+        }
+
+        bool onThumb = false;
+        bool onRail = false;
+        const bool overBar = ScrollBarHitTest(hwnd, x, y, onThumb, onRail);
+        if (overBar != g_scrollHover) {
+            g_scrollHover = overBar;
+            InvalidateScrollBarArea(hwnd);
+        }
+
+        if (!g_trackingMouse) {
+            TRACKMOUSEEVENT tme{};
+            tme.cbSize = sizeof(tme);
+            tme.dwFlags = TME_LEAVE;
+            tme.hwndTrack = hwnd;
+            TrackMouseEvent(&tme);
+            g_trackingMouse = true;
+        }
+
+        if (g_pageMode) break;
 
         RECT rc;
         GetClientRect(hwnd, &rc);
@@ -718,21 +1072,16 @@ LRESULT CALLBACK ConfigWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPara
             RECT rcPill = GetPillRect(w);
             InvalidateRect(hwnd, &rcPill, FALSE);
         }
-
-        if (!g_trackingMouse) {
-            TRACKMOUSEEVENT tme{};
-            tme.cbSize = sizeof(tme);
-            tme.dwFlags = TME_LEAVE;
-            tme.hwndTrack = hwnd;
-            TrackMouseEvent(&tme);
-            g_trackingMouse = true;
-        }
         return 0;
     }
 
     case WM_MOUSELEAVE: {
-        if (g_pageMode) break;
         g_trackingMouse = false;
+        if (g_scrollHover) {
+            g_scrollHover = false;
+            InvalidateScrollBarArea(hwnd);
+        }
+        if (g_pageMode) break;
         if (g_hoverBtn != TitleButton::None) {
             g_hoverBtn = TitleButton::None;
             RECT rc;
@@ -743,10 +1092,35 @@ LRESULT CALLBACK ConfigWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPara
         return 0;
     }
 
+    case WM_MOUSEWHEEL: {
+        const int delta = GET_WHEEL_DELTA_WPARAM(wParam);
+        ScrollConfigBy(hwnd, -delta * 60 / WHEEL_DELTA);
+        return 0;
+    }
+
     case WM_LBUTTONDOWN: {
-        if (g_pageMode) break;
         const int x = GET_X_LPARAM(lParam);
         const int y = GET_Y_LPARAM(lParam);
+
+        bool onThumb = false;
+        bool onRail = false;
+        if (ScrollBarHitTest(hwnd, x, y, onThumb, onRail)) {
+            if (onThumb) {
+                g_scrollGrabOffset = y - ConfigScrollMetrics(hwnd).thumb.top;
+                g_scrollDragging = true;
+                SetCapture(hwnd);
+            } else {
+                RECT client{};
+                GetClientRect(hwnd, &client);
+                const ThemeScroll::Metrics metrics = ConfigScrollMetrics(hwnd);
+                const int page = (std::max)(static_cast<int>(client.bottom) - 40, 60);
+                ScrollConfigBy(hwnd, y < metrics.thumb.top ? -page : page);
+            }
+            InvalidateScrollBarArea(hwnd);
+            return 0;
+        }
+
+        if (g_pageMode) break;
 
         RECT rc;
         GetClientRect(hwnd, &rc);
@@ -764,6 +1138,13 @@ LRESULT CALLBACK ConfigWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPara
     }
 
     case WM_LBUTTONUP: {
+        if (g_scrollDragging) {
+            g_scrollDragging = false;
+            ReleaseCapture();
+            InvalidateScrollBarArea(hwnd);
+            return 0;
+        }
+
         if (g_pageMode) break;
         if (g_pressedBtn != TitleButton::None) {
             ReleaseCapture();
@@ -797,6 +1178,9 @@ LRESULT CALLBACK ConfigWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPara
         }
         break;
     }
+
+    case WM_ERASEBKGND:
+        return 1;
 
     case WM_PAINT: {
         PAINTSTRUCT ps;
@@ -924,7 +1308,7 @@ LRESULT CALLBACK ConfigWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPara
         } // !g_pageMode
 
         // Section Cards (No Storefront Provider Section — Auto Storefront Discovery)
-        ComputeConfigLayout(w);
+        ComputeConfigLayout(w, rcClient.bottom);
 
         const struct CardSpec {
             const RECT* rect;
@@ -935,11 +1319,14 @@ LRESULT CALLBACK ConfigWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPara
             { &g_cardRects[2], L"Cloud Sync, Game Installs & Local Storage" },
             { &g_cardRects[3], L"Universal Multi-Source Achievement Credentials & API Keys" },
             { &g_cardRects[4], L"Fallback Artwork & Metadata Providers (Optional)" },
-            { &g_cardRects[5], UpdateStrings::kCardTitle }
+            { &g_cardRects[5], L"Game Catalogue Notification Bell" },
+            { &g_cardRects[6], UpdateStrings::kCardTitle }
         };
 
         for (const auto& c : cards) {
             RECT rcCard = *c.rect;
+            if (rcCard.bottom <= 0 || rcCard.top >= rcClient.bottom) continue;
+
             HBRUSH cardBrush = CreateSolidBrush(g_palette.cardBg);
             HPEN cardPen = CreatePen(PS_SOLID, 1, g_palette.cardBorder);
             HGDIOBJ oB = SelectObject(memDC, cardBrush);
@@ -959,6 +1346,13 @@ LRESULT CALLBACK ConfigWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPara
                                  rcCard.right - CARD_PADDING, rcCard.top + 28 };
             DrawTextW(memDC, c.title, -1, &rcCardTitle,
                       DT_LEFT | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX);
+        }
+
+        // The page scrolls as one surface; the bar is painted after the cards so it sits on top.
+        const ThemeScroll::Metrics scroll = ThemeScroll::Compute(rcClient, g_contentHeight,
+                                                                 rcClient.bottom, g_scrollPos);
+        if (scroll.needed) {
+            ThemeScroll::Paint(memDC, scroll, g_palette, g_scrollHover, g_scrollDragging);
         }
 
         BitBlt(hdc, 0, 0, w, rcClient.bottom, memDC, 0, 0, SRCCOPY);
@@ -1053,6 +1447,11 @@ LRESULT CALLBACK ConfigWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPara
             drawStyledButton(label.c_str(), syncing, true);
             return TRUE;
         }
+        if (pDis->CtlID == IDC_BTN_CHECK_NOTIFICATIONS) {
+            const bool checking = g_isCheckingNotifications.load();
+            drawStyledButton(checking ? L"Checking..." : L"Check for alerts now", checking, true);
+            return TRUE;
+        }
         if (pDis->CtlID == IDC_BTN_SAVE) {
             drawStyledButton(L"Save Configuration", true, true);
             return TRUE;
@@ -1076,6 +1475,14 @@ LRESULT CALLBACK ConfigWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPara
             } else if (ThemeControls::IsThemedCheck(control)) {
                 ThemeControls::ToggleCheck(control);
             }
+            if (id == IDC_CHK_NOTIFY_NEWS) {
+                UpdateNotificationToggleStates();
+            }
+        }
+
+        if (id == IDC_BTN_CHECK_NOTIFICATIONS) {
+            StartNotificationCheck(hwnd);
+            return 0;
         }
 
         if (id == IDC_BTN_RESET_CACHE) {
@@ -1213,6 +1620,22 @@ LRESULT CALLBACK ConfigWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPara
             return 0;
         }
         break;
+    }
+
+    case WM_APP_NOTIFY_CHECK_DONE: {
+        if (g_hwndBtnCheckNotifications != nullptr) {
+            EnableWindow(g_hwndBtnCheckNotifications, TRUE);
+            InvalidateRect(g_hwndBtnCheckNotifications, nullptr, TRUE);
+        }
+        if (wParam == 0) {
+            if (g_hwndLblNotifyStatus != nullptr) {
+                SetWindowTextW(g_hwndLblNotifyStatus,
+                               L"Background service not running \u2014 start Game Explorer Service, then retry.");
+            }
+        } else {
+            UpdateNotificationStatusLabel();
+        }
+        return 0;
     }
 
     case WM_APP_UPDATE_CHECK_DONE: {

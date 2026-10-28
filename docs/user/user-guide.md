@@ -19,13 +19,18 @@ Game Explorer Studio (`GameExplorerStudio.exe`) is the single companion GUI: one
 2. [Game Catalogue Page (`GameExplorerStudio.exe`)](#2-game-catalogue-page)
    - [Owned-Game Sources](#owned-game-sources)
    - [Filtering, Sorting & Paging](#filtering-sorting--paging)
+   - [Details Pane](#details-pane)
    - [Installing Games](#installing-games)
+   - [Update Alerts](#update-alerts)
+   - [Notification Bell](#notification-bell)
    - [What the Catalogue Deliberately Does Not Do](#what-the-catalogue-deliberately-does-not-do)
-3. [Configuration Page (`GameExplorerStudio.exe`)](#3-configuration-page)
-   - [View & Layout Customization](#view--layout-customization)
-   - [Storefront Scans](#storefront-scans)
-   - [Universal Achievement Credentials](#universal-achievement-credentials)
-   - [OneDrive Cloud Synchronization](#onedrive-cloud-synchronization)
+3. [Configuration Page (`GameExplorerStudio.exe`)](./configuration.md)
+   - [Shell Integration & Scanning](./configuration.md#1-file-explorer-shell-integration)
+   - [Presentation Layout](./configuration.md#2-presentation-layout)
+   - [Cloud Sync & Local Storage](./configuration.md#3-cloud-sync--local-storage)
+   - [Achievement Credentials](./configuration.md#4-achievement-credentials)
+   - [Fallback Providers](./configuration.md#5-fallback-artwork--metadata-providers)
+   - [Notification Bell & Update Checks](./notifications.md)
 4. [Retro & Emulation Support](#4-retro--emulation-support)
    - [Directory Structure & ROM Templates](#directory-structure--rom-templates)
    - [Supported Emulators & Systems](#supported-emulators--systems)
@@ -150,25 +155,32 @@ If you ever encounter corrupt image files or want to force a clean redownload of
 
 ## 2. Game Catalogue Page (`GameExplorerStudio.exe`)
 
-The **Game Catalogue** page browses every game you own on a supported storefront, whether or not it is currently installed. It is deliberately a single list view: rows carry the useful facts and the toolbar and footer carry the actions, so there is no separate details pane to manage.
+The **Game Catalogue** page browses every game you own on a supported storefront, whether or not it is currently installed. The list carries the facts; the details pane on the right carries the rich metadata, the owned editions, and one **Store page** action per edition, while the header, toolbar, and footer carry the global actions.
 
 ```
 +-----------------------------------------------------------------------------------+
-| Game Catalogue                                              [ Refresh Catalogue ] |
+| Game Catalogue                                                [ bell ] [ Refresh ] |
 | Everything you own on a storefront. Installing is handled by the store's own      |
 | client; playing stays in the File Explorer Games view.                            |
 +-----------------------------------------------------------------------------------+
 | Search [                ] Storefront [All ▾] State [Any ▾] Sort [Title ▾] [Asc ▾] |
 | Genre [All ▾] Tag [All ▾] Year [Any ▾] Rating [All ▾] Playtime [Any ▾] [Family ▾] |
-+-----------------------------------------------------------------------------------+
-| Title                    | Storefront | Year | Playtime | Last played | Size  | Status    |
-| Cyberpunk 2077           | Steam      | 2020 | 42h      | 2026-10-20  | 68 GB | Installed |
-| Final Fantasy XIV        | Square     | 2013 | 310h     | 2026-10-18  | 92 GB | Installed |
-| Alan Wake 2              | Epic Games | 2023 | —        | —           | 86 GB | Not inst. |
-+-----------------------------------------------------------------------------------+
++-------------------------------------------------------+---------------------------+
+| Title              | Storefront | Year | Playtime | …  | Cyberpunk 2077            |
+| Cyberpunk 2077     | Steam      | 2020 | 42h      | …  | Developer  CD Projekt Red |
+| Final Fantasy XIV  | Square     | 2013 | 310h     | …  | Publisher  CD Projekt     |
+| Alan Wake 2        | Epic Games | 2023 | —        | …  | Released   2020-12-10     |
+|                    |            |      |          |    | Synopsis  …               |
+|                    |            |      |          |    | Owned editions            |
+|                    |            |      |          |    |  Steam · Installed        |
+|                    |            |      |          |    |  Update available         |
+|                    |            |      |          |    |  [ Store page ]           |
++-------------------------------------------------------+---------------------------+
 | [Previous] [Next]  Page 1 of 4 · 87 games   Per page [24 ▾]  [Store page] [Install] |
 +-----------------------------------------------------------------------------------+
 ```
+
+The details pane appears when the window is wide enough (1120 px or more). Narrow windows keep the full-width list; the same facts remain available through the footer buttons.
 
 ### Owned-Game Sources
 
@@ -193,13 +205,51 @@ The catalogue applies a centralized **Windows-installable gate**, so a title tha
 - **Paging**: 12, 24, 48, or 96 rows per page, with Previous/Next and a live `Page N of M · X games` indicator. **Reset filters** restores the default query.
 - **Refresh Catalogue** re-scans all sources on a background thread, so the page stays responsive while the list rebuilds.
 
+### Details Pane
+
+Selecting a row fills the details pane with everything the catalogue already knows about that title:
+
+- **Identity**: canonical title, storefront, developer, publisher, and release date.
+- **Play facts**: release year, rating, genres, tags, playtime, last played, install size, and family-sharing state.
+- **Synopsis**: the same sanitized synopsis shown in the Library Manager.
+- **Owned editions**: one card per storefront or edition you own, with its install state, installed build (when the storefront exposes one), and its own **Store page** button.
+- **Update verdict**: *Up to date*, *Update available* with the installed and latest build ids, or *Not supported* when the storefront exposes no public way to compare builds.
+
+The pane scrolls with the mouse wheel, its scrollbar thumb, or a click on the scroll rail, and every edition keeps its own **Store page** button so you can open the exact product page for the copy you own.
+
 ### Installing Games
+
+> Installing is a catalogue action, so the footer **Install** button is the only install entry point. The pane never duplicates it per storefront.
 
 1. Select a row in the list.
 2. Click **Install**. If the title is owned in more than one storefront or edition, a menu lists every source; an edition that is already installed is labelled `(Installed)`.
 3. The app hands the request to the storefront's own client through its official install protocol. The storefront chooses the download location and performs the installation.
 
 Windows Game Explorer never creates, moves, or deletes install folders, and it never installs a game behind the storefront's back. If a source exposes no direct install protocol, the status line directs you to its store page instead.
+
+### Update Alerts
+
+The catalogue checks whether an installed copy is behind the build its storefront publishes, using the storefront the game was installed through:
+
+| Storefront | Source of truth | Result |
+| --- | --- | --- |
+| **Steam** | Official keyless `ISteamApps/UpToDateCheck` endpoint, comparing the installed `buildid` with the published build | *Up to date* or *Update available* with both build ids |
+| **GOG Galaxy** | Installed `buildId` from the game's `goggame-*.info` file against the Galaxy `ImportedLatestBuildIds` cache | *Up to date*, *Update available*, or *Not supported* when Galaxy has never imported the title |
+| **Epic Games** | Installed `AppVersionString` from the `.item` manifest | Shown as the installed build; no public comparison endpoint exists, so the verdict is *Not supported* |
+| **Xbox / Microsoft Store** | Installed package version | Shown as the installed build; *Not supported* verdict |
+
+Checks run **once when the background service starts and once after each interactive sign-in**, and can be re-run at any time from **Configuration → Game Catalogue Notification Bell → Check for alerts now**. Results are cached in `%USERPROFILE%\Game Explorer\updates.json`, so the details pane shows the last known verdict instantly and never blocks on the network. No storefront account is contacted for Steam checks, and no storefront file is ever modified.
+
+### Notification Bell
+
+The bell in the catalogue header collects the alerts the background service produced, with an unread badge capped at `9+`:
+
+- **Game updates** — an installed edition is behind the storefront build (Steam and GOG Galaxy).
+- **Storefront news** — recent posts from each storefront you own games on, from the user's own storefront feeds: Steam community announcements per owned game, the GOG.com news feed, the Epic Games Store blog, and the Xbox Wire news feed. News is limited to the last 30 days.
+- **Free games** — [GamerPower](https://www.gamerpower.com/) giveaways of type *game*.
+- **Deals & promotions** — GamerPower *loot* and *beta* giveaways.
+
+Each source has its own switch under **Configuration → Game Catalogue Notification Bell**, and the per-store news switches are only enabled while **Storefront news** is on. Alerts are generated once per sign-in (plus any manual check) rather than polled continuously. Opening the panel and clicking an alert marks it read and opens the underlying page; **Mark all read** clears the badge, which is persisted in `notifications-seen.json`. Free-game and deal data is provided by GamerPower, and the panel always shows the required attribution link back to GamerPower.com.
 
 ### What the Catalogue Deliberately Does Not Do
 
@@ -212,52 +262,13 @@ Windows Game Explorer never creates, moves, or deletes install folders, and it n
 
 ## 3. Configuration Page (`GameExplorerStudio.exe`)
 
-The **Configuration** page of Game Explorer Studio manages system-level integration, storefront scanning preferences, cloud backups, and API credentials.
+The **Configuration** page of Game Explorer Studio manages shell integration, presentation,
+cloud backups, API credentials, catalogue alerts and application updates. The page scrolls as one
+surface, so the wheel, the scrollbar and the rail move every card and its controls together.
 
-```
-+-----------------------------------------------------------------------------------+
-| Game Explorer Studio — Configuration                                 [-] [o] [x]|
-+-----------------------------------------------------------------------------------+
-| [ Card 1: View & Presentation Layout ]                                             |
-|  Presentation Mode:  (*) Cover Art (2:3)   ( ) Hero Banner (3.1:1)   ( ) Details  |
-|  Theme:              (*) Follow System     ( ) Dark Mode             ( ) Light    |
-|                                                                                   |
-| [ Card 2: Storefront Discovery & Scanning ]                                       |
-|  [x] Steam   [x] Epic Games   [x] GOG Galaxy   [x] Ubisoft Connect   [x] EA App   |
-|  [x] Battle.net   [x] Itch.io   [x] Amazon Games   [x] Xbox / Game Pass           |
-|  [ Scan & Populate Library Now ]                                                  |
-|                                                                                   |
-| [ Card 3: Universal Multi-Source Achievement Credentials ]                        |
-|  Steam Web API Key:        [ •••••••••••••••••••••••••••••••• ]                   |
-|  SteamID64:                [ 76561198000000000                ]                   |
-|  RetroAchievements User:   [ PlayerName                       ]                   |
-|  RetroAchievements Key:    [ •••••••••••••••••••••••••••••••• ]                   |
-|                                                                                   |
-| [ Card 4: Cloud Synchronization (OneDrive) ]                                      |
-|  Folder: %USERPROFILE%\OneDrive\Windows Game Explorer                             |
-|  [ Sync Library to OneDrive Now ]                                                 |
-|                                                                                   |
-| [ 💾 Save Settings ]   [ 📁 Open Metadata Folder ]   [ 🧹 Reset Art Cache ]       |
-+-----------------------------------------------------------------------------------+
-```
-
-### View & Layout Customization
-- **Cover Art Mode**: Form-fitting vertical cards (`180x270` image port) displaying authentic 2:3 box art.
-- **Hero Banner Mode**: Ultra-wide cards (`320x104` image port) displaying 3.1:1 panoramic art (`1920x620`).
-- **Details Mode**: High-density list with square icons (`1:1`).
-
-### Storefront Scans
-Enable or disable detection for individual storefronts. Clicking **"Scan & Populate Library Now"** executes the scan on a dedicated background worker thread, ensuring the settings UI and File Explorer never experience UI freezing.
-
-### Universal Achievement Credentials
-To sync live achievements for your games:
-- **Steam Web API Key & SteamID64**: Retrieve your personal key from [steamcommunity.com/dev/apikey](https://steamcommunity.com/dev/apikey) and enter it along with your 17-digit SteamID64.
-- **RetroAchievements Username & Web API Key**: Enter your RetroAchievements credentials from [retroachievements.org/controlpanel.php](https://retroachievements.org/controlpanel.php).
-- **Security Invariant**: All API keys and secrets are securely masked using password dots (`ES_PASSWORD`) so they are never exposed in plaintext on screen.
-
-### OneDrive Cloud Synchronization
-- Automatically synchronizes your game library database backup (`backups/library.db`), metadata JSON files (`metadata/`), and custom artwork (`art/`) to `%OneDrive%\Windows Game Explorer\`.
-- Click **"Sync Library to OneDrive Now"** for an immediate on-demand sync snapshot.
+Every card, switch, credential field, default value and storage key is documented in the
+**[Configuration guide](./configuration.md)**, and the alert sources in the
+**[Update Alerts & Notification Bell guide](./notifications.md)**.
 
 ---
 

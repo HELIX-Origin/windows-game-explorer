@@ -2,6 +2,7 @@
 #include <sddl.h>
 #include <shellapi.h>
 #include <shlobj.h>
+#include <wtsapi32.h>
 
 #include <atomic>
 #include <chrono>
@@ -12,7 +13,9 @@
 
 #include "GameExplorerCore/DarkMode.h"
 #include "GameExplorerCore/Database.h"
+#include "GameExplorerCore/GameUpdates.h"
 #include "GameExplorerCore/Models.h"
+#include "GameExplorerCore/Notifications.h"
 #include "GameExplorerCore/OwnedGames.h"
 #include "GameExplorerCore/PlatformLauncher.h"
 #include "GameExplorerCore/Settings.h"
@@ -35,6 +38,35 @@ HANDLE g_hStopEvent = nullptr;
 std::atomic<bool> g_running{ false };
 std::atomic<size_t> g_preloadedInstalledCount{ 0 };
 std::atomic<size_t> g_preloadedOwnedCount{ 0 };
+std::atomic<bool> g_notificationRunning{ false };
+std::atomic<size_t> g_notificationCount{ 0 };
+std::atomic<GameExplorer::PreloadWorker*> g_notificationWorker{ nullptr };
+
+// Runs `work` while impersonating the interactive console user. The service runs as LocalSystem,
+// so every user-scoped path (`%USERPROFILE%\Game Explorer`, storefront client caches, the settings
+// database) only resolves correctly under that user's token. If impersonation is not available
+// (e.g. running standalone in user context or during pre-logon boot), falls back to executing directly.
+template <typename Work>
+bool RunAsConsoleUser(Work&& work) {
+    const DWORD sessionId = WTSGetActiveConsoleSessionId();
+    if (sessionId != 0xFFFFFFFF) {
+        HANDLE token = nullptr;
+        if (WTSQueryUserToken(sessionId, &token)) {
+            const bool impersonating = ImpersonateLoggedOnUser(token) != FALSE;
+            if (impersonating) {
+                work();
+                RevertToSelf();
+                CloseHandle(token);
+                return true;
+            }
+            CloseHandle(token);
+        }
+    }
+
+    // Fallback: execute in current process/user security context
+    work();
+    return true;
+}
 
 void ReportServiceStatus(DWORD currentState, DWORD win32ExitCode, DWORD waitHint) {
     static DWORD checkPoint = 1;
@@ -45,7 +77,8 @@ void ReportServiceStatus(DWORD currentState, DWORD win32ExitCode, DWORD waitHint
     if (currentState == SERVICE_START_PENDING) {
         g_serviceStatus.dwControlsAccepted = 0;
     } else {
-        g_serviceStatus.dwControlsAccepted = SERVICE_ACCEPT_STOP | SERVICE_ACCEPT_SHUTDOWN;
+        g_serviceStatus.dwControlsAccepted = SERVICE_ACCEPT_STOP | SERVICE_ACCEPT_SHUTDOWN |
+                                             SERVICE_ACCEPT_SESSIONCHANGE;
     }
 
     if (currentState == SERVICE_RUNNING || currentState == SERVICE_STOPPED) {
@@ -59,7 +92,7 @@ void ReportServiceStatus(DWORD currentState, DWORD win32ExitCode, DWORD waitHint
     }
 }
 
-DWORD WINAPI ServiceCtrlHandlerEx(DWORD dwControl, DWORD /*dwEventType*/, LPVOID /*lpEventData*/,
+DWORD WINAPI ServiceCtrlHandlerEx(DWORD dwControl, DWORD dwEventType, LPVOID lpEventData,
                                   LPVOID /*lpContext*/) {
     switch (dwControl) {
     case SERVICE_CONTROL_STOP:
@@ -70,6 +103,20 @@ DWORD WINAPI ServiceCtrlHandlerEx(DWORD dwControl, DWORD /*dwEventType*/, LPVOID
             SetEvent(g_hStopEvent);
         }
         return NO_ERROR;
+
+    case SERVICE_CONTROL_SESSIONCHANGE: {
+        // A notification pass is tied to the user's logon session, so a fresh sign-in refreshes
+        // the bell once instead of polling in the background.
+        if (dwEventType != WTS_SESSION_LOGON || lpEventData == nullptr) return NO_ERROR;
+        const auto* notification = static_cast<const WTSSESSION_NOTIFICATION*>(lpEventData);
+        if (notification->dwSessionId != WTSGetActiveConsoleSessionId()) return NO_ERROR;
+
+        GameExplorer::PreloadWorker* worker = g_notificationWorker.load();
+        if (worker != nullptr) {
+            (void)worker->Request();
+        }
+        return NO_ERROR;
+    }
 
     case SERVICE_CONTROL_INTERROGATE:
         return NO_ERROR;
@@ -99,15 +146,54 @@ void LogMonitorError(DWORD error) {
 
 // Background service cache preload: executes fast SmartScan against database without blocking shell or UI
 void PreloadCache() {
-    auto& db = GameExplorer::Database::Instance();
-    if (!db.IsOpen()) {
-        db.Open(GameExplorer::Storage::GetDatabasePath());
+    (void)RunAsConsoleUser([] {
+        auto& db = GameExplorer::Database::Instance();
+        if (!db.IsOpen()) {
+            db.Open(GameExplorer::Storage::GetDatabasePath());
+        }
+        GameExplorer::StorefrontScanner::SmartScan(db);
+        const auto installedGames = db.GetAllGames();
+        const auto ownedGames = GameExplorer::ScanAllOwnedGamesDirect();
+        g_preloadedInstalledCount = installedGames.size();
+        g_preloadedOwnedCount = ownedGames.size();
+    });
+}
+
+void LogNotificationError(const std::wstring& message) {
+    OutputDebugStringW(message.c_str());
+}
+
+// One notification pass: check every installed edition for a newer build, then collect the
+// storefront news feeds and GamerPower. Both caches are written into the signed-in user's
+// environment so the studio reads exactly what this pass produced. Runs once at service start,
+// once per interactive logon, and whenever a client requests it - never on a timer.
+void RefreshNotifications() {
+    g_notificationRunning = true;
+    const bool ran = RunAsConsoleUser([] {
+        const GameExplorer::AppSettings settings = GameExplorer::SettingsManager::Load();
+        std::vector<GameExplorer::OwnedGame> games =
+            GameExplorer::FilterWindowsInstallableOwnedGames(GameExplorer::ScanAllOwnedGamesDirect(
+                settings.steamWebApiKey, settings.steamId64));
+
+        GameExplorer::GameUpdateReport report;
+        std::wstring error;
+        const GameExplorer::NotificationFeed feed = GameExplorer::CollectNotifications(
+            games, GameExplorer::NotificationSettingsFrom(settings), &report, &error);
+
+        (void)GameExplorer::SaveUpdateReport(report, GameExplorer::UpdateReportPath());
+        (void)GameExplorer::SaveNotificationFeed(feed, GameExplorer::NotificationFeedPath());
+        g_notificationCount = feed.items.size();
+
+        if (!error.empty()) {
+            LogNotificationError(std::wstring(Messages::kNotificationErrorPrefix) + error);
+        }
+    });
+
+    if (!ran) {
+        OutputDebugStringW(Messages::kNoConsoleUserWarning);
+        g_notificationCount = 0;
     }
-    GameExplorer::StorefrontScanner::SmartScan(db);
-    const auto installedGames = db.GetAllGames();
-    const auto ownedGames = GameExplorer::ScanAllOwnedGamesDirect();
-    g_preloadedInstalledCount = installedGames.size();
-    g_preloadedOwnedCount = ownedGames.size();
+    g_notificationRunning = false;
 }
 
 void LogPipeError(DWORD error) {
@@ -142,7 +228,8 @@ bool CompletePipeOperation(HANDLE pipe, OVERLAPPED& operation, BOOL completed, D
 }
 
 // Background thread that listens on \\.\pipe\GameExplorerService for commands from client apps.
-void NamedPipeServerThread(GameExplorer::PreloadWorker& preloadWorker) {
+void NamedPipeServerThread(GameExplorer::PreloadWorker& preloadWorker,
+                           GameExplorer::PreloadWorker& notificationWorker) {
     SECURITY_ATTRIBUTES sa{};
     sa.nLength = sizeof(sa);
     sa.bInheritHandle = FALSE;
@@ -210,6 +297,13 @@ void NamedPipeServerThread(GameExplorer::PreloadWorker& preloadWorker) {
                 } else if (request == Messages::kGetCountsCommand) {
                     response = Messages::kInstalledCountPrefix + std::to_string(g_preloadedInstalledCount.load()) +
                                Messages::kOwnedCountPrefix + std::to_string(g_preloadedOwnedCount.load());
+                } else if (request == Messages::kCheckUpdatesCommand) {
+                    // One-shot refresh: the client polls the status command until it reports idle.
+                    response = notificationWorker.Request() ? Messages::kCheckStartedResponse
+                                                            : Messages::kStoppingResponse;
+                } else if (request == Messages::kGetUpdatesStatusCommand) {
+                    response = g_notificationRunning.load() ? Messages::kRunningResponse
+                                                            : Messages::kIdleResponse;
                 }
 
                 DWORD bytesWritten = 0;
@@ -296,15 +390,25 @@ void DirectoryMonitorThread(GameExplorer::PreloadWorker& preloadWorker) {
 
 void RunWorkers() {
     GameExplorer::PreloadWorker preloadWorker(PreloadCache, LogPreloadError);
+    GameExplorer::PreloadWorker notificationWorker(RefreshNotifications,
+                                                   [](std::exception_ptr error) {
+                                                       g_notificationRunning = false;
+                                                       LogPreloadError(std::move(error));
+                                                   });
+    g_notificationWorker = &notificationWorker;
     (void)preloadWorker.Request();
-    std::thread pipeThread(NamedPipeServerThread, std::ref(preloadWorker));
+    (void)notificationWorker.Request();
+    std::thread pipeThread(NamedPipeServerThread, std::ref(preloadWorker),
+                           std::ref(notificationWorker));
     std::thread monitorThread(DirectoryMonitorThread, std::ref(preloadWorker));
 
     WaitForSingleObject(g_hStopEvent, INFINITE);
     g_running = false;
+    g_notificationWorker = nullptr;
     pipeThread.join();
     monitorThread.join();
     preloadWorker.Stop();
+    notificationWorker.Stop();
 }
 
 VOID WINAPI ServiceMain(DWORD /*argc*/, LPWSTR* /*argv*/) {

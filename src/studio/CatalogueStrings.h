@@ -6,6 +6,8 @@ namespace GameExplorer::CatalogueStrings {
 inline constexpr wchar_t kCatalogueWindowClass[] = L"GameExplorerCataloguePage";
 inline constexpr wchar_t kCatalogueListClass[] = L"GameExplorerCatalogueList";
 inline constexpr wchar_t kCatalogueDetailsClass[] = L"GameExplorerCatalogueDetails";
+inline constexpr wchar_t kCatalogueBellClass[] = L"GameExplorerCatalogueBell";
+inline constexpr wchar_t kCatalogueBellPanelClass[] = L"GameExplorerCatalogueBellPanel";
 
 // Action Buttons
 inline constexpr wchar_t kBtnPrevious[] = L"Previous";
@@ -51,17 +53,45 @@ inline constexpr wchar_t kSortDescending[] = L"Descending";
 // Details Pane
 inline constexpr wchar_t kDetailsPaneTitle[] = L"Game Details";
 inline constexpr wchar_t kDetailsEmptyPrompt[] =
-    L"Select a game from the catalogue to view owned editions, storefronts, and installation options.";
-inline constexpr wchar_t kDetailsOwnedEditions[] = L"Owned Editions & Stores";
+    L"Select a game from the catalogue to view its details, owned editions, and installation options.";
+inline constexpr wchar_t kDetailsAbout[] = L"About this game";
+inline constexpr wchar_t kDetailsDetails[] = L"Details";
+inline constexpr wchar_t kDetailsOwnedEditions[] = L"Owned editions & stores";
 inline constexpr wchar_t kDetailsDeveloper[] = L"Developer:";
 inline constexpr wchar_t kDetailsPublisher[] = L"Publisher:";
-inline constexpr wchar_t kDetailsReleaseDate[] = L"Release Date:";
-inline constexpr wchar_t kDetailsPlaytime[] = L"Total Playtime:";
+inline constexpr wchar_t kDetailsReleaseDate[] = L"Release date:";
+inline constexpr wchar_t kDetailsPlaytime[] = L"Total playtime:";
+inline constexpr wchar_t kDetailsLastPlayed[] = L"Last played:";
+inline constexpr wchar_t kDetailsInstallSize[] = L"Install size:";
+inline constexpr wchar_t kDetailsGenres[] = L"Genres:";
+inline constexpr wchar_t kDetailsTags[] = L"Tags:";
+inline constexpr wchar_t kDetailsRating[] = L"Rating:";
 inline constexpr wchar_t kDetailsStateInstalled[] = L"Installed on this PC";
 inline constexpr wchar_t kDetailsStateAvailable[] = L"Available to install";
-inline constexpr wchar_t kDetailsInstallFrom[] = L"Install via ";
 inline constexpr wchar_t kDetailsOpenStore[] = L"Store page";
 inline constexpr wchar_t kDetailsMultiEditionNotice[] =
-    L"Multiple editions owned. Choose your preferred storefront or edition below:";
+    L"Multiple editions owned. The Install button asks which storefront to use.";
+inline constexpr wchar_t kDetailsUpdateAvailable[] = L"Update available";
+inline constexpr wchar_t kDetailsUpToDate[] = L"Up to date";
+inline constexpr wchar_t kDetailsUpdateNotSupported[] = L"No update check available";
+inline constexpr wchar_t kDetailsUpdateFailed[] = L"Update check failed";
+inline constexpr wchar_t kDetailsUpdateUnknown[] = L"Update status unknown";
+inline constexpr wchar_t kDetailsBuild[] = L"Build ";
+inline constexpr wchar_t kDetailsBuildArrow[] = L" \u2192 ";
+inline constexpr wchar_t kDetailsNotInstalled[] = L"Not installed";
+
+// Notification bell
+inline constexpr wchar_t kBellPanelTitle[] = L"Notifications";
+inline constexpr wchar_t kBellMarkAllRead[] = L"Mark all read";
+inline constexpr wchar_t kBellEmpty[] =
+    L"No alerts yet. The background service refreshes update, news and giveaway alerts once at "
+    L"sign-in \u2014 use Configuration \u203A Check for alerts now to refresh on demand.";
+inline constexpr wchar_t kBellLastRefresh[] = L"Last refresh: ";
+inline constexpr wchar_t kBellNoRefresh[] =
+    L"The background service has not refreshed alerts yet.";
+inline constexpr wchar_t kBellUnreadSuffix[] = L" unread";
+inline constexpr wchar_t kBellAttribution[] = L"Free game and deal data powered by ";
+inline constexpr wchar_t kBellAttributionLink[] = L"GamerPower";
+inline constexpr wchar_t kGamerPowerUrl[] = L"https://www.gamerpower.com";
 
 } // namespace GameExplorer::CatalogueStrings

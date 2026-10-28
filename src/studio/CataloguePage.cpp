@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <cstdio>
 #include <cstring>
+#include <ctime>
 #include <cwchar>
 #include <functional>
 #include <memory>
@@ -15,6 +16,8 @@
 #include <vector>
 
 #include "GameExplorerCore/DarkMode.h"
+#include "GameExplorerCore/GameUpdates.h"
+#include "GameExplorerCore/Notifications.h"
 #include "GameExplorerCore/OwnedGames.h"
 #include "GameExplorerCore/Settings.h"
 #include "GameExplorerCore/Storage.h"
@@ -37,6 +40,8 @@ namespace {
 constexpr const wchar_t* CATALOGUE_WINDOW_CLASS = Strings::kCatalogueWindowClass;
 constexpr const wchar_t* CATALOGUE_LIST_CLASS = Strings::kCatalogueListClass;
 constexpr const wchar_t* CATALOGUE_DETAILS_CLASS = Strings::kCatalogueDetailsClass;
+constexpr const wchar_t* CATALOGUE_BELL_CLASS = Strings::kCatalogueBellClass;
+constexpr const wchar_t* CATALOGUE_BELL_PANEL_CLASS = Strings::kCatalogueBellPanelClass;
 
 constexpr int IDC_CAT_SEARCH = 3001;
 constexpr int IDC_CAT_STORE = 3002;
@@ -84,9 +89,51 @@ RECT g_detailsCardRect{};
 struct DetailButtonAction {
     RECT rect;
     size_t sourceIndex;
-    bool isStorePage;
 };
 std::vector<DetailButtonAction> g_detailButtons;
+
+// Details pane scroll state. The pane lays out every section from the top and offsets by
+// `g_detailsScroll`, so the content height it reports after a pass bounds the next one.
+int g_detailsScroll = 0;
+int g_detailsContentHeight = 0;
+bool g_detailsDragging = false;
+int g_detailsDragOffset = 0;
+bool g_detailsBarHover = false;
+
+// Last update pass cached by the background service. The pane only reads it; it never runs a
+// check of its own.
+GameUpdateReport g_updateReport;
+
+// Notification bell. The feed is a cache the background service writes once at sign-in (or on
+// demand from Configuration); this page only reads it, remembers which ids the user has seen and
+// writes that seen-state back.
+NotificationFeed g_notifyFeed;
+std::vector<std::wstring> g_seenIds;
+HWND g_hwndBell = nullptr;
+HWND g_hwndBellPanel = nullptr;
+bool g_bellHover = false;
+bool g_notifyPanelOpen = false;
+RECT g_bellPanelRect{};   // panel geometry in page coordinates, used for outside-click closing
+int g_notifyScroll = 0;
+int g_notifyContentHeight = 0;
+bool g_notifyBarHover = false;
+bool g_notifyBarDragging = false;
+int g_notifyDragOffset = 0;
+int g_notifyHotRow = -1;  // row under the pointer, -1 when none
+
+// One painted notification row. Rects are in panel client coordinates and are rebuilt on every
+// paint, exactly like g_detailButtons in the details pane.
+struct NotificationRow {
+    RECT rect;
+    RECT title;
+    RECT meta;
+    RECT body;
+    size_t index;
+};
+std::vector<NotificationRow> g_notifyRows;
+RECT g_notifyMarkReadRect{};
+RECT g_notifyCloseRect{};
+RECT g_notifyAttribLinkRect{};
 
 HWND g_hwndSearch = nullptr;
 HWND g_hwndStore = nullptr;
@@ -708,6 +755,11 @@ void OpenSourceStorePage(HWND hwnd, const StorefrontSource& src) {
     }
 }
 
+void OpenExternalUrl(const std::wstring& url) {
+    if (url.empty()) return;
+    ShellExecuteW(nullptr, L"open", url.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+}
+
 void OpenStorePage(HWND hwnd) {
     if (g_selected < 0 || g_selected >= static_cast<int>(g_page.items.size())) return;
     const OwnedGame& game = g_page.items[static_cast<size_t>(g_selected)];
@@ -945,6 +997,278 @@ void PaintCatalogue(HWND hwnd) {
     EndPaint(hwnd, &ps);
 }
 
+// ---- Details pane layout ----------------------------------------------------
+//
+// The pane is a single scrolling column: title, storefront list, metadata, synopsis and one card
+// per owned edition. `DrawDetailsContent` walks that column once to measure and once to paint, so
+// the wheel and the scrollbar always agree with what was actually drawn.
+
+int MeasureWrappedHeight(HDC dc, const std::wstring& text, int width, UINT extraFlags) {
+    if (text.empty() || width <= 0) return 0;
+    RECT rect{ 0, 0, width, 0 };
+    DrawTextW(dc, text.c_str(), static_cast<int>(text.size()), &rect,
+              DT_CALCRECT | DT_WORDBREAK | DT_NOPREFIX | extraFlags);
+    return rect.bottom - rect.top;
+}
+
+void DrawWrappedText(HDC dc, const std::wstring& text, const RECT& rect, COLORREF colour,
+                     UINT extraFlags) {
+    SetTextColor(dc, colour);
+    RECT target = rect;
+    DrawTextW(dc, text.c_str(), static_cast<int>(text.size()), &target,
+              DT_WORDBREAK | DT_NOPREFIX | extraFlags);
+}
+
+std::wstring JoinSources(const OwnedGame& game) {
+    std::wstring joined;
+    for (const auto& source : game.sources) {
+        if (!joined.empty()) joined += L" \u00B7 ";
+        joined += source.storeName.empty() ? source.storeKey : source.storeName;
+    }
+    return joined.empty() ? game.storeName : joined;
+}
+
+COLORREF UpdateStateColour(GameUpdateState state) {
+    switch (state) {
+    case GameUpdateState::UpdateAvailable:
+        return g_isDarkMode ? RGB(255, 176, 64) : RGB(168, 88, 0);
+    case GameUpdateState::Failed:
+        return g_isDarkMode ? RGB(255, 120, 120) : RGB(176, 0, 32);
+    case GameUpdateState::UpToDate:
+        return g_palette.accent;
+    case GameUpdateState::NotSupported:
+    case GameUpdateState::Unknown:
+        break;
+    }
+    return g_palette.textSecondary;
+}
+
+// Builds the one-line update verdict for a storefront edition. `colour` receives the token to
+// paint it with; the caller keeps the build ids in the same line so the evidence is visible.
+std::wstring DescribeUpdate(const StorefrontSource& source, COLORREF& colour) {
+    if (!source.installed) {
+        colour = g_palette.textSecondary;
+        return Strings::kDetailsNotInstalled;
+    }
+
+    const GameUpdateRecord* record =
+        FindUpdateRecord(g_updateReport, source.storeKey, source.productId);
+    if (record == nullptr) {
+        colour = g_palette.textSecondary;
+        return Strings::kDetailsUpdateUnknown;
+    }
+
+    colour = UpdateStateColour(record->info.state);
+    std::wstring line;
+    switch (record->info.state) {
+    case GameUpdateState::UpdateAvailable:
+        line = Strings::kDetailsUpdateAvailable;
+        break;
+    case GameUpdateState::UpToDate:
+        line = Strings::kDetailsUpToDate;
+        break;
+    case GameUpdateState::NotSupported:
+        line = Strings::kDetailsUpdateNotSupported;
+        break;
+    case GameUpdateState::Failed:
+        line = Strings::kDetailsUpdateFailed;
+        break;
+    case GameUpdateState::Unknown:
+        return Strings::kDetailsUpdateUnknown;
+    }
+
+    const std::wstring& installed = record->info.installedBuildId;
+    const std::wstring& latest = record->info.latestBuildId;
+    if (!installed.empty()) {
+        line += L" \u00B7 " + std::wstring(Strings::kDetailsBuild) + installed;
+        if (record->info.state == GameUpdateState::UpdateAvailable && !latest.empty() &&
+            latest != installed) {
+            line += Strings::kDetailsBuildArrow + latest;
+        }
+    }
+    return line;
+}
+
+// Returns the total content height of the details column, measured from its top.
+int DrawDetailsContent(HDC dc, const RECT& client, bool draw, int scroll) {
+    const auto& game = g_page.items[static_cast<size_t>(g_selected)];
+    const int left = client.left + 16;
+    const int right = client.right - 16 - ThemeScroll::kBarWidth;
+    const int contentWidth = right - left;
+    if (contentWidth <= 0) return 0;
+
+    const int originTop = client.top + 16;
+    int y = originTop - scroll;
+
+    auto setFont = [&](HFONT font) {
+        if (draw) SelectObject(dc, font);
+    };
+    auto drawLine = [&](const std::wstring& text, int lineY, int height, COLORREF colour,
+                        UINT flags) {
+        if (!draw) return;
+        RECT rect{ left, lineY, right, lineY + height };
+        SetTextColor(dc, colour);
+        DrawTextW(dc, text.c_str(), static_cast<int>(text.size()), &rect,
+                  flags | DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
+    };
+    auto drawParagraph = [&](const std::wstring& text, int blockY, int height, COLORREF colour) {
+        if (!draw) return;
+        DrawWrappedText(dc, text, RECT{ left, blockY, right, blockY + height }, colour, 0);
+    };
+
+    // Title (wraps when a long name needs a second line) and the storefront summary.
+    setFont(g_hFontTitle);
+    const int titleHeight = MeasureWrappedHeight(dc, game.title, contentWidth, 0);
+    drawParagraph(game.title, y, titleHeight, g_palette.textPrimary);
+    y += titleHeight + 2;
+
+    setFont(g_hFont);
+    drawLine(JoinSources(game), y, 20, g_palette.textSecondary, DT_LEFT);
+    y += 24;
+
+    // Metadata block: only rows the storefront actually reported.
+    struct MetaRow {
+        const wchar_t* label;
+        std::wstring value;
+    };
+    std::vector<MetaRow> meta;
+    if (!game.releaseDate.empty() || game.releaseYear > 0) {
+        meta.push_back({ Strings::kDetailsReleaseDate,
+                         game.releaseDate.empty() ? std::to_wstring(game.releaseYear)
+                                                  : game.releaseDate });
+    }
+    if (!game.developer.empty()) meta.push_back({ Strings::kDetailsDeveloper, game.developer });
+    if (!game.publisher.empty()) meta.push_back({ Strings::kDetailsPublisher, game.publisher });
+    if (!game.genres.empty()) meta.push_back({ Strings::kDetailsGenres, game.genres });
+    if (!game.tags.empty()) meta.push_back({ Strings::kDetailsTags, game.tags });
+    if (!game.rating.empty()) meta.push_back({ Strings::kDetailsRating, game.rating });
+    if (game.playtimeMinutes > 0) meta.push_back({ Strings::kDetailsPlaytime,
+                                                   FormatPlaytime(game.playtimeMinutes) });
+    if (game.lastPlayedTimestamp > 0) {
+        meta.push_back({ Strings::kDetailsLastPlayed, FormatLastPlayed(game.lastPlayedTimestamp) });
+    }
+    if (game.installSizeBytes > 0) {
+        meta.push_back({ Strings::kDetailsInstallSize, FormatSize(game.installSizeBytes) });
+    }
+
+    if (!meta.empty()) {
+        constexpr int kLabelWidth = 98;
+        const int valueWidth = contentWidth - kLabelWidth;
+        for (const MetaRow& row : meta) {
+            setFont(g_hFontBold);
+            const int labelHeight = MeasureWrappedHeight(dc, row.label, kLabelWidth, 0);
+            setFont(g_hFont);
+            const int valueHeight = MeasureWrappedHeight(dc, row.value, valueWidth, 0);
+            const int rowHeight = (std::max)(labelHeight, valueHeight);
+            if (draw) {
+                RECT labelRect{ left, y, left + kLabelWidth - 8, y + rowHeight };
+                SelectObject(dc, g_hFontBold);
+                SetTextColor(dc, g_palette.textSecondary);
+                DrawTextW(dc, row.label, -1, &labelRect,
+                          DT_LEFT | DT_TOP | DT_NOPREFIX | DT_END_ELLIPSIS);
+                RECT valueRect{ left + kLabelWidth, y, right, y + rowHeight };
+                SelectObject(dc, g_hFont);
+                SetTextColor(dc, g_palette.textPrimary);
+                DrawTextW(dc, row.value.c_str(), static_cast<int>(row.value.size()), &valueRect,
+                          DT_LEFT | DT_TOP | DT_WORDBREAK | DT_NOPREFIX);
+            }
+            y += rowHeight + 4;
+        }
+        y += 4;
+    }
+
+    // Synopsis. Storefront descriptions sometimes carry markup; the formatter strips it so the
+    // pane shows readable prose rather than raw tags.
+    const std::wstring synopsis = StripSynopsisMarkup(game.synopsis);
+    if (!synopsis.empty()) {
+        setFont(g_hFontBold);
+        drawLine(Strings::kDetailsAbout, y, 22, g_palette.textPrimary, DT_LEFT);
+        y += 24;
+        setFont(g_hFont);
+        const int height = MeasureWrappedHeight(dc, synopsis, contentWidth, 0);
+        drawParagraph(synopsis, y, height, g_palette.textSecondary);
+        y += height + 16;
+    }
+
+    // Owned editions. Playing is the Games view's job and installing is the footer button's job,
+    // so each card is informational plus one Store page link.
+    setFont(g_hFontBold);
+    const std::wstring editionsTitle = std::wstring(Strings::kDetailsOwnedEditions) + L" (" +
+                                       std::to_wstring(game.sources.size()) + L")";
+    drawLine(editionsTitle, y, 22, g_palette.textPrimary, DT_LEFT);
+    y += 26;
+
+    if (game.sources.size() > 1) {
+        setFont(g_hFont);
+        const int height = MeasureWrappedHeight(dc, Strings::kDetailsMultiEditionNotice,
+                                                contentWidth, 0);
+        drawParagraph(Strings::kDetailsMultiEditionNotice, y, height, g_palette.textSecondary);
+        y += height + 8;
+    }
+
+    for (size_t i = 0; i < game.sources.size(); ++i) {
+        const StorefrontSource& source = game.sources[i];
+        constexpr int kCardHeight = 86;
+        const RECT card{ left, y, right, y + kCardHeight };
+        if (draw) {
+            FillRect(dc, &card, g_hFieldBrush);
+        }
+
+        const bool hasStorePage = !source.storePageUrl.empty();
+        const RECT storeRect{ card.right - 104, card.top + 8, card.right - 8, card.top + 34 };
+        const int titleWidth = contentWidth - 20 - (hasStorePage ? 110 : 0);
+
+        std::wstring storeLabel = source.storeName.empty() ? source.storeKey : source.storeName;
+        if (!source.editionLabel.empty()) storeLabel += L" \u2013 " + source.editionLabel;
+        setFont(g_hFontBold);
+        const int labelHeight = MeasureWrappedHeight(dc, storeLabel, titleWidth, 0);
+        if (draw) {
+            RECT labelRect{ card.left + 10, card.top + 8, card.left + 10 + titleWidth,
+                            card.top + 8 + labelHeight };
+            SelectObject(dc, g_hFontBold);
+            SetTextColor(dc, g_palette.textPrimary);
+            DrawTextW(dc, storeLabel.c_str(), static_cast<int>(storeLabel.size()), &labelRect,
+                      DT_LEFT | DT_TOP | DT_WORDBREAK | DT_NOPREFIX);
+        }
+
+        if (hasStorePage) {
+            if (draw) {
+                HBRUSH storeBrush = CreateSolidBrush(g_palette.cardBg);
+                FillRect(dc, &storeRect, storeBrush);
+                DeleteObject(storeBrush);
+                SetTextColor(dc, g_palette.textSecondary);
+                SelectObject(dc, g_hFont);
+                RECT labelRect = storeRect;
+                DrawTextW(dc, Strings::kDetailsOpenStore, -1, &labelRect,
+                          DT_CENTER | DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+            }
+            g_detailButtons.push_back({ storeRect, i });
+        }
+
+        setFont(g_hFont);
+        const std::wstring stateText = source.installed ? Strings::kDetailsStateInstalled
+                                                        : Strings::kDetailsStateAvailable;
+        drawLine(stateText, card.top + 40, 18,
+                 source.installed ? g_palette.accent : g_palette.textSecondary, DT_LEFT);
+
+        COLORREF updateColour = g_palette.textSecondary;
+        const std::wstring updateText = DescribeUpdate(source, updateColour);
+        drawLine(updateText, card.top + 60, 18, updateColour, DT_LEFT);
+
+        y += kCardHeight + 8;
+    }
+
+    return y + scroll - client.top + 16;
+}
+
+void ClampDetailsScroll() {
+    RECT client{};
+    if (g_hwndDetails != nullptr) GetClientRect(g_hwndDetails, &client);
+    const int height = client.bottom - client.top;
+    g_detailsScroll = (std::max)(0, (std::min)(g_detailsScroll,
+                                              ThemeScroll::MaxScroll(g_detailsContentHeight, height)));
+}
+
 void PaintDetails(HWND hwnd) {
     PAINTSTRUCT ps{};
     HDC hdc = BeginPaint(hwnd, &ps);
@@ -968,94 +1292,25 @@ void PaintDetails(HWND hwnd) {
 
     g_detailButtons.clear();
 
-    const bool hasSelection = (g_selected >= 0 && g_selected < static_cast<int>(g_page.items.size()));
+    const bool hasSelection =
+        (g_selected >= 0 && g_selected < static_cast<int>(g_page.items.size()));
     if (!hasSelection) {
+        g_detailsContentHeight = 0;
+        g_detailsScroll = 0;
         SelectObject(memDC, g_hFont);
         RECT promptRect{ client.left + 20, client.top + 50, client.right - 20, client.bottom - 50 };
         SetTextColor(memDC, g_palette.textSecondary);
         DrawTextW(memDC, Strings::kDetailsEmptyPrompt, -1, &promptRect,
                   DT_CENTER | DT_WORDBREAK | DT_NOPREFIX);
     } else {
-        const auto& game = g_page.items[static_cast<size_t>(g_selected)];
+        g_detailsContentHeight = DrawDetailsContent(memDC, client, false, 0);
+        ClampDetailsScroll();
+        DrawDetailsContent(memDC, client, true, g_detailsScroll);
 
-        int y = client.top + 14;
-        SelectObject(memDC, g_hFontTitle);
-        const RECT titleRect{ client.left + 14, y, client.right - 14, y + 26 };
-        DrawTextLine(memDC, game.title, titleRect, g_palette.textPrimary);
-        y += 30;
-
-        SelectObject(memDC, g_hFont);
-        if (game.releaseYear > 0) {
-            const std::wstring rel = std::wstring(Strings::kDetailsReleaseDate) + L" " + std::to_wstring(game.releaseYear);
-            DrawTextLine(memDC, rel, { client.left + 14, y, client.right - 14, y + 20 }, g_palette.textSecondary);
-            y += 20;
-        }
-
-        if (game.playtimeMinutes > 0) {
-            const std::wstring pt = std::wstring(Strings::kDetailsPlaytime) + L" " +
-                std::to_wstring(game.playtimeMinutes / 60) + L"h " + std::to_wstring(game.playtimeMinutes % 60) + L"m";
-            DrawTextLine(memDC, pt, { client.left + 14, y, client.right - 14, y + 20 }, g_palette.textSecondary);
-            y += 20;
-        }
-
-        y += 8;
-        SelectObject(memDC, g_hFontBold);
-        const std::wstring secTitle = std::wstring(Strings::kDetailsOwnedEditions) +
-            L" (" + std::to_wstring(game.sources.size()) + L")";
-        DrawTextLine(memDC, secTitle, { client.left + 14, y, client.right - 14, y + 22 }, g_palette.textPrimary);
-        y += 24;
-
-        if (game.sources.size() > 1) {
-            SelectObject(memDC, g_hFont);
-            RECT noticeRect{ client.left + 14, y, client.right - 14, y + 36 };
-            SetTextColor(memDC, g_palette.textSecondary);
-            DrawTextW(memDC, Strings::kDetailsMultiEditionNotice, -1, &noticeRect, DT_LEFT | DT_WORDBREAK | DT_NOPREFIX);
-            y += 38;
-        }
-
-        for (size_t i = 0; i < game.sources.size(); ++i) {
-            const auto& src = game.sources[i];
-            const int cardTop = y;
-            const int cardBottom = cardTop + 62;
-            if (cardBottom > client.bottom - 8) break;
-
-            const RECT cardRect{ client.left + 14, cardTop, client.right - 14, cardBottom };
-            FillRect(memDC, &cardRect, g_hFieldBrush);
-
-            SelectObject(memDC, g_hFontBold);
-            std::wstring storeLabel = src.storeName;
-            if (!src.editionLabel.empty()) {
-                storeLabel += L" \u2013 " + src.editionLabel;
-            }
-            DrawTextLine(memDC, storeLabel, { cardRect.left + 10, cardTop + 5, cardRect.right - 80, cardTop + 22 },
-                         g_palette.textPrimary);
-
-            SelectObject(memDC, g_hFont);
-            const std::wstring statusStr = src.installed ? Strings::kDetailsStateInstalled : Strings::kDetailsStateAvailable;
-            const COLORREF statusColor = src.installed ? g_palette.accent : g_palette.textSecondary;
-            DrawTextLine(memDC, statusStr, { cardRect.right - 120, cardTop + 5, cardRect.right - 10, cardTop + 22 },
-                         statusColor, DT_RIGHT);
-
-            const int btnY = cardTop + 28;
-            const RECT installRect{ cardRect.left + 10, btnY, cardRect.left + 130, btnY + 26 };
-            const RECT storeRect{ cardRect.left + 138, btnY, cardRect.left + 228, btnY + 26 };
-
-            g_detailButtons.push_back({ installRect, i, false });
-            g_detailButtons.push_back({ storeRect, i, true });
-
-            HBRUSH btnBrush = CreateSolidBrush(src.installed ? g_palette.cardBg : g_palette.accent);
-            FillRect(memDC, &installRect, btnBrush);
-            DeleteObject(btnBrush);
-
-            HBRUSH storeBrush = CreateSolidBrush(g_palette.cardBg);
-            FillRect(memDC, &storeRect, storeBrush);
-            DeleteObject(storeBrush);
-
-            const std::wstring installLabel = src.installed ? L"Play" : (std::wstring(Strings::kDetailsInstallFrom) + src.storeName);
-            DrawTextLine(memDC, installLabel, installRect, src.installed ? g_palette.textPrimary : g_palette.accentText, DT_CENTER);
-            DrawTextLine(memDC, Strings::kDetailsOpenStore, storeRect, g_palette.textSecondary, DT_CENTER);
-
-            y = cardBottom + 8;
+        const ThemeScroll::Metrics bar =
+            ThemeScroll::Compute(client, g_detailsContentHeight, height, g_detailsScroll);
+        if (bar.needed) {
+            ThemeScroll::Paint(memDC, bar, g_palette, g_detailsBarHover, g_detailsDragging);
         }
     }
 
@@ -1066,25 +1321,97 @@ void PaintDetails(HWND hwnd) {
     EndPaint(hwnd, &ps);
 }
 
+// Details-pane scroll geometry, shared by paint, wheel and drag hit testing.
+ThemeScroll::Metrics DetailsBarMetrics(const RECT& client) {
+    return ThemeScroll::Compute(client, g_detailsContentHeight, client.bottom - client.top,
+                                g_detailsScroll);
+}
+
 LRESULT CALLBACK CatalogueDetailsProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
     switch (uMsg) {
     case WM_PAINT:
         PaintDetails(hwnd);
         return 0;
 
+    case WM_SIZE:
+        ClampDetailsScroll();
+        InvalidateRect(hwnd, nullptr, TRUE);
+        return 0;
+
+    case WM_MOUSEWHEEL: {
+        RECT client{};
+        GetClientRect(hwnd, &client);
+        const int pageHeight = client.bottom - client.top;
+        if (ThemeScroll::MaxScroll(g_detailsContentHeight, pageHeight) <= 0) return 0;
+        const int delta = GET_WHEEL_DELTA_WPARAM(wParam);
+        g_detailsScroll -= (delta / WHEEL_DELTA) * 60;
+        ClampDetailsScroll();
+        InvalidateRect(hwnd, nullptr, TRUE);
+        return 0;
+    }
+
+    case WM_LBUTTONDOWN: {
+        POINT pt{ GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam) };
+        RECT client{};
+        GetClientRect(hwnd, &client);
+        const ThemeScroll::Metrics bar = DetailsBarMetrics(client);
+        if (bar.needed && pt.x >= client.right - ThemeScroll::kBarWidth) {
+            if (PtInRect(&bar.thumb, pt)) {
+                g_detailsDragging = true;
+                g_detailsDragOffset = pt.y - bar.thumb.top;
+                SetCapture(hwnd);
+            } else {
+                // Clicking the rail pages the content toward the pointer.
+                g_detailsScroll +=
+                    (pt.y < bar.thumb.top) ? -(client.bottom - client.top) : (client.bottom - client.top);
+                ClampDetailsScroll();
+                InvalidateRect(hwnd, nullptr, TRUE);
+            }
+        }
+        return 0;
+    }
+
+    case WM_MOUSEMOVE: {
+        POINT pt{ GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam) };
+        RECT client{};
+        GetClientRect(hwnd, &client);
+        if (g_detailsDragging) {
+            const ThemeScroll::Metrics dragged = DetailsBarMetrics(client);
+            g_detailsScroll = ThemeScroll::PositionForThumbDrag(
+                dragged, pt.y, g_detailsDragOffset, g_detailsContentHeight,
+                client.bottom - client.top);
+            ClampDetailsScroll();
+            InvalidateRect(hwnd, nullptr, TRUE);
+        } else {
+            const ThemeScroll::Metrics bar = DetailsBarMetrics(client);
+            const bool hover = bar.needed && pt.x >= client.right - ThemeScroll::kBarWidth;
+            if (hover) {
+                TRACKMOUSEEVENT track{ sizeof(TRACKMOUSEEVENT), TME_LEAVE, hwnd, 0 };
+                TrackMouseEvent(&track);
+            }
+            if (hover != g_detailsBarHover) {
+                g_detailsBarHover = hover;
+                InvalidateRect(hwnd, nullptr, TRUE);
+            }
+        }
+        return 0;
+    }
+
     case WM_LBUTTONUP: {
+        if (g_detailsDragging) {
+            g_detailsDragging = false;
+            ReleaseCapture();
+            InvalidateRect(hwnd, nullptr, TRUE);
+            return 0;
+        }
+
         POINT pt{ GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam) };
         if (g_selected >= 0 && g_selected < static_cast<int>(g_page.items.size())) {
             const auto& game = g_page.items[static_cast<size_t>(g_selected)];
             for (const auto& btn : g_detailButtons) {
                 if (PtInRect(&btn.rect, pt)) {
                     if (btn.sourceIndex < game.sources.size()) {
-                        const auto& src = game.sources[btn.sourceIndex];
-                        if (btn.isStorePage) {
-                            OpenSourceStorePage(GetParent(hwnd), src);
-                        } else {
-                            InstallSource(GetParent(hwnd), src);
-                        }
+                        OpenSourceStorePage(GetParent(hwnd), game.sources[btn.sourceIndex]);
                     }
                     return 0;
                 }
@@ -1092,6 +1419,13 @@ LRESULT CALLBACK CatalogueDetailsProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARA
         }
         return 0;
     }
+
+    case WM_MOUSELEAVE:
+        if (g_detailsBarHover) {
+            g_detailsBarHover = false;
+            InvalidateRect(hwnd, nullptr, TRUE);
+        }
+        return 0;
 
     case WM_SETCURSOR: {
         POINT pt{};
@@ -1108,6 +1442,748 @@ LRESULT CALLBACK CatalogueDetailsProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARA
 
     case WM_ERASEBKGND:
         return 1;
+    }
+    return DefWindowProcW(hwnd, uMsg, wParam, lParam);
+}
+
+// ---- Notification bell ------------------------------------------------------
+//
+// The bell is a small custom window in the page header and the panel is a themed child window
+// that overlays the page while open. Both paint from the cached feed only, so opening the bell
+// never blocks on the network. Item clicks and "Mark all read" write the seen-id file back.
+
+constexpr int kBellButtonSize = 40;
+constexpr int kBellPanelWidth = 420;
+constexpr int kBellPanelGap = 8;
+constexpr int kBellHeaderHeight = 48;
+constexpr int kBellFooterHeight = 52;
+constexpr int kBellPanelMinHeight = 240;
+constexpr int kBellPanelMaxHeight = 560;
+constexpr int kNotifyPadX = 14;
+constexpr int kNotifyPadY = 12;
+constexpr int kNotifyStripe = 3;
+
+int UnreadNotificationCount() {
+    int count = 0;
+    for (const auto& item : g_notifyFeed.items) {
+        if (!IsNotificationSeen(g_seenIds, item.id)) ++count;
+    }
+    return count;
+}
+
+std::wstring FormatRelativeTime(int64_t unixSeconds) {
+    if (unixSeconds <= 0) return {};
+    int64_t delta = static_cast<int64_t>(std::time(nullptr)) - unixSeconds;
+    if (delta < 0) delta = 0;
+    if (delta < 60) return L"just now";
+    if (delta < 3600) return std::to_wstring(delta / 60) + L" min ago";
+    if (delta < 86400) return std::to_wstring(delta / 3600) + L" h ago";
+    if (delta < 86400 * 30) return std::to_wstring(delta / 86400) + L" d ago";
+
+    // Older alerts read better as an absolute date than as "63 d ago".
+    std::tm parts{};
+    const time_t stamp = static_cast<time_t>(unixSeconds);
+    if (localtime_s(&parts, &stamp) != 0) return {};
+    wchar_t buffer[32]{};
+    if (wcsftime(buffer, _countof(buffer), L"%Y-%m-%d", &parts) == 0) return {};
+    return buffer;
+}
+
+// ISO-8601 UTC from the service ("2026-10-28T09:41:07Z") rendered as a compact UTC stamp.
+std::wstring FormatRefreshStamp(const std::wstring& iso) {
+    std::wstring stamp = iso;
+    const size_t marker = stamp.find(L'T');
+    if (marker != std::wstring::npos) stamp[marker] = L' ';
+    if (!stamp.empty() && stamp.back() == L'Z') stamp.pop_back();
+    return stamp + L" UTC";
+}
+
+void ReloadNotificationFeed() {
+    NotificationFeed feed;
+    (void)LoadNotificationFeed(feed, NotificationFeedPath());
+    g_notifyFeed = std::move(feed);
+
+    std::vector<std::wstring> seen;
+    (void)LoadSeenIds(seen, NotificationSeenPath());
+    g_seenIds = std::move(seen);
+
+    if (g_hwndBell != nullptr) InvalidateRect(g_hwndBell, nullptr, TRUE);
+    if (g_notifyPanelOpen && g_hwndBellPanel != nullptr) {
+        InvalidateRect(g_hwndBellPanel, nullptr, TRUE);
+    }
+}
+
+void MarkNotificationSeen(const std::wstring& id) {
+    if (id.empty() || IsNotificationSeen(g_seenIds, id)) return;
+    g_seenIds.push_back(id);
+    (void)SaveSeenIds(g_seenIds, NotificationSeenPath());
+    if (g_hwndBell != nullptr) InvalidateRect(g_hwndBell, nullptr, TRUE);
+    if (g_notifyPanelOpen && g_hwndBellPanel != nullptr) {
+        InvalidateRect(g_hwndBellPanel, nullptr, TRUE);
+    }
+}
+
+void MarkAllNotificationsSeen() {
+    bool changed = false;
+    for (const auto& item : g_notifyFeed.items) {
+        if (IsNotificationSeen(g_seenIds, item.id)) continue;
+        g_seenIds.push_back(item.id);
+        changed = true;
+    }
+    if (changed) (void)SaveSeenIds(g_seenIds, NotificationSeenPath());
+    if (g_hwndBell != nullptr) InvalidateRect(g_hwndBell, nullptr, TRUE);
+    if (g_hwndBellPanel != nullptr) InvalidateRect(g_hwndBellPanel, nullptr, TRUE);
+}
+
+COLORREF NotificationKindColour(NotificationKind kind) {
+    switch (kind) {
+    case NotificationKind::GameUpdate:
+    case NotificationKind::FreeGame:
+        return g_palette.accent;
+    case NotificationKind::News:
+    case NotificationKind::Promotion:
+        break;
+    }
+    return g_palette.textSecondary;
+}
+
+RECT NotificationContentRect(const RECT& client) {
+    return RECT{ client.left, client.top + kBellHeaderHeight, client.right,
+                 client.bottom - kBellFooterHeight };
+}
+
+void ClampNotificationScroll() {
+    RECT client{};
+    if (g_hwndBellPanel != nullptr) GetClientRect(g_hwndBellPanel, &client);
+    const RECT content = NotificationContentRect(client);
+    g_notifyScroll = (std::max)(0, (std::min)(g_notifyScroll,
+                                              ThemeScroll::MaxScroll(g_notifyContentHeight,
+                                                                     content.bottom - content.top)));
+}
+
+ThemeScroll::Metrics NotificationBarMetrics(const RECT& client) {
+    const RECT content = NotificationContentRect(client);
+    return ThemeScroll::Compute(content, g_notifyContentHeight, content.bottom - content.top,
+                                g_notifyScroll);
+}
+
+// Measures (draw == false) or paints (draw == true) every alert row and returns the total content
+// height. Hit rectangles are only recorded on the paint pass because they need the live scroll
+// offset.
+int LayoutNotificationRows(HDC dc, const RECT& content, bool draw, int scroll) {
+    if (draw) g_notifyRows.clear();
+    if (g_notifyFeed.items.empty()) return 0;
+
+    const int left = content.left + kNotifyPadX;
+    const int right = content.right - kNotifyPadX - ThemeScroll::kBarWidth;
+    if (right <= left) return 0;
+
+    TEXTMETRICW metrics{};
+    SelectObject(dc, g_hFont);
+    GetTextMetricsW(dc, &metrics);
+    const int lineHeight = metrics.tmHeight + metrics.tmExternalLeading;
+    const int textWidth = right - left;
+
+    int y = 0;
+    for (size_t i = 0; i < g_notifyFeed.items.size(); ++i) {
+        const NotificationItem& item = g_notifyFeed.items[i];
+        const bool unread = !IsNotificationSeen(g_seenIds, item.id);
+
+        SelectObject(dc, g_hFontBold);
+        RECT titleCalc{ 0, 0, textWidth, 0 };
+        DrawTextW(dc, item.title.c_str(), static_cast<int>(item.title.size()), &titleCalc,
+                  DT_CALCRECT | DT_WORDBREAK | DT_NOPREFIX);
+        int titleHeight = titleCalc.bottom - titleCalc.top;
+        if (titleHeight <= 0) titleHeight = lineHeight;
+        titleHeight = (std::min)(titleHeight, lineHeight * 2);
+
+        int bodyHeight = 0;
+        if (!item.body.empty()) {
+            SelectObject(dc, g_hFont);
+            RECT bodyCalc{ 0, 0, textWidth, 0 };
+            DrawTextW(dc, item.body.c_str(), static_cast<int>(item.body.size()), &bodyCalc,
+                      DT_CALCRECT | DT_WORDBREAK | DT_NOPREFIX);
+            bodyHeight = (std::min)(static_cast<int>(bodyCalc.bottom - bodyCalc.top),
+                                    lineHeight * 2);
+        }
+
+        const int rowTop = y;
+        RECT kindRect{ left, rowTop + kNotifyPadY, left + textWidth / 2,
+                       rowTop + kNotifyPadY + lineHeight };
+        RECT dateRect{ left + textWidth / 2, kindRect.top, right, kindRect.bottom };
+        RECT titleRect{ left, kindRect.bottom + 2, right, kindRect.bottom + 2 + titleHeight };
+        RECT metaRect{ left, titleRect.bottom + 2, right, titleRect.bottom + 2 + lineHeight };
+        RECT bodyRect{ left, metaRect.bottom + 2, right, metaRect.bottom + 2 + bodyHeight };
+        int rowBottom = metaRect.bottom;
+        if (bodyHeight > 0) rowBottom = bodyRect.bottom;
+        rowBottom += kNotifyPadY;
+
+        const int clientTop = content.top + rowTop - scroll;
+        const int clientBottom = content.top + rowBottom - scroll;
+        if (draw && clientBottom > content.top && clientTop < content.bottom) {
+            const RECT rowRect{ content.left, clientTop, content.right, clientBottom };
+            if (g_notifyHotRow == static_cast<int>(i) && !item.url.empty()) {
+                HBRUSH hot = CreateSolidBrush(g_palette.cardSelectedBg);
+                FillRect(dc, &rowRect, hot);
+                DeleteObject(hot);
+            }
+            if (unread) {
+                RECT stripe{ rowRect.left, rowRect.top, rowRect.left + kNotifyStripe,
+                             rowRect.bottom };
+                HBRUSH stripeBrush = CreateSolidBrush(g_palette.accent);
+                FillRect(dc, &stripe, stripeBrush);
+                DeleteObject(stripeBrush);
+            }
+
+            // Translate a content-space rectangle into panel client coordinates.
+            auto toClient = [&](RECT rect) {
+                OffsetRect(&rect, content.left, content.top - scroll);
+                return rect;
+            };
+            const RECT clientKind = toClient(kindRect);
+            const RECT clientDate = toClient(dateRect);
+            const RECT clientTitle = toClient(titleRect);
+            const RECT clientMeta = toClient(metaRect);
+            const RECT clientBody = toClient(bodyRect);
+
+            SelectObject(dc, g_hFontBold);
+            DrawTextLine(dc, NotificationKindLabel(item.kind), clientKind,
+                         NotificationKindColour(item.kind), DT_LEFT);
+            SelectObject(dc, g_hFont);
+            DrawTextLine(dc, FormatRelativeTime(item.publishedUtc), clientDate,
+                         g_palette.textSecondary, DT_RIGHT);
+
+            SelectObject(dc, g_hFontBold);
+            DrawWrappedText(dc, item.title, clientTitle,
+                            unread ? g_palette.textPrimary : g_palette.textSecondary, 0);
+
+            std::wstring meta = item.source;
+            if (!item.gameTitle.empty()) {
+                if (!meta.empty()) meta += L" \u00B7 ";
+                meta += item.gameTitle;
+            }
+            SelectObject(dc, g_hFont);
+            DrawTextLine(dc, meta, clientMeta, g_palette.textSecondary, DT_LEFT);
+            if (bodyHeight > 0) {
+                DrawWrappedText(dc, item.body, clientBody, g_palette.textSecondary, 0);
+            }
+
+            RECT divider{ content.left + kNotifyPadX, clientBottom - 1,
+                          content.right - kNotifyPadX - ThemeScroll::kBarWidth, clientBottom };
+            HBRUSH dividerBrush = CreateSolidBrush(g_palette.divider);
+            FillRect(dc, &divider, dividerBrush);
+            DeleteObject(dividerBrush);
+
+            g_notifyRows.push_back({ rowRect, clientTitle, clientMeta, clientBody, i });
+        }
+
+        y = rowBottom;
+    }
+
+    return y;
+}
+
+void PositionBellPanel(HWND page) {
+    if (g_hwndBellPanel == nullptr || !IsWindow(g_hwndBellPanel)) return;
+
+    RECT client{};
+    GetClientRect(page, &client);
+    const int width = client.right - client.left;
+    const int height = client.bottom - client.top;
+    if (width <= 0 || height <= 0) return;
+
+    const int panelWidth = (std::min)(kBellPanelWidth, (std::max)(280, width - 2 * kPageMargin));
+    const int panelHeight = (std::max)(
+        kBellPanelMinHeight,
+        (std::min)(kBellPanelMaxHeight, height - (16 + kButtonHeight + kBellPanelGap) - 16));
+    int top = 16 + kButtonHeight + kBellPanelGap;
+    if (top + panelHeight > height - 8) top = (std::max)(8, height - 8 - panelHeight);
+    const int left = width - kPageMargin - panelWidth;
+
+    g_bellPanelRect = RECT{ left, top, left + panelWidth, top + panelHeight };
+    SetWindowPos(g_hwndBellPanel, HWND_TOP, left, top, panelWidth, panelHeight,
+                 SWP_NOACTIVATE | SWP_SHOWWINDOW);
+}
+
+void CloseBellPanel() {
+    if (!g_notifyPanelOpen) return;
+    g_notifyPanelOpen = false;
+    g_notifyHotRow = -1;
+    g_notifyBarHover = false;
+    g_notifyBarDragging = false;
+    if (g_hwndBellPanel != nullptr && IsWindow(g_hwndBellPanel)) {
+        ShowWindow(g_hwndBellPanel, SW_HIDE);
+    }
+    if (g_hwndBell != nullptr) InvalidateRect(g_hwndBell, nullptr, TRUE);
+}
+
+void ToggleBellPanel(HWND page) {
+    if (g_notifyPanelOpen) {
+        CloseBellPanel();
+        return;
+    }
+    ReloadNotificationFeed();
+    g_notifyPanelOpen = true;
+    g_notifyScroll = 0;
+    g_notifyHotRow = -1;
+    PositionBellPanel(page);
+    if (g_hwndBellPanel != nullptr) {
+        InvalidateRect(g_hwndBellPanel, nullptr, TRUE);
+        SetFocus(g_hwndBellPanel);
+    }
+    if (g_hwndBell != nullptr) InvalidateRect(g_hwndBell, nullptr, TRUE);
+}
+
+void PaintBell(HWND hwnd) {
+    PAINTSTRUCT ps{};
+    HDC hdc = BeginPaint(hwnd, &ps);
+    if (hdc == nullptr) return;
+
+    RECT client{};
+    GetClientRect(hwnd, &client);
+    const int width = client.right - client.left;
+    const int height = client.bottom - client.top;
+    if (width <= 0 || height <= 0) {
+        EndPaint(hwnd, &ps);
+        return;
+    }
+
+    HDC memDC = CreateCompatibleDC(hdc);
+    HBITMAP memBmp = CreateCompatibleBitmap(hdc, width, height);
+    HGDIOBJ oldBmp = SelectObject(memDC, memBmp);
+
+    FillRect(memDC, &client, g_hCanvasBrush);
+    SetBkMode(memDC, TRANSPARENT);
+
+    const int unread = UnreadNotificationCount();
+    const bool active = g_bellHover || g_notifyPanelOpen;
+
+    if (active) {
+        HBRUSH hoverBrush = CreateSolidBrush(g_palette.chromeHoverBg);
+        HGDIOBJ oldBrush = SelectObject(memDC, hoverBrush);
+        HGDIOBJ oldPen = SelectObject(memDC, GetStockObject(NULL_PEN));
+        RoundRect(memDC, 0, 0, width, height, 8, 8);
+        SelectObject(memDC, oldPen);
+        SelectObject(memDC, oldBrush);
+        DeleteObject(hoverBrush);
+    }
+
+    const COLORREF bellColour =
+        unread > 0 ? g_palette.accent
+                   : (active ? g_palette.textPrimary : g_palette.textSecondary);
+    const int cx = width / 2;
+    const int cy = height / 2 + 1;
+
+    HBRUSH bellBrush = CreateSolidBrush(bellColour);
+    HGDIOBJ oldBrush = SelectObject(memDC, bellBrush);
+    HGDIOBJ oldPen = SelectObject(memDC, GetStockObject(NULL_PEN));
+    Ellipse(memDC, cx - 2, cy - 13, cx + 2, cy - 9);       // crown
+    Ellipse(memDC, cx - 6, cy - 9, cx + 6, cy + 1);        // dome
+    Rectangle(memDC, cx - 5, cy - 4, cx + 5, cy + 4);      // body
+    RoundRect(memDC, cx - 8, cy + 3, cx + 8, cy + 7, 6, 6);  // skirt
+    Ellipse(memDC, cx - 2, cy + 6, cx + 2, cy + 10);       // clapper
+    SelectObject(memDC, oldPen);
+    SelectObject(memDC, oldBrush);
+    DeleteObject(bellBrush);
+
+    if (unread > 0) {
+        constexpr int kBadge = 16;
+        const RECT badge{ width - kBadge - 2, 1, width - 2, 1 + kBadge };
+        HBRUSH badgeBrush = CreateSolidBrush(g_palette.accent);
+        HGDIOBJ badgeOldBrush = SelectObject(memDC, badgeBrush);
+        HGDIOBJ badgeOldPen = SelectObject(memDC, GetStockObject(NULL_PEN));
+        Ellipse(memDC, badge.left, badge.top, badge.right, badge.bottom);
+        SelectObject(memDC, badgeOldPen);
+        SelectObject(memDC, badgeOldBrush);
+        DeleteObject(badgeBrush);
+
+        wchar_t count[8]{};
+        if (unread > 9) {
+            wcscpy_s(count, L"9+");
+        } else {
+            swprintf_s(count, L"%d", unread);
+        }
+        RECT badgeText = badge;
+        SetTextColor(memDC, g_palette.accentText);
+        SelectObject(memDC, g_hFontBold);
+        DrawTextW(memDC, count, -1, &badgeText,
+                  DT_CENTER | DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+    }
+
+    BitBlt(hdc, 0, 0, width, height, memDC, 0, 0, SRCCOPY);
+    SelectObject(memDC, oldBmp);
+    DeleteObject(memBmp);
+    DeleteDC(memDC);
+    EndPaint(hwnd, &ps);
+}
+
+void PaintNotificationPanel(HWND hwnd) {
+    PAINTSTRUCT ps{};
+    HDC hdc = BeginPaint(hwnd, &ps);
+    if (hdc == nullptr) return;
+
+    RECT client{};
+    GetClientRect(hwnd, &client);
+    const int width = client.right - client.left;
+    const int height = client.bottom - client.top;
+    if (width <= 0 || height <= 0) {
+        EndPaint(hwnd, &ps);
+        return;
+    }
+
+    HDC memDC = CreateCompatibleDC(hdc);
+    HBITMAP memBmp = CreateCompatibleBitmap(hdc, width, height);
+    HGDIOBJ oldBmp = SelectObject(memDC, memBmp);
+
+    FillRect(memDC, &client, g_hCardBrush);
+    SetBkMode(memDC, TRANSPARENT);
+
+    HPEN borderPen = CreatePen(PS_SOLID, 1, g_palette.cardBorder);
+    HGDIOBJ oldPen = SelectObject(memDC, borderPen);
+    HGDIOBJ oldBrush = SelectObject(memDC, GetStockObject(NULL_BRUSH));
+    Rectangle(memDC, 0, 0, width, height);
+    SelectObject(memDC, oldBrush);
+    SelectObject(memDC, oldPen);
+    DeleteObject(borderPen);
+
+    const int unread = UnreadNotificationCount();
+
+    // Header: title, unread summary, mark-all-read link and a close cross.
+    std::wstring heading = Strings::kBellPanelTitle;
+    if (unread > 0) {
+        heading += L"  \u00B7  " + std::to_wstring(unread) + Strings::kBellUnreadSuffix;
+    }
+
+    g_notifyCloseRect = RECT{ width - 34, 0, width - 10, kBellHeaderHeight };
+    SelectObject(memDC, g_hFontBold);
+    SIZE markSize{};
+    GetTextExtentPoint32W(memDC, Strings::kBellMarkAllRead,
+                          static_cast<int>(wcslen(Strings::kBellMarkAllRead)), &markSize);
+    const int markRight = g_notifyCloseRect.left - 12;
+    g_notifyMarkReadRect = RECT{ markRight - markSize.cx - 6, 0, markRight, kBellHeaderHeight };
+
+    RECT headingRect{ kNotifyPadX + 2, 0, g_notifyMarkReadRect.left - 10, kBellHeaderHeight };
+    DrawTextLine(memDC, heading, headingRect, g_palette.textPrimary, DT_LEFT);
+
+    SelectObject(memDC, g_hFontBold);
+    DrawTextLine(memDC, Strings::kBellMarkAllRead, g_notifyMarkReadRect,
+                 unread > 0 ? g_palette.accent : g_palette.textSecondary, DT_RIGHT);
+
+    {
+        const int cx = (g_notifyCloseRect.left + g_notifyCloseRect.right) / 2;
+        const int cy = kBellHeaderHeight / 2;
+        HPEN crossPen = CreatePen(PS_SOLID, 2, g_palette.textSecondary);
+        HGDIOBJ crossOldPen = SelectObject(memDC, crossPen);
+        MoveToEx(memDC, cx - 5, cy - 5, nullptr);
+        LineTo(memDC, cx + 5, cy + 5);
+        MoveToEx(memDC, cx + 5, cy - 5, nullptr);
+        LineTo(memDC, cx - 5, cy + 5);
+        SelectObject(memDC, crossOldPen);
+        DeleteObject(crossPen);
+    }
+
+    // Dividers under the header and above the footer.
+    HBRUSH dividerBrush = CreateSolidBrush(g_palette.divider);
+    RECT headerDivider{ 1, kBellHeaderHeight - 1, width - 1, kBellHeaderHeight };
+    RECT footerDivider{ 1, height - kBellFooterHeight, width - 1, height - kBellFooterHeight + 1 };
+    FillRect(memDC, &headerDivider, dividerBrush);
+    FillRect(memDC, &footerDivider, dividerBrush);
+
+    const RECT content = NotificationContentRect(client);
+    if (g_notifyFeed.items.empty()) {
+        g_notifyContentHeight = 0;
+        g_notifyScroll = 0;
+        g_notifyRows.clear();
+        RECT prompt{ content.left + 24, content.top, content.right - 24, content.bottom };
+        SelectObject(memDC, g_hFont);
+        SetTextColor(memDC, g_palette.textSecondary);
+        DrawTextW(memDC, Strings::kBellEmpty, -1, &prompt,
+                  DT_CENTER | DT_VCENTER | DT_WORDBREAK | DT_NOPREFIX);
+    } else {
+        g_notifyContentHeight = LayoutNotificationRows(memDC, content, false, 0);
+        ClampNotificationScroll();
+
+        const int saved = SaveDC(memDC);
+        IntersectClipRect(memDC, content.left, content.top, content.right, content.bottom);
+        LayoutNotificationRows(memDC, content, true, g_notifyScroll);
+        RestoreDC(memDC, saved);
+
+        const ThemeScroll::Metrics bar = NotificationBarMetrics(client);
+        if (bar.needed) {
+            ThemeScroll::Paint(memDC, bar, g_palette, g_notifyBarHover, g_notifyBarDragging);
+        }
+    }
+
+    // Footer: refresh stamp and the mandatory GamerPower attribution link.
+    SelectObject(memDC, g_hFont);
+    const std::wstring stamp =
+        g_notifyFeed.generatedAt.empty()
+            ? std::wstring(Strings::kBellNoRefresh)
+            : std::wstring(Strings::kBellLastRefresh) + FormatRefreshStamp(g_notifyFeed.generatedAt);
+    RECT stampRect{ kNotifyPadX + 2, height - kBellFooterHeight + 6, width - kNotifyPadX,
+                    height - kBellFooterHeight + 6 + 18 };
+    DrawTextLine(memDC, stamp, stampRect, g_palette.textSecondary, DT_LEFT);
+
+    const int attributionTop = height - kBellFooterHeight + 26;
+    const std::wstring attribution = Strings::kBellAttribution;
+    SIZE leadSize{};
+    GetTextExtentPoint32W(memDC, attribution.c_str(), static_cast<int>(attribution.size()),
+                          &leadSize);
+    RECT leadRect{ kNotifyPadX + 2, attributionTop, width - kNotifyPadX, attributionTop + 18 };
+    DrawTextLine(memDC, attribution, leadRect, g_palette.textSecondary, DT_LEFT);
+
+    const int linkLeft = leadRect.left + leadSize.cx;
+    SIZE linkSize{};
+    GetTextExtentPoint32W(memDC, Strings::kBellAttributionLink,
+                          static_cast<int>(wcslen(Strings::kBellAttributionLink)), &linkSize);
+    g_notifyAttribLinkRect = RECT{ linkLeft, attributionTop, linkLeft + linkSize.cx,
+                                    attributionTop + 18 };
+    if (g_notifyAttribLinkRect.right <= width - kNotifyPadX) {
+        DrawTextLine(memDC, Strings::kBellAttributionLink, g_notifyAttribLinkRect,
+                     g_palette.accent, DT_LEFT);
+        HPEN underline = CreatePen(PS_SOLID, 1, g_palette.accent);
+        HGDIOBJ underlineOldPen = SelectObject(memDC, underline);
+        const int underlineY = attributionTop + linkSize.cy - 1;
+        MoveToEx(memDC, g_notifyAttribLinkRect.left, underlineY, nullptr);
+        LineTo(memDC, g_notifyAttribLinkRect.right, underlineY);
+        SelectObject(memDC, underlineOldPen);
+        DeleteObject(underline);
+    } else {
+        g_notifyAttribLinkRect = RECT{};
+    }
+
+    DeleteObject(dividerBrush);
+    BitBlt(hdc, 0, 0, width, height, memDC, 0, 0, SRCCOPY);
+    SelectObject(memDC, oldBmp);
+    DeleteObject(memBmp);
+    DeleteDC(memDC);
+    EndPaint(hwnd, &ps);
+}
+
+int NotificationRowAt(POINT pt) {
+    RECT client{};
+    if (g_hwndBellPanel != nullptr) GetClientRect(g_hwndBellPanel, &client);
+    const RECT content = NotificationContentRect(client);
+    if (pt.y < content.top || pt.y >= content.bottom) return -1;
+
+    for (const auto& row : g_notifyRows) {
+        if (!PtInRect(&row.rect, pt)) continue;
+        if (row.index < g_notifyFeed.items.size() &&
+            !g_notifyFeed.items[row.index].url.empty()) {
+            return static_cast<int>(row.index);
+        }
+        return -1;
+    }
+    return -1;
+}
+
+LRESULT CALLBACK CatalogueBellProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
+    switch (uMsg) {
+    case WM_PAINT:
+        PaintBell(hwnd);
+        return 0;
+
+    case WM_ERASEBKGND:
+        return 1;
+
+    case WM_MOUSEMOVE:
+        if (!g_bellHover) {
+            g_bellHover = true;
+            TRACKMOUSEEVENT track{ sizeof(TRACKMOUSEEVENT), TME_LEAVE, hwnd, 0 };
+            TrackMouseEvent(&track);
+            InvalidateRect(hwnd, nullptr, TRUE);
+        }
+        return 0;
+
+    case WM_MOUSELEAVE:
+        g_bellHover = false;
+        InvalidateRect(hwnd, nullptr, TRUE);
+        return 0;
+
+    case WM_LBUTTONUP:
+        ToggleBellPanel(GetParent(hwnd));
+        return 0;
+
+    case WM_SETCURSOR:
+        SetCursor(LoadCursorW(nullptr, IDC_HAND));
+        return TRUE;
+
+    case WM_KEYDOWN:
+        if (wParam == VK_SPACE || wParam == VK_RETURN) {
+            ToggleBellPanel(GetParent(hwnd));
+            return 0;
+        }
+        break;
+    }
+    return DefWindowProcW(hwnd, uMsg, wParam, lParam);
+}
+
+LRESULT CALLBACK CatalogueBellPanelProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
+    switch (uMsg) {
+    case WM_PAINT:
+        PaintNotificationPanel(hwnd);
+        return 0;
+
+    case WM_ERASEBKGND:
+        return 1;
+
+    case WM_LBUTTONDOWN: {
+        POINT pt{ GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam) };
+        if (PtInRect(&g_notifyCloseRect, pt)) {
+            CloseBellPanel();
+            return 0;
+        }
+        if (PtInRect(&g_notifyMarkReadRect, pt)) {
+            MarkAllNotificationsSeen();
+            return 0;
+        }
+        if (!IsRectEmpty(&g_notifyAttribLinkRect) && PtInRect(&g_notifyAttribLinkRect, pt)) {
+            OpenExternalUrl(Strings::kGamerPowerUrl);
+            return 0;
+        }
+
+        RECT client{};
+        GetClientRect(hwnd, &client);
+        const ThemeScroll::Metrics bar = NotificationBarMetrics(client);
+        if (bar.needed && pt.x >= NotificationContentRect(client).right - ThemeScroll::kBarWidth) {
+            if (PtInRect(&bar.thumb, pt)) {
+                g_notifyBarDragging = true;
+                g_notifyDragOffset = pt.y - bar.thumb.top;
+                SetCapture(hwnd);
+            } else {
+                const RECT content = NotificationContentRect(client);
+                g_notifyScroll += (pt.y < bar.thumb.top) ? -(content.bottom - content.top)
+                                                          : (content.bottom - content.top);
+                ClampNotificationScroll();
+                g_notifyHotRow = -1;
+                InvalidateRect(hwnd, nullptr, TRUE);
+            }
+        }
+        return 0;
+    }
+
+    case WM_LBUTTONUP: {
+        if (g_notifyBarDragging) {
+            g_notifyBarDragging = false;
+            ReleaseCapture();
+            InvalidateRect(hwnd, nullptr, TRUE);
+            return 0;
+        }
+        POINT pt{ GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam) };
+        const int row = NotificationRowAt(pt);
+        if (row >= 0) {
+            const NotificationItem& item = g_notifyFeed.items[static_cast<size_t>(row)];
+            MarkNotificationSeen(item.id);
+            OpenExternalUrl(item.url);
+        }
+        return 0;
+    }
+
+    case WM_MOUSEMOVE: {
+        POINT pt{ GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam) };
+        if (g_notifyBarDragging) {
+            RECT client{};
+            GetClientRect(hwnd, &client);
+            const RECT content = NotificationContentRect(client);
+            const ThemeScroll::Metrics dragged = NotificationBarMetrics(client);
+            g_notifyScroll = ThemeScroll::PositionForThumbDrag(
+                dragged, pt.y, g_notifyDragOffset, g_notifyContentHeight,
+                content.bottom - content.top);
+            ClampNotificationScroll();
+            g_notifyHotRow = -1;
+            InvalidateRect(hwnd, nullptr, TRUE);
+            return 0;
+        }
+
+        RECT client{};
+        GetClientRect(hwnd, &client);
+        const ThemeScroll::Metrics bar = NotificationBarMetrics(client);
+        const bool overBar =
+            bar.needed && pt.x >= NotificationContentRect(client).right - ThemeScroll::kBarWidth;
+        if (overBar) {
+            TRACKMOUSEEVENT track{ sizeof(TRACKMOUSEEVENT), TME_LEAVE, hwnd, 0 };
+            TrackMouseEvent(&track);
+        }
+        if (overBar != g_notifyBarHover) {
+            g_notifyBarHover = overBar;
+            InvalidateRect(hwnd, nullptr, TRUE);
+        }
+
+        const int hot = overBar ? -1 : NotificationRowAt(pt);
+        if (hot != g_notifyHotRow) {
+            g_notifyHotRow = hot;
+            InvalidateRect(hwnd, nullptr, TRUE);
+        }
+        return 0;
+    }
+
+    case WM_MOUSELEAVE:
+        if (g_notifyBarHover || g_notifyHotRow != -1) {
+            g_notifyBarHover = false;
+            g_notifyHotRow = -1;
+            InvalidateRect(hwnd, nullptr, TRUE);
+        }
+        return 0;
+
+    case WM_MOUSEWHEEL: {
+        RECT client{};
+        GetClientRect(hwnd, &client);
+        const RECT content = NotificationContentRect(client);
+        if (ThemeScroll::MaxScroll(g_notifyContentHeight, content.bottom - content.top) <= 0) {
+            return 0;
+        }
+        const int delta = GET_WHEEL_DELTA_WPARAM(wParam);
+        g_notifyScroll -= (delta / WHEEL_DELTA) * 60;
+        ClampNotificationScroll();
+        g_notifyHotRow = -1;
+        InvalidateRect(hwnd, nullptr, TRUE);
+        return 0;
+    }
+
+    case WM_KEYDOWN: {
+        RECT client{};
+        GetClientRect(hwnd, &client);
+        const RECT content = NotificationContentRect(client);
+        const int page = content.bottom - content.top;
+        switch (wParam) {
+        case VK_ESCAPE:
+            CloseBellPanel();
+            return 0;
+        case VK_UP:
+            g_notifyScroll -= 40;
+            break;
+        case VK_DOWN:
+            g_notifyScroll += 40;
+            break;
+        case VK_PRIOR:
+            g_notifyScroll -= page;
+            break;
+        case VK_NEXT:
+            g_notifyScroll += page;
+            break;
+        default:
+            return 0;
+        }
+        ClampNotificationScroll();
+        g_notifyHotRow = -1;
+        InvalidateRect(hwnd, nullptr, TRUE);
+        return 0;
+    }
+
+    case WM_SETCURSOR: {
+        POINT pt{};
+        GetCursorPos(&pt);
+        ScreenToClient(hwnd, &pt);
+        const bool interactive =
+            PtInRect(&g_notifyCloseRect, pt) || PtInRect(&g_notifyMarkReadRect, pt) ||
+            (!IsRectEmpty(&g_notifyAttribLinkRect) && PtInRect(&g_notifyAttribLinkRect, pt)) ||
+            NotificationRowAt(pt) >= 0;
+        if (interactive) {
+            SetCursor(LoadCursorW(nullptr, IDC_HAND));
+            return TRUE;
+        }
+        break;
+    }
     }
     return DefWindowProcW(hwnd, uMsg, wParam, lParam);
 }
@@ -1134,6 +2210,8 @@ void LayoutCatalogue(HWND hwnd) {
 
     // Sync button lives in the header, right aligned with the page margin.
     place(g_hwndSync, width - kPageMargin - 160, 16, 160, kButtonHeight);
+    place(g_hwndBell, width - kPageMargin - 160 - kBellPanelGap - kBellButtonSize, 16,
+          kBellButtonSize, kButtonHeight);
 
     // Toolbar row 1.
     const int row1 = g_toolbarRect.top + 14;
@@ -1180,8 +2258,8 @@ void LayoutCatalogue(HWND hwnd) {
     place(g_hwndOpenStore, right - 130, g_footerRect.top, 130, kButtonHeight);
 
     // The list and details pane fill the card area
-    constexpr int kDetailsWidth = 320;
-    const bool showDetails = (width >= 1080);
+    constexpr int kDetailsWidth = 368;
+    const bool showDetails = (width >= 1120);
 
     if (showDetails) {
         RECT listRect{ g_listCardRect.left + 1, g_listCardRect.top + 1,
@@ -1206,6 +2284,7 @@ void LayoutCatalogue(HWND hwnd) {
     ClampScroll();
     if (g_hwndList != nullptr) InvalidateRect(g_hwndList, nullptr, TRUE);
     if (g_hwndDetails != nullptr) InvalidateRect(g_hwndDetails, nullptr, TRUE);
+    if (g_notifyPanelOpen) PositionBellPanel(hwnd);
     InvalidateRect(hwnd, nullptr, FALSE);
 }
 
@@ -1296,10 +2375,15 @@ void ResetFilters(HWND hwnd) {
 }
 
 void SelectRow(int index) {
+    const int previous = g_selected;
     if (index < 0 || index >= static_cast<int>(g_page.items.size())) {
         g_selected = -1;
     } else {
         g_selected = index;
+    }
+    // A new game starts its details column at the top instead of inheriting the old offset.
+    if (g_selected != previous) {
+        g_detailsScroll = 0;
     }
     if (g_hwndList != nullptr) InvalidateRect(g_hwndList, nullptr, TRUE);
     if (g_hwndDetails != nullptr) InvalidateRect(g_hwndDetails, nullptr, TRUE);
@@ -1502,11 +2586,18 @@ void CreateCatalogueControls(HWND hwnd) {
     g_hwndResetFilters = MakeButton(hwnd, L"Reset filters", IDC_CAT_RESET_FILTERS);
 
     g_hwndList = CreateWindowExW(0, CATALOGUE_LIST_CLASS, L"",
-                                 WS_CHILD | WS_VISIBLE | WS_TABSTOP, 0, 0, 10, 10, hwnd,
-                                 nullptr, GetModuleHandleW(nullptr), nullptr);
+                                 WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS | WS_TABSTOP, 0, 0,
+                                 10, 10, hwnd, nullptr, GetModuleHandleW(nullptr), nullptr);
     g_hwndDetails = CreateWindowExW(0, CATALOGUE_DETAILS_CLASS, L"",
-                                    WS_CHILD | WS_VISIBLE, 0, 0, 10, 10, hwnd,
+                                    WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS, 0, 0, 10, 10, hwnd,
                                     nullptr, GetModuleHandleW(nullptr), nullptr);
+    g_hwndBell = CreateWindowExW(0, CATALOGUE_BELL_CLASS, L"",
+                                 WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS | WS_TABSTOP, 0, 0,
+                                 10, 10, hwnd, nullptr, GetModuleHandleW(nullptr), nullptr);
+    // Created last so it sits above every other child in the z-order while open.
+    g_hwndBellPanel = CreateWindowExW(0, CATALOGUE_BELL_PANEL_CLASS, L"",
+                                      WS_CHILD | WS_CLIPSIBLINGS | WS_TABSTOP, 0, 0, 10, 10,
+                                      hwnd, nullptr, GetModuleHandleW(nullptr), nullptr);
 }
 
 void EnsurePageClasses(HINSTANCE instance) {
@@ -1530,6 +2621,24 @@ void EnsurePageClasses(HINSTANCE instance) {
     detailsClass.hCursor = LoadCursorW(nullptr, IDC_ARROW);
     detailsClass.lpszClassName = CATALOGUE_DETAILS_CLASS;
     RegisterClassExW(&detailsClass);
+
+    WNDCLASSEXW bellClass{};
+    bellClass.cbSize = sizeof(bellClass);
+    bellClass.style = CS_HREDRAW | CS_VREDRAW;
+    bellClass.lpfnWndProc = CatalogueBellProc;
+    bellClass.hInstance = instance;
+    bellClass.hCursor = LoadCursorW(nullptr, IDC_HAND);
+    bellClass.lpszClassName = CATALOGUE_BELL_CLASS;
+    RegisterClassExW(&bellClass);
+
+    WNDCLASSEXW panelClass{};
+    panelClass.cbSize = sizeof(panelClass);
+    panelClass.style = CS_HREDRAW | CS_VREDRAW;
+    panelClass.lpfnWndProc = CatalogueBellPanelProc;
+    panelClass.hInstance = instance;
+    panelClass.hCursor = LoadCursorW(nullptr, IDC_ARROW);
+    panelClass.lpszClassName = CATALOGUE_BELL_PANEL_CLASS;
+    RegisterClassExW(&panelClass);
 
     registered = true;
 }
@@ -1629,8 +2738,45 @@ LRESULT CALLBACK CataloguePageProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM l
         ApplyThemeToControls();
         LayoutCatalogue(hwnd);
         ReloadOwnedGames(hwnd);
+        ReloadNotificationFeed();
         g_status = L"Sync a storefront to list the games you own, installed or not.";
         InvalidateRect(hwnd, nullptr, FALSE);
+        return 0;
+    }
+
+    case WM_SHOWWINDOW:
+        // The service writes the feed in the background; re-reading it whenever the page is
+        // shown keeps the badge current without polling.
+        if (wParam != 0) {
+            ReloadNotificationFeed();
+        } else {
+            CloseBellPanel();
+        }
+        return 0;
+
+    case WM_LBUTTONDOWN:
+        // A click on the page background dismisses the panel. Clicks on child windows arrive as
+        // WM_PARENTNOTIFY below instead.
+        if (g_notifyPanelOpen) {
+            CloseBellPanel();
+            return 0;
+        }
+        break;
+
+    case WM_PARENTNOTIFY: {
+        // A click on any child other than the bell or its panel dismisses the panel, matching how
+        // the rest of the app treats transient overlays.
+        if (LOWORD(wParam) == WM_LBUTTONDOWN && g_notifyPanelOpen) {
+            POINT pt{};
+            GetCursorPos(&pt);
+            ScreenToClient(hwnd, &pt);
+            RECT bellRect{};
+            if (g_hwndBell != nullptr) GetWindowRect(g_hwndBell, &bellRect);
+            MapWindowPoints(nullptr, hwnd, reinterpret_cast<POINT*>(&bellRect), 2);
+            if (!PtInRect(&bellRect, pt) && !PtInRect(&g_bellPanelRect, pt)) {
+                CloseBellPanel();
+            }
+        }
         return 0;
     }
 
@@ -1728,6 +2874,12 @@ LRESULT CALLBACK CataloguePageProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM l
     case WM_DESTROY:
         g_hwndList = nullptr;
         g_hwndDetails = nullptr;
+        g_hwndBell = nullptr;
+        g_hwndBellPanel = nullptr;
+        g_notifyPanelOpen = false;
+        g_notifyRows.clear();
+        g_notifyFeed.items.clear();
+        g_seenIds.clear();
         g_hwndPage = nullptr;
         DestroyCatalogueResources();
         return 0;

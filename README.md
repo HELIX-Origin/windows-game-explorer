@@ -36,14 +36,12 @@ Organize, browse, and launch your entire multi-platform game library with high-r
 
 ## 📚 Documentation
 
-Detailed user guides, engineering specifications, and customization references are available in the [`docs/`](./docs/README.md) folder:
+Documentation is split by audience in the [`docs/`](./docs/README.md) folder — **user** pages for
+installing and running the app, **developer** pages for working on the code:
 
 - **[Project Overview & Architecture](./docs/overview.md)** — Core design philosophy, system architecture, and supported platform breakdown.
-- **[Quick Start Guide](./docs/quick-start.md)** — Installation methods, navigation pane entry points, and first-time library setup.
-- **[Comprehensive User Guide](./docs/user-guide.md)** — Deep-dive manual for the Library Manager, Game Catalogue, Configuration, Artwork Discovery, ROMs, and cloud sync.
-- **[Developer & Technical Reference](./docs/developer-guide.md)** — UWP XAML Islands internals, C++20 core engine, SQLite schema, build gates, and test suites.
-- **[Windows Version Compatibility](./docs/research/windows-version-compatibility.md)** — Windows 11 target architecture and historical compatibility analysis.
-- **[Metadata & Customization Guide](./docs/metadata-customization.md)** — JSON schema specification for per-game overrides and manual imports.
+- **User documentation** ([`docs/user/`](./docs/user/README.md)) — [Installation](./docs/user/installation.md), [Quick Start](./docs/user/quick-start.md), [User Guide](./docs/user/user-guide.md), [Configuration](./docs/user/configuration.md), [Update Alerts & Notification Bell](./docs/user/notifications.md), [Metadata & Customization](./docs/user/metadata-customization.md), [Troubleshooting](./docs/user/troubleshooting.md), [FAQ](./docs/user/faq.md).
+- **Developer documentation** ([`docs/developer/`](./docs/developer/README.md)) — [Developer & Technical Reference](./docs/developer/developer-guide.md), [Background Service & IPC](./docs/developer/service-and-ipc.md), [Game Catalogue Internals](./docs/developer/catalogue-internals.md), [Testing & Verification](./docs/developer/testing.md), and [research records](./docs/developer/research/).
 
 ---
 
@@ -58,7 +56,7 @@ Detailed user guides, engineering specifications, and customization references a
 ```powershell
 # One dispatcher owns every workflow command
 .\game-explorer.bat build Release     # Fast incremental build (/W4 /WX zero-warning gate)
-.\game-explorer.bat test Release      # Run the 87-test automated C++ unit test suite
+.\game-explorer.bat test Release      # Run the 112-test automated C++ unit test suite
 .\game-explorer.bat release           # Build, test, lint, and package installer + portable ZIPs
 .\game-explorer.bat help              # List every command and option
 ```

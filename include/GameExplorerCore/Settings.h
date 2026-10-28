@@ -25,6 +25,17 @@ struct AppSettings {
     std::wstring steamGridDbApiKey;
     std::wstring igdbClientId;
     std::wstring igdbClientSecret;
+
+    // Notification bell (Game Catalogue). Every source is switchable on its own so update alerts
+    // can stay on while marketing feeds are muted.
+    bool notifyGameUpdates{ true };
+    bool notifyNews{ true };
+    bool notifySteamNews{ true };
+    bool notifyGogNews{ true };
+    bool notifyEpicNews{ true };
+    bool notifyXboxNews{ true };
+    bool notifyFreeGames{ true };
+    bool notifyPromotions{ true };
 };
 
 class SettingsManager {

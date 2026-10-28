@@ -21,6 +21,13 @@ struct StorefrontSource {
     // scanner must set this from its own platform evidence; the catalogue drops non-Windows
     // sources in one place (FilterWindowsInstallableOwnedGames).
     bool windowsInstallable{ true };
+    // Build identity recorded for the installed copy (Steam `buildid`, GOG `buildId`, Epic
+    // `AppVersionString`). Empty when the storefront does not publish one locally.
+    std::wstring installedBuildId;
+    // Newest build the storefront client recorded locally (for example GOG Galaxy's imported
+    // latest build id). Empty when no local comparison is possible. The Steam update check uses
+    // the official Web API instead and leaves this empty.
+    std::wstring latestBuildId;
 };
 
 /**
@@ -41,6 +48,9 @@ struct OwnedGame {
     std::wstring coverArtUrl;       // storefront-supplied artwork
     std::wstring storePageUrl;
     std::wstring installUri;        // official client protocol, e.g. "steam://install/730"
+    std::wstring developer;         // storefront-reported developer
+    std::wstring publisher;         // storefront-reported publisher
+    std::wstring releaseDate;       // storefront-reported release date (may be a bare year)
     std::wstring genres;            // comma-separated storefront genres
     std::wstring tags;              // comma-separated storefront tags
     std::wstring rating;            // storefront/ESRB/PEGI rating label

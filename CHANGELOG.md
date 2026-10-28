@@ -4,6 +4,74 @@ All notable changes to **Windows Game Explorer** are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+## [2.7.0] - 2026-10-28
+
+### Added
+- **In-view Games tab notification bell child flyout**: Added an unread-badged notification bell button directly to the Games tab command bar in File Explorer (`LibraryViewHost.cpp`). Clicking the bell opens a native XAML child flyout directly inside the view displaying alert items, summaries, kind badges, and tap-to-open actions without redirecting away to Studio.
+- **Game Catalogue details pane**: selecting a catalogue row now fills a scrolling details pane with the
+  canonical title, storefront, developer, publisher, release date, rating, genres, tags, playtime, last
+  played, install size, family-sharing state, synopsis, and one card per owned edition. Each edition card
+  shows its install state, its installed build when the storefront exposes one, its update verdict, and a
+  single **Store page** button. The pane appears at 1120 px and wider; narrow windows keep the full-width
+  list.
+- **Per-game update checker**: `GameUpdates` compares an installed edition against the build its own
+  storefront publishes. Steam uses the keyless official `ISteamApps/UpToDateCheck` endpoint against the
+  installed `buildid` from `appmanifest_<appId>.acf`; GOG Galaxy compares the installed `buildId` from
+  `goggame-*.info` with `ImportedLatestBuildIds`; Epic and Xbox report the installed version but stay
+  `NotSupported` because neither storefront publishes a public comparison endpoint. Uninstalled editions
+  and editions without an installed build id never touch the network. Results are cached in
+  `%USERPROFILE%\Game Explorer\updates.json`.
+- **Catalogue notification bell**: a bell button in the catalogue header collects alerts the background
+  service produced, with an unread badge capped at `9+`. Alerts cover newer builds for installed editions,
+  recent storefront news from the signed-in user's own feeds (Steam community announcements per owned game,
+  GOG.com news, the Epic Games Store blog and Xbox Wire, limited to the last 30 days), free full games and
+  deals/loot/beta keys from GamerPower. The panel supports wheel, keyboard and scrollbar scrolling, opens an
+  alert's page, marks individual alerts read, and persists read state in `notifications-seen.json`.
+- **Game Catalogue Notification Bell settings card**: a new Configuration card with a game-update master
+  switch, a storefront-news master switch plus per-store switches (Steam, GOG, Epic, Xbox), separate free-game
+  and promotion switches, a **Check for alerts now** action and a last-refresh status line.
+- **Service-side refresh**: `GameExplorerService` now runs one notification pass at start, on interactive
+  logon (`SERVICE_CONTROL_SESSIONCHANGE` with `WTS_SESSION_LOGON`), and on the new `CHECK_UPDATES` pipe
+  command, exposing `GET_UPDATES_STATUS`. Because the service runs as `LocalSystem`, the pass impersonates the
+  active console user so `%USERPROFILE%\Game Explorer`, storefront caches and settings resolve correctly; with
+  nobody signed in the pass is skipped instead of writing into the service account's profile.
+- **Responsive 2-column layout in Configuration page**: cards dynamically arrange into two balanced columns when window width >= 1000px (Cards 0, 1, 2, 6 on the left; Cards 3, 4, 5 on the right) with independent padding and bounds, falling back to a clean single column on narrower windows.
+- **25 new unit tests**: 14 for the update checker and 11 for the notification feed, bringing the suite to
+  **112 tests**, all passing under `/W4 /WX`.
+- **Documentation restructure**: `docs/` now has explicit audience trees. `docs/README.md` is the split
+  entry point, `docs/overview.md` the product overview, `docs/user/` holds the user hub plus installation,
+  quick start, user guide, configuration, notifications, metadata customization, troubleshooting and FAQ,
+  and `docs/developer/` holds the developer hub plus the developer guide, service & IPC, catalogue internals,
+  testing, and the five architecture research records under `developer/research/`.
+- **Documentation coverage**: the user tree documents the details pane, the update verdict table, the bell,
+  every Configuration card, installer scope and silent switches, uninstall, the settings and alert files,
+  and troubleshooting; the developer tree documents `GameUpdates`, `Notifications`, the shared
+  `ServiceProtocol` header, the impersonation model, every pipe command, the `updates.json` /
+  `notifications.json` / `notifications-seen.json` schemas, catalogue internals and the 112-case harness.
+
+### Changed
+- **Catalogue is install-only**: the per-store **Play** buttons and the per-store **Install** buttons were
+  removed from the details pane. Playing stays in the File Explorer Games view, and installing is the single
+  footer **Install** action, which lists every owned edition in one menu. Only **Store page** remains per
+  edition.
+- The Configuration page now scrolls as one surface: cards, child controls and the `ThemeScroll` bar share a
+  single offset instead of clipping the lower cards.
+- Documentation links in `README.md`, `AGENTS.md`, the ledgers and source comments now point at the new
+  `docs/user/` and `docs/developer/` paths; the old flat `docs/*.md` pages and `docs/research/` are gone.
+
+### Fixed
+- **Configuration page card overlap & radio toggle drawing artifacts on scroll**: Added `WS_CLIPSIBLINGS` to all child controls; converted window positioning to atomic `BeginDeferWindowPos` / `DeferWindowPos` / `EndDeferWindowPos` with `SWP_NOCOPYBITS`; implemented automatic viewport visibility clipping (`SWP_HIDEWINDOW` / `SWP_SHOWWINDOW`); replaced parent-only invalidation with synchronous `RedrawWindow(hwnd, nullptr, nullptr, RDW_INVALIDATE | RDW_ALLCHILDREN | RDW_ERASE | RDW_UPDATENOW)` across scrolling, sizing, and tab switching; and suppressed class background erasing (`WM_ERASEBKGND`).
+- **Metadata Manager Browse & Add and Remove**: Fixed common dialog owner window handles to prevent child window lockups, added `.lnk` shortcut target resolution, immediately selected newly added games in the listbox and editor, and enabled unblocked removal of game entries without prompt loops or restrictions.
+- **Epic Online Services false detection**: Added anti-cheat and helper keywords to registry scanning, blacklisted EOS executables/paths, and purged stale metadata.
+- **Itch duplicate entries**: Purged slug-based duplicate metadata files and prevented re-indexing of Butler-tracked games via canonical path deduplication.
+- **User customization preservation**: Scanning updates missing fields without overwriting user-customized titles, artwork, and descriptions in existing JSON metadata files.
+- Clicking the page background outside the notification panel now dismisses it. The catalogue page handles its
+  own `WM_LBUTTONDOWN` in addition to `WM_PARENTNOTIFY`, which only reports child-window clicks.
+- The list, details pane and bell children now carry `WS_CLIPSIBLINGS`, so a sibling can no longer paint over
+  the notification panel when the panel overlaps it.
+
 ## [2.6.0] - 2026-10-27
 
 ### Added
@@ -62,7 +130,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   `scripts/unregister.ps1` no longer launch `Start-Process -Verb RunAs` (which opened a second
   window). They verify Administrator rights, print the exact `game-explorer.bat register` /
   `unregister` command when elevation is missing, and propagate `regsvr32` exit codes.
-- **Owned-games source record** (`docs/research/owned-games-sources.md`) rewritten to the shipped
+- **Owned-games source record** (`docs/developer/research/owned-games-sources.md`) rewritten to the shipped
   state: per-store verified artefacts, the Windows-only gate evidence per store, aggregator deferrals
   (Playnite LiteDB, Heroic, Lutris) and the stores that remain installed-only because they publish no
   owned-uninstalled artefact.

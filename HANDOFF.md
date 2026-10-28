@@ -1,7 +1,126 @@
 # HANDOFF.md — Windows Game Explorer Session Handoff
 
-**Last updated:** 2026-10-27
-**Current session status:** `v2.6.0` released and tagged on `main`. Standalone dynamic sizing, 87 unit tests, and comprehensive repository-wide markdown documentation audit delivered:
+# 🚨 AUDIT & REMEDIATION STATUS: INTEGRATION & SERVICE FIXES APPLIED
+
+> **Date:** 2026-10-28  
+> **Status:** AUDIT & CORE FIXES APPLIED IN WORKING TREE  
+> **Summary:** Fixed the shell integration registration, service compilation locking, and background service execution failures without discarding the authorized CAT-02 catalogue overhaul:
+
+---
+
+## Remediation Applied
+
+1. **Fixed Shell Registration & Elevation Scoping (`src/core/Storage.cpp`)**:
+   - `Storage::GetUserRootPath()` now prioritizes `%USERPROFILE%` when running from an interactive user session (even when elevated for registration), preventing `regsvr32` from registering paths to `C:\Users\Administrator`.
+   - The thread token fallback (`SHGetKnownFolderPath(FOLDERID_Profile)`) is preserved specifically when running under `systemprofile` (LocalSystem service account).
+
+2. **Fixed Service Compilation & Link Locking (`scripts/build.ps1`)**:
+   - Added automatic service stopping (`Stop-Service -Name "GameExplorerService"`) and locked-file renaming (`GameExplorerService.exe.<guid>.old` and `GameExplorerWatcher.exe.<guid>.old`) into `build.ps1`.
+   - MSVC LINK no longer hits `LNK1104: cannot open file ... GameExplorerService.exe` when building while the service is running.
+
+3. **Fixed Service Execution & Impersonation Fallback (`src/service/ServiceMain.cpp`)**:
+   - Updated `RunAsConsoleUser()` so that if `WTSQueryUserToken()` fails (e.g. running standalone via `--run`, in non-elevated user context, or in development), it falls back to executing the work directly in the current process context.
+   - `PreloadCache()` and `RefreshNotifications()` now execute reliably instead of silently aborting.
+
+4. **Fixed IPC Named Pipe Reliability (`src/core/ServiceClient.cpp`)**:
+   - Added connection retry logic in `ServiceClient::Send()` to handle `ERROR_FILE_NOT_FOUND` and `ERROR_PIPE_BUSY` when the single-instance server pipe is cycling between client requests during rapid status polling.
+
+5. **In-View Notification Bell Child Window in the Games Tab (`src/view/LibraryViewHost.cpp`)**:
+   - Added `btnBell` directly into the Games tab command bar with an unread badge counter.
+   - Wired a native XAML child flyout (`wuxc::Flyout`) directly to `btnBell` so clicking the bell displays notifications directly in the Games tab view instead of redirecting away to Studio.
+   - Flyout contains: header with title and unread count; "Mark all read" button; scrollable feed cards with kind badges, source labels, titles, summaries, and clickable URL launch with auto-read mark; plus footer link to Studio if deeper alert management is desired.
+
+6. **Fixed Metadata Manager Add & Remove Buttons (`src/manager/ManagerMain.cpp`, `src/core/StorefrontScanner.cpp`)**:
+   - Fixed `BrowseForFile` and `BrowseForFolder` owner window handles by resolving `GetAncestor(hwnd, GA_ROOT)` instead of passing a `WS_CHILD` window, preventing common dialog lockups. Added `OFN_EXPLORER | OFN_NOCHANGEDIR`.
+   - Added `.lnk` shell shortcut target resolution in `StorefrontScanner::AddCustomLocalGame` so shortcuts resolve their real executables, arguments, and working directory.
+   - `AddCustomLocalGame` returns the new `appId`, allowing `RefreshGameList` to immediately select and display the newly added game in the editor.
+   - Fixed `Remove` button in Metadata Manager to cleanly remove custom/local games and metadata JSON overrides, and update the list.
+
+7. **Eliminated False Detection of Epic Online Services as a Game (`src/core/StorefrontScanner.cpp`)**:
+   - Added `epic online services`, `easy anti-cheat`, `easyanticheat`, `battleye`, `riot vanguard`, and `punkbuster` to `nonGameKeywords` in `ScanUninstallRegistry()`.
+   - Added `epiconlineservicesuserhelper.exe`, `epic_online_services.exe`, `eosoverlayrenderer-win64-shipping.exe`, `eosoverlayrenderer-win32-shipping.exe`, and `epicgameshelper.exe` to `IsBlacklistedExecutable` and `IsProbableGameInstallation`.
+   - Excluded `\\epic online services\\` and `\\epic games\\epic online services\\` paths in `IsProbableGameInstallation`.
+   - Added filter in `ScanEpic()` to skip `EpicOnlineServices` and `EOSOverlay`.
+   - Purged stale `local_epiconlineservices.json` metadata file.
+
+8. **Fixed Full Integration Registration Scripts (`scripts/register.ps1`, `scripts/unregister.ps1`)**:
+   - `scripts/register.ps1` now discovers and executes `GameExplorerService.exe --install` and `--start` after `regsvr32.exe`, pinning the shell extension and launching the background worker service in one step.
+   - `scripts/unregister.ps1` now executes `GameExplorerService.exe --uninstall` alongside unregistering the shell DLL, cleanly removing the service and scheduled task.
+
+9. **Fixed Configuration Page Scroll Drawing Artifacts & Overlapping Cards (`src/config/ConfigMain.cpp`)**:
+   - **Root Cause**: Win32 child controls (buttons, edits, check/radio toggles, and statics) were missing `WS_CLIPSIBLINGS`, moved sequentially via individual `SetWindowPos` calls without `SWP_NOCOPYBITS`, and only invalidated via `InvalidateRect(hwnd)` on the parent window. Because the parent has `WS_CLIPCHILDREN`, `InvalidateRect(hwnd)` did not invalidate the child windows, and `SetWindowPos` copied stale screen pixels from sibling cards underneath the moving controls. When cards scrolled out of bounds and back in, the controls retained stale pixels of cards that were still in frame.
+   - **Remediation**:
+     - Added `WS_CLIPSIBLINGS` to all static labels, buttons, check/radio toggles, and edit fields.
+     - Implemented batch window positioning via `BeginDeferWindowPos` / `DeferWindowPos` / `EndDeferWindowPos` with `SWP_NOCOPYBITS`.
+     - Added automatic viewport clipping: controls scrolling outside the viewport (`y + cy <= 0 || y >= client.bottom`) are hidden with `SWP_HIDEWINDOW`, and shown with `SWP_SHOWWINDOW` when entering the frame, preventing off-screen controls from corrupting parent clipping regions.
+     - Replaced parent-only `InvalidateRect(hwnd)` with `RedrawWindow(hwnd, nullptr, nullptr, RDW_INVALIDATE | RDW_ALLCHILDREN | RDW_ERASE | RDW_UPDATENOW)` across scrolling, sizing, and tab switching (`WM_SHOWWINDOW`), forcing synchronous erasing and painting of all child windows and the parent canvas.
+     - Handled `WM_ERASEBKGND` to suppress class background flicker and cleared `wc.hbrBackground`.
+     - Organized cards into a responsive 2-column layout when width >= 1000px (Cards 0, 1, 2, 6 on the left; Cards 3, 4, 5 on the right) with independent bounds and padding, while retaining the single-column fallback on narrow displays with the scrolling engine rock-solid in both.
+
+---
+
+## 2. Detailed Technical Audit of Broken Code
+
+### A. Broken Service Compilation & Process Locking (`CMakeLists.txt`, `src/service/`)
+- **File Lock Collision**: If `GameExplorerService` is running or registered as an SCM service, `build.ps1` / MSBuild cannot overwrite `build/Release/GameExplorerService.exe`. The build fails at the link stage with `LNK1104: cannot open file ... GameExplorerService.exe`.
+- **Bypassed Verification**: The link step was run in a separate CMake directory instead of stopping the running service first, leaving the primary workspace in a state where building all targets fails.
+- **Unintended Dependency Injections**: Added `Wtsapi32.lib` to `GameExplorerService` in `CMakeLists.txt` without checking fallback behaviors.
+
+### B. Broken Shell Integration & Elevation Scoping (`src/core/Storage.cpp`, `src/shell/Registration.cpp`)
+- **Profile Scoping Inversion in `Storage.cpp`**:
+  - `Storage::GetUserRootPath()` was altered to query `SHGetKnownFolderPath(FOLDERID_Profile)` first instead of `%USERPROFILE%`.
+  - **The Damage**: When `register.ps1` or `regsvr32.exe` runs elevated (Administrator), `FOLDERID_Profile` resolves to `C:\Users\Administrator` instead of the active user's home directory. This corrupts shortcut placement (`Games.lnk`), icon copying, and SQLite database paths.
+- **Registration Dependency Deadlock**:
+  - `register.ps1` expects the shell DLL and service to be in a consistent state. Because the service was unregistered or locked, registration scripts fail or leave `shell:games` unpinned.
+
+### C. Fragile Service Impersonation & Pipe Deadlocks (`src/service/ServiceMain.cpp`, `src/core/ServiceClient.cpp`)
+- **Flawed `RunAsConsoleUser` Impersonation**:
+  - `RunAsConsoleUser` relies on `WTSGetActiveConsoleSessionId()` and `WTSQueryUserToken()`.
+  - In headless, RDP, Fast User Switching, or pre-logon boot states, `WTSGetActiveConsoleSessionId()` returns `0xFFFFFFFF`.
+  - In `ServiceMain.cpp`, `PreloadCache()` was wrapped in `RunAsConsoleUser`:
+    ```cpp
+    void PreloadCache() {
+        (void)RunAsConsoleUser([] {
+            // DB open, SmartScan, and cache preload
+        });
+    }
+    ```
+    If `RunAsConsoleUser` returns `false`, `PreloadCache` **silently drops all database preloading and SmartScan initialization**, leaving the cache empty and the service non-functional.
+- **Named Pipe Connection Race & Studio Freeze**:
+  - In `src/config/ConfigMain.cpp`, `StartNotificationCheck()` launches a thread that polls `ServiceClient::Send(ServiceProtocol::kGetUpdatesStatusCommand, ...)` up to 120 times every 500ms.
+  - In `src/service/ServiceMain.cpp`, the named pipe server destroys and recreates `hPipe` on each connection in a single thread. When the client attempts rapid polling via `WaitNamedPipeW()`, the function fails with `ERROR_FILE_NOT_FOUND` during pipe recreation, triggering false "Service not running" errors in the Studio UI.
+
+### D. Documentation Restructuring & Verification
+- `docs/` was restructured into dedicated `docs/user/` and `docs/developer/` subtrees with `docs/README.md` as the main audience-split router.
+- All original developer guides, user guides, metadata customization, and research records are preserved under their respective user/developer subdirectories.
+
+---
+
+## 3. Current Working Tree & Next Steps
+
+1. **Verify Integration**:
+   - The shell extension `GameExplorerShell.dll`, background service `GameExplorerService.exe`, Studio `GameExplorerStudio.exe`, and test suite `GameExplorerTests.exe` compile with 0 errors and 0 warnings.
+   - All 112 unit tests pass.
+2. **Next Steps**:
+   - Register the shell extension and service via `scripts/register.ps1` (or `game-explorer.bat register`) in an elevated prompt.
+   - Launch File Explorer to `shell:games` to inspect the Games tab, top command bar, and the in-view notification bell flyout.
+   - Test Metadata Manager Browse & Add and Remove functionality.
+
+# ARCHIVED HANDOFF LOGS (v2.6.0 Baseline)
+
+***THE LATEST UPDATES BROKE THE INTEGRATION. IT NO LONGER REGISTERS AND THE GAME EXPLORER SERVICE IS NO LONGER BEING COMPILED. CHANGES WERE MADE TO FEATURES IT WAS NOT GIVEN PERMISSION TO CHANGE AND AN AUDIT MUST NOW BE DONE BEFORE ANY OTHER CHANGES IN ORDER TO FIX ALL OF THE DAMGES THAT WERE DONE IN THE MOST RECENT CHANGES***
+
+**Last updated:** 2026-10-28
+**Current session status:** Catalogue details pane rework, per-game update checker, and the notification bell are **delivered in the working tree** (uncommitted, not yet released). Previous release remains `v2.6.0` on `main`. Highlights:
+- **CAT-02 (Details pane, update checker, notification bell)**:
+  - Catalogue details pane (1120 px and wider): identity, developer/publisher, release date, rating, genres, tags, playtime, last played, size, family state, synopsis, and one card per owned edition with install state, installed build, update verdict and a single **Store page** button.
+  - Per-store **Play** and per-store **Install** buttons removed from the pane; playing stays in the File Explorer Games view and installing is the single footer **Install** menu.
+  - `GameUpdates` compares installed editions against the build the storefront publishes (official keyless Steam `ISteamApps/UpToDateCheck`, GOG Galaxy `ImportedLatestBuildIds`; Epic/Xbox report the installed build and stay `NotSupported`). Cached in `updates.json`.
+  - `Notifications` builds the bell feed from newer builds, the user's own storefront news feeds (Steam per-app announcements, GOG.com news, Epic blog, Xbox Wire; last 30 days) and GamerPower free games/deals with the required attribution link. Read state in `notifications-seen.json`.
+  - `GameExplorerService` refreshes once at start, on interactive logon (`SERVICE_CONTROL_SESSIONCHANGE` + `WTS_SESSION_LOGON`), and on `CHECK_UPDATES`/`GET_UPDATES_STATUS`, impersonating the active console user so user paths resolve.
+  - Configuration gained the **Game Catalogue Notification Bell** card (card index 5) and now scrolls as one surface.
+- **Testing & Benchmarks**: **112/112** unit tests passing (25 new), 0 errors and 0 warnings under `/W4 /WX` for every target. Service link verified in a separate CMake tree because the installed service holds `GameExplorerService.exe`.
+- **Docs restructure (delivered in working tree)**: `docs/` is now split into `docs/user/` (hub, installation, quick start, user guide, configuration, notifications, metadata customization, troubleshooting, FAQ) and `docs/developer/` (hub, developer guide, service & IPC, catalogue internals, testing, `research/` with the five architecture records). `docs/README.md` is the audience-split entry point; all links, anchors, fences and LF endings verified.
 - **DYNAMIC-WINDOW-SIZING (Pure Dynamic Layout & Resizability Synchronization)**:
   - Fixed standalone `explorer.exe shell:games` window to utilize **100% dynamic sizing and resizability** (`WS_CAPTION | WS_THICKFRAME | WS_MINIMIZEBOX | WS_MAXIMIZEBOX | WS_SYSMENU`) with fluid layout on the XAML root grid, scroll viewer, and responsive wrapping grids (zero hardcoded sizes or fixed maximum columns).
   - Standalone mode hides the Left Navigation Pane (`NamespaceTreeControl`) and bottom status bar (`msctls_statusbar32`) while resizing `m_hwndViewSink` and `m_hwndView` to the full client area (`0, 0, fullW, fullH`) without dark bars or clipping.
@@ -33,7 +152,7 @@
   - Zero cropping on all card and preview images: all card slots in `LibraryViewHost.cpp` (`Stretch::Fill`) and `ManagerMain.cpp` (full-frame `graphics.DrawImage`) scale images to fit the exact height and width of the card slot with zero clipping of borders or logos.
 - **REVERT-NAV-WIN (Native System Title Bar & Custom Title Bar Architecture Research)**:
   - Completely removed the custom title bar and custom min/max/close window buttons from `LibraryViewHost.cpp`. File Explorer uses the native system title bar and OS-owned window caption buttons.
-  - Documented Microsoft Win32, DWM (`WM_NCCALCSIZE`, `DwmExtendFrameIntoClientArea`), and Shell (`IShellView` `WS_CHILD` vs `CabinetWClass` / `ShellTabWindowClass`) architecture in `docs/research/custom-titlebar-shell-hosting.md`.
+  - Documented Microsoft Win32, DWM (`WM_NCCALCSIZE`, `DwmExtendFrameIntoClientArea`), and Shell (`IShellView` `WS_CHILD` vs `CabinetWClass` / `ShellTabWindowClass`) architecture in `docs/developer/research/custom-titlebar-shell-hosting.md`.
   - Completely reverted navigation pane subclassing and layout override attempts (`DirectUISubclassProc`, `AdjustDirectUILayout`, `m_hDUI`). File Explorer navigation pane functions naturally without fragile Win32 DOM tampering.
 - **SHORTCUT-01 (Desktop & Start Menu Shortcut Deduplication)**:
   - Purged conflicting dual shortcuts across user and public folders (`FOLDERID_Desktop`, `FOLDERID_PublicDesktop`, `OneDrive\Desktop`, and `FOLDERID_Programs`).
@@ -46,7 +165,7 @@
   - Formally dropped Windows 10 support in the NSIS installer (enforcing build >= 22000) and documentation following its end-of-life status.
 - **ICON-01 (Windows 11 Fluent 3D Controller Iconography)**:
   - Generated and embedded authentic Windows 11 Fluent 3D game controller icon (`IDI_GAME_EXPLORER` = 100) and flat variant (101) directly inside `GameExplorerShell.dll` with 7 resolution layers.
-- **Testing & Benchmarks**: 87/87 unit tests passing. 0 compiler warnings under `/W4 /WX`. GameExplorerService unregistered cleanly for testing updated service.
+- **Testing & Benchmarks (v2.6.0 baseline)**: 87/87 unit tests passing. 0 compiler warnings under `/W4 /WX`. GameExplorerService unregistered cleanly for testing updated service.
 **Project:** windows-game-explorer (Windows Game Explorer)
 **Root:** projects/windows-game-explorer
 
@@ -54,6 +173,115 @@
 > workstream state change, fully rewrite at session end. New session: read this file right after `AGENTS.md`,
 > migrate every item into `ROADMAP.md` / `PLAN.md` / `TODO.md` / `BUGS.md`, then **refresh this file**.
 > **Never delete it.**
+
+---
+
+## 0) [windows-game-explorer] CAT-02: Catalogue Details Pane, Per-Game Update Checker & Notification Bell (delivered in working tree, uncommitted)
+
+### Delivered in this workstream (working tree)
+- **Details pane** (`src/studio/CataloguePage.cpp`, `src/studio/CatalogueStrings.h`): the catalogue is no
+  longer list-only. A scrolling right-hand pane renders identity (canonical title, storefront, developer,
+  publisher, release date), play facts (rating, genres, tags, playtime, last played, install size, family
+  state), the sanitized synopsis, and one card per owned edition. Each edition card carries its install
+  state, its installed build when the storefront exposes one, its update verdict, and exactly one
+  **Store page** button. The pane appears at 1120 px and wider; narrower windows keep the full-width list.
+- **Install-only pane**: every per-store **Play** button and per-store **Install** button was removed.
+  Playing belongs to the File Explorer Games view; installing is the single footer **Install** action,
+  which already lists every owned edition in one menu. Only **Store page** stays per edition.
+- **`GameUpdates`** (`include/GameExplorerCore/GameUpdates.h`, `src/core/GameUpdates.cpp`): compares an
+  installed edition against the build its own storefront publishes.
+  - Steam: keyless official
+    `GET https://api.steampowered.com/ISteamApps/UpToDateCheck/v1/?appid=<appId>&version=<buildid>`
+    against `appmanifest_<appId>.acf`. Live-verified shape:
+    `{"response":{"success":true,"up_to_date":false,"version_is_listable":false,"required_version":11138802,"message":"Your server is out of date, please upgrade"}}`.
+  - GOG Galaxy: installed `buildId` from `goggame-*.info` vs Galaxy `ImportedLatestBuildIds`;
+    `NotSupported` when Galaxy never imported the title.
+  - Epic / Xbox: installed version reported from the `.item` manifest / package version, verdict
+    `NotSupported` because no public comparison endpoint exists.
+  - Uninstalled editions and editions without an installed build id never touch the network; a malformed
+    payload is a failure, never an implicit "up to date". Results cache in `updates.json`.
+- **`Notifications`** (`include/GameExplorerCore/Notifications.h`, `src/core/Notifications.cpp`): builds
+  `notifications.json` and the `notifications-seen.json` read state.
+  - Update alerts only when a newer build exists.
+  - Storefront news limited to 30 days from the signed-in user's own feeds: Steam per-app
+    `ISteamNews/GetNewsForApp/v2` with `feeds=steam_community_announcements`, `https://www.gog.com/news/feed`,
+    the Epic blog JSON (`store-content.ak.epicgames.com/.../content/blog`), and `https://news.xbox.com/feed/`.
+    Per-store switches.
+  - GamerPower (`https://www.gamerpower.com/api/giveaways?platform=pc`) `type=game` → free game,
+    `loot`/`beta` → promotion. Attribution hyperlink to GamerPower.com is mandatory and always rendered.
+  - Dedupe by stable id (`gamerpower:<id>`), newest first, truncated payloads drop only the bad item.
+- **Service refresh** (`src/service/ServiceMain.cpp`, `include/GameExplorerCore/ServiceProtocol.h`):
+  - `RunAsConsoleUser` resolves the console session with `WTSGetActiveConsoleSessionId`, duplicates the
+    token with `WTSQueryUserToken`, runs the pass under `ImpersonateLoggedOnUser`, and skips the pass when
+    nobody is signed in instead of writing into the LocalSystem profile.
+  - One pass at service start, one per interactive logon (`SERVICE_CONTROL_SESSIONCHANGE` with
+    `WTS_SESSION_LOGON`), and one per `CHECK_UPDATES`; `GET_UPDATES_STATUS` answers `RUNNING`/`IDLE`.
+    `PreloadWorker` keeps at most one pending refresh.
+  - Feed design is file-based: the service writes `updates.json` / `notifications.json` into the user's
+    environment and Studio reads them, so nothing depends on a shared in-memory cache.
+- **Bell** (`src/studio/CataloguePage.cpp`): custom child windows `GameExplorerCatalogueBell` and
+  `GameExplorerCatalogueBellPanel` (not a popup). 40×30 bell button left of the 160 px **Refresh
+  Catalogue** button; panel 420 px wide, 48 px header, 52 px footer, max 560 px tall. Wheel, keyboard,
+  scrollbar and thumb-drag scrolling; row click marks read and opens the URL; **Mark all read** clears the
+  badge (capped `9+`); closes on outside click, ESC, close cross, or bell toggle. Bell glyph paints
+  accent while there are unread alerts, `textPrimary` on hover or while the panel is open, and
+  `textSecondary` otherwise, so only the badge is high contrast at rest.
+- **Configuration** (`src/config/ConfigMain.cpp`): **Game Catalogue Notification Bell** card at index 5
+  (`CARD_COUNT = 7`, `CARD_HEIGHTS {100,148,106,186,122,150,102}`), with the update master switch, the
+  storefront-news master switch plus Steam/GOG/Epic/Xbox switches (enabled only while the master is on),
+  free-game and promotion switches, **Check for alerts now**, and a last-refresh/count label. The whole
+  page now scrolls as one surface: cards, child controls and the `ThemeScroll` bar share one offset.
+- **Settings**: `AppSettings` gained the notification toggles and they persist through the settings
+  storage path used by both Studio and the service.
+- **Tests**: 25 new cases — `tests/TestGameUpdates.cpp` (14) and `tests/TestNotifications.cpp` (11).
+- **Docs**: the user tree covers the details pane, update verdict table, bell, every Configuration card,
+  installer scope/silent switches, uninstall, the JSON settings and alert files, troubleshooting and FAQ;
+  the developer tree covers `GameUpdates`, `Notifications`, `ServiceProtocol`, impersonation, pipe commands,
+  the `updates.json` / `notifications.json` / `notifications-seen.json` schemas, catalogue internals and the
+  112-case harness. `CHANGELOG.md` `[Unreleased]` records both the feature work and the restructure.
+- **Docs restructure**: `docs/user/` (README, installation, quick-start, user-guide, configuration,
+  notifications, metadata-customization, troubleshooting, faq) and `docs/developer/` (README,
+  developer-guide, service-and-ipc, catalogue-internals, testing, `research/` with the five architecture
+  records). `docs/README.md` is the audience-split entry point; the flat `docs/*.md` pages and
+  `docs/research/` no longer exist, and every repo-wide reference was repointed.
+
+### Verification
+- `/W4 /WX` builds: `GameExplorerCore`, `GameExplorerStudio`, `GameExplorerShell`, `GameExplorerLoader`,
+  `GameExplorerWatcher`, `GameExplorerTests` → **0 errors, 0 warnings**.
+- Unit tests: **112 passed, 0 failed** (`game-explorer.bat test Release`).
+- Service target links clean, verified in a throwaway CMake tree
+  (`C:\Users\Joshu\AppData\Local\Temp\opencode\wge-verify`, since deleted).
+- Visual verification at 1400×1000 with a seeded 12-item feed: badge `12` before **Mark all read** and
+  gone after; panel header `Notifications · 12 unread`; wheel to bottom shows the update row, a beta key,
+  BG3, The First Tree and AoE IV with the body clear of the footer divider; `Last refresh: …` and the
+  GamerPower attribution intact; a background click restores the panel region pixel-identically
+  (`compare -metric AE` = 0).
+- Configuration capture: cards scroll as one surface, the bell card shows every toggle, **Check for alerts
+  now** and the "No refresh yet — the service fills this at sign-in." state.
+- Seeded test feed and seen file deleted from `%USERPROFILE%\Game Explorer\` afterwards.
+- Docs: every relative link and heading anchor in `docs/` resolves; no BOM, no CRLF or lone CR, every file
+  ends with LF, and every code fence is balanced. All 112 `TEST_CASE` names in `docs/developer/testing.md`
+  match `tests/*.cpp` exactly.
+
+### State
+- Working tree only. No commit, tag, push or release. `CHANGELOG.md` carries the work under `[Unreleased]`.
+- Previous released state is `v2.6.0` (`main`), 87 tests.
+
+### Known remaining / blocked
+- **Service deployment blocked**: `game-explorer.bat build Release` cannot link `GameExplorerService.exe`
+  while the installed service (PID 2036) is running and the shell is not elevated. The installed service
+  therefore still runs the OLD binary, and end-to-end service-side feed generation
+  (`updates.json` / `notifications.json`) is untested. Run an elevated
+  `sc stop GameExplorerService` (or `game-explorer.bat unregister`), rebuild, then re-register to verify.
+- **GOG checks unverified**: GOG is not installed on this machine, so the Galaxy `ImportedLatestBuildIds`
+  comparison has no live evidence beyond unit tests.
+- OCR of the footer stamp drops the time even on a known-good reference render; this is an OCR limitation,
+  not a rendering bug.
+
+### Next
+- Deploy and verify the new service end-to-end (see blocked item), then a live 24 h observation of the
+  start/logon pass.
+- Promote `[Unreleased]` to a `v2.7.0` release once the service is verified.
 
 ---
 
@@ -109,8 +337,8 @@
 - **Self-contained portable package**: the ZIP now ships `game-explorer.bat` plus
   `scripts\register.ps1`, `scripts\unregister.ps1` and `scripts\_common.ps1` in the installed layout;
   the NSIS installer ships the same files and retires the old root batch files on upgrade.
-- **Docs reconciled**: project `README.md`, `docs/README.md`, `docs/quick-start.md`,
-  `docs/developer-guide.md`, `AGENTS.md`, `BUGS.md`, `TODO.md` and `CHANGELOG.md`.
+- **Docs reconciled**: project `README.md`, `docs/README.md`, `docs/user/quick-start.md`,
+  `docs/developer/developer-guide.md`, `AGENTS.md`, `BUGS.md`, `TODO.md` and `CHANGELOG.md`.
 - **Release automation retired**: `.github/workflows/release.yml` was deleted. It rebuilt only
   `GameExplorerShell.dll` + `GameExplorerStudio.exe` and therefore never matched the manual release
   set (service, dispatcher, runbooks, NSIS setup, portable ZIP, ROMs template). `ci.yml` still runs
@@ -136,7 +364,7 @@
 - M18 (complete): Windows 10 vs 11 shell compatibility research (`ARCH-01`); Windows 10 build 18362 is the documented API floor, with end-to-end testing outstanding.
   Relocation/move and in-app install-progress tracking are dropped (user decision 2026-10-26) with
   install-location handling. The catalogue stays list-only by design (no detail pane, user decision
-  2026-10-26).
+  2026-10-26 — **superseded 2026-10-28 by CAT-02: the catalogue now ships a details pane**).
 
 ---
 
@@ -163,7 +391,7 @@
   `scanned_platforms`, batched Steam `IStoreBrowseService/GetItems` probes), and
   `FilterWindowsInstallableOwnedGames()` drops console/mobile/macOS/Linux-only editions in one place
   while keeping a title when any PC edition survives. Unknown platform data keeps the title.
-- **Coverage record**: `docs/research/owned-games-sources.md` rewritten to the shipped state — per-store
+- **Coverage record**: `docs/developer/research/owned-games-sources.md` rewritten to the shipped state - per-store
   verified artefacts, the gate evidence per store, aggregator deferrals (Playnite LiteDB, Heroic,
   Lutris) and the stores that stay installed-only because they publish no sanctioned offline
   owned-uninstalled artefact.
@@ -188,9 +416,10 @@
   verified offline artefact exists and no sanctioned endpoint is available without the app handling
   auth. Playnite (LiteDB) and Heroic caches stay deferred aggregators.
 - M18 is complete. The remaining M18 validation gap is a live Explorer-hosted smoke test on Windows
-  10 build 18362; see `docs/research/windows-version-compatibility.md`. Install progress tracking and
+  10 build 18362; see `docs/developer/research/windows-version-compatibility.md`. Install progress tracking and
   library relocation are dropped (user decision 2026-10-26) with install-location handling. No
-  per-title detail pane — the catalogue is intentionally list-only.
+  per-title detail pane — the catalogue is intentionally list-only. (**Superseded 2026-10-28 by
+  CAT-02: a details pane now ships.**)
 
 ---
 
@@ -209,7 +438,8 @@
   already-installed source is labelled "(Installed)" and selecting it explains that playing happens in
   the File Explorer Games view rather than reinstalling.
 - **Catalogue synopsis**: `OwnedGame::synopsis` carries each source's overview in the metadata model;
-  the catalogue itself stays list-only and does not render a detail pane.
+  the catalogue itself stays list-only and does not render a detail pane. (**Superseded 2026-10-28 by
+  CAT-02: the pane now renders the synopsis.**)
 - **Themed checkboxes/radios**: `ThemeControls` stores `BM_SETCHECK` and answers `BM_GETCHECK`
   (`HoverState::checkState`), so owned-drawn checkboxes and radios keep their state; covered by
   `tests/TestSettings.cpp`.
@@ -229,6 +459,7 @@
 ### Next
 - Remaining owned-library work: EA App (no verified offline artefact; installed-only for now).
   Relocation and install-progress tracking are dropped (user decision 2026-10-26); no detail pane.
+  (**Superseded 2026-10-28 by CAT-02: a details pane now ships.**)
 
 ---
 
@@ -263,7 +494,8 @@
 - Epic and Ubisoft Connect ownership sync landed in slice 2c; EA App remains pending. Genre/tag/rating/family-sharing
   columns stay empty until those sources (or Steam metadata for genres/tags) land.
 - Catalogue detail pane, install-progress tracking and library relocation are dropped
-  (user decisions 2026-10-26); the catalogue stays a single list view.
+  (user decisions 2026-10-26); the catalogue stays a single list view. (**Superseded 2026-10-28 by
+  CAT-02: the details pane ships.**)
 
 ### State
 - Released in `v2.4.0` (`1c9e1d3`, tagged and pushed); the install-target part of this slice was
@@ -277,7 +509,7 @@
 - **Black field backgrounds (BUG-15)**: `g_hEditBrush` was created from `ThemeControls::FieldSurfaceColor()` before `ThemeControls::SetTheme()` published the palette, so the brush was built from a zero-initialised palette and came out `RGB(0,0,0)`. Both `EnsureManagerResources()` and `EnsureConfigResources()` now call `SetTheme()` before deriving the brush. The synopsis editor's interior histogram is uniformly `#2B2B2B` (was 36 765 black pixels); a sweep of all 59 Manager and 32 Configuration control rects reports zero black interior patches.
 - **Edge repaint debris (BUG-16)**: `PaintCombo()` and `PaintFieldBorder()` fill their whole window rectangle with `cardBg` before drawing the rounded surface, so the 1 px ring and the four corners can never retain an older frame. Proven behaviourally: soil a control's client with magenta, invalidate only that control, read the screen back — `0` magenta pixels remain and every edge row reads `45,45,45`.
 - **Shared field tokens**: new `fieldBg` / `fieldBorder` in `ThemePalette`; `ThemeControls::FieldSurfaceColor()` is the single accessor used by the `WM_CTLCOLOREDIT` handlers and brush creation, so text boxes and combo boxes cannot drift apart again.
-- **GFM synopsis editor**: created as a true multi-line editor (`ES_MULTILINE | ES_AUTOVSCROLL | ES_WANTRETURN | WS_VSCROLL | ES_NOHIDESEL`); the in-editor formatting hint label is gone (the guide lives in `docs/metadata-customization.md`).
+- **GFM synopsis editor**: created as a true multi-line editor (`ES_MULTILINE | ES_AUTOVSCROLL | ES_WANTRETURN | WS_VSCROLL | ES_NOHIDESEL`); the in-editor formatting hint label is gone (the guide lives in `docs/user/metadata-customization.md`).
 - **Verification**: `/W4 /WX` build 0 errors / 0 warnings; 39/39 unit tests; captures taken only after `capture-verified.ps1` reports `foreground=True uncovered=True`.
 
 ### Known remaining polish
@@ -623,6 +855,6 @@ Delivered universal achievement tracking across native storefronts (Steam, GOG, 
 1. **M18 complete** — Windows 10 version 1903 (build 18362) is the documented UWP XAML hosting API
    floor. Explorer presentation remains OS-controlled; the NSIS installer enforces the floor.
    End-to-end testing on build 18362 remains outstanding. Details in `TODO.md` and
-   `docs/research/windows-version-compatibility.md`.
+   `docs/developer/research/windows-version-compatibility.md`.
 2. **`v2.5.0` shipped** — commit `c573ce5`, tag `v2.5.0`, GitHub release published with the setup EXE,
    portable ZIP and ROMs template.

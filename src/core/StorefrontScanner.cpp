@@ -465,6 +465,44 @@ std::wstring ExtractJsonStringField(const std::wstring& json, const std::wstring
     return UnescapeJsonOrVdfString(json.substr(pos + 1, endQuote - (pos + 1)));
 }
 
+// Reads the build identity from GOG's install manifest (`goggame-<id>.info`) next to the game.
+// The manifest is JSON authored by the GOG installer/Galaxy; `buildId` is the exact build that is
+// on disk, and older manifests that only ship `version` fall back to that. Read-only.
+std::wstring ReadGogInstalledBuildId(const std::wstring& installPath, const std::wstring& gameId) {
+    if (installPath.empty()) return L"";
+
+    std::error_code ec;
+    fs::path infoPath = gameId.empty() ? fs::path()
+                                       : fs::path(installPath) / (L"goggame-" + gameId + L".info");
+    if (infoPath.empty() || !fs::exists(infoPath, ec)) {
+        infoPath.clear();
+        for (const auto& entry : fs::directory_iterator(
+                 installPath, fs::directory_options::skip_permission_denied, ec)) {
+            if (!entry.is_regular_file(ec)) continue;
+            const std::wstring name = entry.path().filename().wstring();
+            if (name.rfind(L"goggame-", 0) == 0 && entry.path().extension() == L".info") {
+                infoPath = entry.path();
+                break;
+            }
+        }
+    }
+    if (infoPath.empty() || !fs::exists(infoPath, ec)) return L"";
+
+    std::wifstream stream(infoPath);
+    if (!stream.is_open()) return L"";
+
+    std::wstring json;
+    std::wstring line;
+    while (std::getline(stream, line)) {
+        json += line;
+        json.push_back(L'\n');
+    }
+
+    std::wstring buildId = ExtractJsonStringField(json, L"buildId");
+    if (buildId.empty()) buildId = ExtractJsonStringField(json, L"version");
+    return buildId;
+}
+
 // Parses the optional "launchMethods" object array from a per-game metadata JSON document.
 // Each entry describes a secondary launch method (custom launcher/wrapper) for the game.
 std::vector<LaunchMethod> ExtractLaunchMethods(const std::wstring& json) {
@@ -1721,8 +1759,18 @@ bool StorefrontScanner::ResetArtworkCache() {
         }
     }
 
+    ClearRemovedGames();
+    auto& db = Database::Instance();
+    if (db.IsOpen()) {
+        (void)db.BeginTransaction();
+        for (const auto& ex : db.GetAllGames()) {
+            (void)db.DeleteGame(ex.id);
+        }
+        (void)db.CommitTransaction();
+    }
+
     // 4. Complete Repopulation: Scan all storefronts to regenerate fresh authentic metadata & artwork
-    ScanAll(Database::Instance());
+    ScanAll(db);
 
     // 5. Broadcast notification to open Windows File Explorer and companion views
     SHChangeNotify(SHCNE_UPDATEDIR, SHCNF_PATHW, nullptr, nullptr);
@@ -2232,6 +2280,11 @@ bool StorefrontScanner::IsBlacklistedExecutable(const std::wstring& filename) {
         L"link2ea.exe",
         L"epicgameslauncher.exe",
         L"epicwebhelper.exe",
+        L"epicgameshelper.exe",
+        L"epiconlineservicesuserhelper.exe",
+        L"epic_online_services.exe",
+        L"eosoverlayrenderer-win64-shipping.exe",
+        L"eosoverlayrenderer-win32-shipping.exe",
         L"legendary.exe",
         L"galaxyclient.exe",
         L"gog.galaxy.client.service.exe",
@@ -2617,7 +2670,7 @@ std::vector<GameItem> StorefrontScanner::ScanSteam() {
             std::wifstream stream(entry.path());
             if (!stream.is_open()) continue;
 
-            std::wstring rawAppId, gameName, installDir, sizeOnDiskStr, lastPlayedStr;
+            std::wstring rawAppId, gameName, installDir, sizeOnDiskStr, lastPlayedStr, buildIdStr;
             std::wstring line;
             while (std::getline(stream, line)) {
                 std::wstring key, val;
@@ -2627,6 +2680,7 @@ std::vector<GameItem> StorefrontScanner::ScanSteam() {
                     else if (key == L"installdir") installDir = val;
                     else if (key == L"SizeOnDisk") sizeOnDiskStr = val;
                     else if (key == L"LastPlayed") lastPlayedStr = val;
+                    else if (key == L"buildid") buildIdStr = val;
                 }
             }
 
@@ -2646,6 +2700,7 @@ std::vector<GameItem> StorefrontScanner::ScanSteam() {
             item.title = gameName;
             item.platform = PlatformType::Steam;
             item.launchUri = L"steam://rungameid/" + rawAppId;
+            item.buildId = buildIdStr;
 
             if (!sizeOnDiskStr.empty()) {
                 item.diskSizeBytes = _wcstoui64(sizeOnDiskStr.c_str(), nullptr, 10);
@@ -2682,6 +2737,7 @@ std::vector<GameItem> StorefrontScanner::ScanSteam() {
 std::vector<GameItem> StorefrontScanner::ScanItch() {
     std::vector<GameItem> games;
     std::set<std::wstring> discoveredFolderNames;
+    std::set<std::wstring> discoveredExes;
 
     auto extractItchSubdomainAuthor = [](const std::wstring& storeUrl) -> std::wstring {
         const size_t schemePos = storeUrl.find(L"://");
@@ -2855,6 +2911,7 @@ std::vector<GameItem> StorefrontScanner::ScanItch() {
                             if (!exePath.empty()) {
                                 item.executablePath = exePath.wstring();
                                 item.workingDirectory = exePath.parent_path().wstring();
+                                discoveredExes.insert(NormalizeDirKey(item.executablePath));
                             } else {
                                 item.workingDirectory = gameDir.wstring();
                             }
@@ -2932,6 +2989,14 @@ std::vector<GameItem> StorefrontScanner::ScanItch() {
 
                 const fs::path exePath = FindPrimaryGameExecutable(entry.path());
                 if (!exePath.empty()) {
+                    const std::wstring normExe = NormalizeDirKey(exePath.wstring());
+                    if (!normExe.empty() && discoveredExes.count(normExe) > 0) {
+                        continue;
+                    }
+                    if (!normExe.empty()) {
+                        discoveredExes.insert(normExe);
+                    }
+
                     GameItem item{};
                     auto itSlug = butlerGamesBySlug.find(lowerFn);
                     auto itTitle = (itSlug == butlerGamesBySlug.end()) ? butlerGamesByTitle.find(lowerFn) : butlerGamesBySlug.end();
@@ -3037,6 +3102,8 @@ std::vector<GameItem> StorefrontScanner::ScanGOG() {
                 item.platform = PlatformType::GOG;
                 item.workingDirectory = installPath;
                 item.executablePath = exePath.empty() ? (installPath + L"\\" + subKeyName + L".exe") : exePath;
+                item.buildId = ReadGogInstalledBuildId(
+                    installPath, gameId.empty() ? std::wstring(subKeyName) : gameId);
                 games.push_back(std::move(item));
             }
         }
@@ -3067,7 +3134,7 @@ std::vector<GameItem> StorefrontScanner::ScanEpic() {
         if (!stream.is_open()) continue;
 
         std::wstring line;
-        std::wstring displayName, appName, installLocation, launchExe;
+        std::wstring displayName, appName, installLocation, launchExe, appVersion;
 
         while (std::getline(stream, line)) {
             std::wstring key, val;
@@ -3076,15 +3143,27 @@ std::vector<GameItem> StorefrontScanner::ScanEpic() {
                 else if (key == L"AppName") appName = val;
                 else if (key == L"InstallLocation") installLocation = val;
                 else if (key == L"LaunchExecutable") launchExe = val;
+                else if (key == L"AppVersionString") appVersion = val;
             }
         }
 
         if (!displayName.empty() && !appName.empty()) {
+            std::wstring lowerAppName = appName;
+            std::transform(lowerAppName.begin(), lowerAppName.end(), lowerAppName.begin(), ::towlower);
+            std::wstring lowerDisp = displayName;
+            std::transform(lowerDisp.begin(), lowerDisp.end(), lowerDisp.begin(), ::towlower);
+            if (lowerAppName.find(L"epiconlineservices") != std::wstring::npos ||
+                lowerAppName.find(L"eosoverlay") != std::wstring::npos ||
+                lowerDisp.find(L"epic online services") != std::wstring::npos) {
+                continue;
+            }
+
             GameItem item{};
             item.appId = L"epic_" + appName;
             item.title = displayName;
             item.platform = PlatformType::Epic;
             item.workingDirectory = installLocation;
+            item.buildId = appVersion;
             if (!launchExe.empty()) {
                 item.executablePath = (fs::path(installLocation) / launchExe).wstring();
             }
@@ -4053,7 +4132,9 @@ bool StorefrontScanner::IsProbableGameInstallation(const std::wstring& installDi
         L"dropbox.exe", L"ccleaner64.exe", L"rufus.exe", L"obs64.exe", L"audacity.exe",
         L"vmware.exe", L"virtualbox.exe", L"putty.exe", L"filezilla.exe", L"winscp.exe",
         L"installer.exe", L"unins000.exe", L"setup.exe", L"supportassist.exe",
-        L"dsu.exe", L"igfxext.exe", L"inteltechnologyaccesstray.exe", L"intelsoftwareassetmanager.exe"
+        L"dsu.exe", L"igfxext.exe", L"inteltechnologyaccesstray.exe", L"intelsoftwareassetmanager.exe",
+        L"epiconlineservicesuserhelper.exe", L"epic_online_services.exe",
+        L"eosoverlayrenderer-win64-shipping.exe", L"eosoverlayrenderer-win32-shipping.exe"
     };
 
     std::wstring lowerFn = fn;
@@ -4074,6 +4155,8 @@ bool StorefrontScanner::IsProbableGameInstallation(const std::wstring& installDi
         lowerPath.find(L"\\ea desktop\\") != std::wstring::npos ||
         lowerPath.find(L"\\origin\\") != std::wstring::npos ||
         lowerPath.find(L"\\electronic arts\\") != std::wstring::npos ||
+        lowerPath.find(L"\\epic online services\\") != std::wstring::npos ||
+        lowerPath.find(L"\\epic games\\epic online services\\") != std::wstring::npos ||
         lowerPath.find(L"\\epic games\\launcher\\") != std::wstring::npos ||
         lowerPath.find(L"\\epic games launcher\\") != std::wstring::npos ||
         lowerPath.find(L"\\epic games\\legendary\\") != std::wstring::npos ||
@@ -4218,7 +4301,8 @@ std::vector<GameItem> StorefrontScanner::ScanUninstallRegistry() {
         L"antigravity", L"visual studio", L"sdk", L"development kit", L"supportassist",
         L"dell core", L"onedrive", L"sharex", L"winaero", L"open code", L"opencode",
         L"ripgrep", L"eclipse temurin", L"free download manager", L"github copilot",
-        L"nvm for windows", L"youtube", L"ruby ", L"glab "
+        L"nvm for windows", L"youtube", L"ruby ", L"glab ", L"epic online services",
+        L"easy anti-cheat", L"easyanticheat", L"battleye", L"riot vanguard", L"punkbuster"
     };
 
     for (const auto& regRoot : roots) {
@@ -5399,48 +5483,141 @@ std::vector<GameItem> StorefrontScanner::ScanEmulatedGames() {
     return games;
 }
 
-bool StorefrontScanner::AddCustomLocalGame(const std::wstring& executablePath, const std::wstring& customTitle) {
+bool StorefrontScanner::AddCustomLocalGame(const std::wstring& executablePath, const std::wstring& customTitle, std::wstring* outAppId) {
     if (executablePath.empty() || !fs::exists(executablePath)) return false;
 
     Storage::EnsureDirectoriesCreated();
     const auto now = GetTickCount64();
     GameItem item{};
     item.appId = L"custom_" + std::to_wstring(now);
-    item.title = customTitle.empty() ? fs::path(executablePath).stem().wstring() : customTitle;
     item.platform = PlatformType::CustomExecutable;
-    item.executablePath = executablePath;
-    item.workingDirectory = fs::path(executablePath).parent_path().wstring();
+
+    std::wstring exe = executablePath;
+    std::wstring workDir = fs::path(executablePath).parent_path().wstring();
+    std::wstring title = customTitle.empty() ? fs::path(executablePath).stem().wstring() : customTitle;
+
+    // If a .lnk shortcut was chosen, resolve to the underlying target executable
+    if (_wcsicmp(fs::path(executablePath).extension().c_str(), L".lnk") == 0) {
+        ResolvedShortcutInfo lnk = ResolveLnkShortcut(executablePath);
+        if (!lnk.targetPath.empty() && fs::exists(lnk.targetPath)) {
+            exe = lnk.targetPath;
+            if (!lnk.workingDir.empty()) workDir = lnk.workingDir;
+            if (!lnk.arguments.empty()) item.launchArguments = lnk.arguments;
+            if (!lnk.iconPath.empty()) item.iconPath = lnk.iconPath;
+        }
+    }
+
+    item.title = title;
+    item.executablePath = exe;
+    item.workingDirectory = workDir;
     EnrichFromExecutableVersionInfo(item);
 
     SavePerGameMetadata(item);
+    Database::Instance().UpsertGame(item);
     SHChangeNotify(SHCNE_UPDATEDIR, SHCNF_PATHW, Storage::GetUserRootPath().c_str(), nullptr);
+    if (outAppId != nullptr) *outAppId = item.appId;
     return true;
 }
 
-bool StorefrontScanner::RemoveCustomLocalGame(const std::wstring& appId) {
+fs::path StorefrontScanner::RemovedGamesPath() {
+    return Storage::GetMetadataPath() / L".removed_games.json";
+}
+
+bool StorefrontScanner::LoadRemovedGameIds(std::vector<std::wstring>& out) {
+    out.clear();
+    const fs::path p = RemovedGamesPath();
+    std::error_code ec;
+    if (!fs::exists(p, ec)) return false;
+
+    std::ifstream stream(p, std::ios::binary);
+    if (!stream.is_open()) return false;
+    const std::string utf8((std::istreambuf_iterator<char>(stream)), std::istreambuf_iterator<char>());
+    stream.close();
+
+    const std::wstring wide = Utf8ToWide(utf8.c_str());
+    size_t pos = 0;
+    while ((pos = wide.find(L"\"", pos)) != std::wstring::npos) {
+        const size_t endQuote = wide.find(L"\"", pos + 1);
+        if (endQuote == std::wstring::npos) break;
+        std::wstring id = wide.substr(pos + 1, endQuote - (pos + 1));
+        if (!id.empty()) {
+            out.push_back(std::move(id));
+        }
+        pos = endQuote + 1;
+    }
+    return true;
+}
+
+bool StorefrontScanner::SaveRemovedGameIds(const std::vector<std::wstring>& ids) {
+    Storage::EnsureDirectoriesCreated();
+    const fs::path p = RemovedGamesPath();
+    std::wstring json = L"[\n";
+    for (size_t i = 0; i < ids.size(); ++i) {
+        json += L"  \"" + ids[i] + L"\"" + (i + 1 < ids.size() ? L",\n" : L"\n");
+    }
+    json += L"]\n";
+    std::ofstream out(p, std::ios::binary);
+    if (!out.is_open()) return false;
+    const std::string utf8 = WideToUtf8(json);
+    out.write(utf8.data(), utf8.size());
+    return true;
+}
+
+bool StorefrontScanner::IsGameRemoved(const std::wstring& appId) {
     if (appId.empty()) return false;
+    std::vector<std::wstring> ids;
+    if (!LoadRemovedGameIds(ids)) return false;
+    for (const auto& id : ids) {
+        if (_wcsicmp(id.c_str(), appId.c_str()) == 0) return true;
+    }
+    return false;
+}
+
+bool StorefrontScanner::AddRemovedGame(const std::wstring& appId) {
+    if (appId.empty()) return false;
+    std::vector<std::wstring> ids;
+    (void)LoadRemovedGameIds(ids);
+    for (const auto& id : ids) {
+        if (_wcsicmp(id.c_str(), appId.c_str()) == 0) return true;
+    }
+    ids.push_back(appId);
+    return SaveRemovedGameIds(ids);
+}
+
+bool StorefrontScanner::ClearRemovedGames() {
+    std::error_code ec;
+    return fs::remove(RemovedGamesPath(), ec);
+}
+
+bool StorefrontScanner::RemoveGame(const std::wstring& appId) {
+    if (appId.empty()) return false;
+    (void)AddRemovedGame(appId);
+
     const fs::path metaDir = Storage::GetMetadataPath();
     const fs::path jsonPath = metaDir / (appId + L".json");
     std::error_code ec;
-    bool removed = false;
-    if (fs::exists(jsonPath, ec) && fs::remove(jsonPath, ec)) {
-        removed = true;
+    if (fs::exists(jsonPath, ec)) {
+        fs::remove(jsonPath, ec);
     }
 
     // Also sweep OneDrive metadata mirror to prevent sync-back
     const fs::path oneDriveMeta = Storage::GetOneDriveMetadataPath();
     if (!oneDriveMeta.empty()) {
         const fs::path odJsonPath = oneDriveMeta / (appId + L".json");
-        if (fs::exists(odJsonPath, ec) && fs::remove(odJsonPath, ec)) {
-            removed = true;
+        if (fs::exists(odJsonPath, ec)) {
+            fs::remove(odJsonPath, ec);
         }
     }
 
-    if (removed) {
-        SHChangeNotify(SHCNE_UPDATEDIR, SHCNF_PATHW, Storage::GetUserRootPath().c_str(), nullptr);
-        return true;
-    }
-    return false;
+    // Keep database in sync for persistence
+    Database::Instance().DeleteGameByAppId(appId);
+
+    SHChangeNotify(SHCNE_UPDATEDIR, SHCNF_PATHW, Storage::GetUserRootPath().c_str(), nullptr);
+    return true;
+}
+
+bool StorefrontScanner::RemoveCustomLocalGame(const std::wstring& appId) {
+    return RemoveGame(appId);
 }
 
 void EnrichFromSteamStoreSearch(GameItem& item) {
@@ -5567,13 +5744,23 @@ std::vector<GameItem> StorefrontScanner::LoadAllGamesFromMetadata() {
     std::error_code ec;
     if (!fs::exists(metaDir, ec)) return games;
 
+    std::set<std::wstring> seenAppIds;
+    std::set<std::wstring> seenExePaths;
+    std::set<std::wstring> seenPlatformTitles;
+
     for (const auto& entry : fs::directory_iterator(metaDir, ec)) {
         if (!entry.is_regular_file()) continue;
         const auto p = entry.path();
         if (p.extension() != L".json") continue;
+        const std::wstring fn = p.filename().wstring();
+        if (fn.empty() || fn.front() == L'.') continue;
 
         GameItem item{};
         item.appId = p.stem().wstring();
+        if (IsGameRemoved(item.appId)) {
+            continue;
+        }
+
         if (LoadPerGameMetadata(item)) {
             // Self-healing: if an item is a local_ entry and fails game heuristics, purge it
             if (item.appId.rfind(L"local_", 0) == 0) {
@@ -5586,6 +5773,31 @@ std::vector<GameItem> StorefrontScanner::LoadAllGamesFromMetadata() {
             }
 
             if (!item.title.empty()) {
+                if (!seenAppIds.insert(item.appId).second) {
+                    continue;
+                }
+
+                // Deduplicate by normalized executable path (auto-purging duplicate JSON)
+                if (!item.executablePath.empty()) {
+                    const std::wstring normExe = NormalizeDirKey(item.executablePath);
+                    if (!normExe.empty() && !seenExePaths.insert(normExe).second) {
+                        std::error_code dupEc;
+                        fs::remove(p, dupEc);
+                        Database::Instance().DeleteGameByAppId(item.appId);
+                        continue;
+                    }
+                }
+
+                // Deduplicate by platform + title key (auto-purging duplicate JSON)
+                std::wstring platTitle = std::wstring(PlatformToString(item.platform)) + L"|" + item.title;
+                std::transform(platTitle.begin(), platTitle.end(), platTitle.begin(), ::towlower);
+                if (!seenPlatformTitles.insert(platTitle).second) {
+                    std::error_code dupEc;
+                    fs::remove(p, dupEc);
+                    Database::Instance().DeleteGameByAppId(item.appId);
+                    continue;
+                }
+
                 item.id = static_cast<int64_t>(games.size() + 1);
                 games.push_back(std::move(item));
             }
@@ -5814,15 +6026,48 @@ std::vector<GameItem> StorefrontScanner::ScanAllInstalledGames() {
         }
 
         game.id = static_cast<int64_t>(deduped.size() + 1);
-        LoadPerGameMetadata(game);
 
-        // Multi-source metadata and artwork enrichment:
-        // Configured providers (SteamGridDB, IGDB) are primary defaults when enabled;
-        // Keyless Steam Store search and storefronts act as fallbacks.
-        EnrichGameMetadata(game);
+        GameItem existing{};
+        existing.appId = game.appId;
+        const bool hasExisting = LoadPerGameMetadata(existing);
 
-        SavePerGameMetadata(game);
-        deduped.push_back(std::move(game));
+        if (!hasExisting) {
+            // First time this game is discovered: create new metadata JSON with multi-source enrichment
+            EnrichGameMetadata(game);
+            SavePerGameMetadata(game);
+            deduped.push_back(std::move(game));
+        } else {
+            // Existing metadata JSON file: DO NOT override user customizations!
+            // Update only fields that are currently empty in existing metadata.
+            if (existing.title.empty()) existing.title = game.title;
+            if (existing.developer.empty()) existing.developer = game.developer;
+            if (existing.publisher.empty()) existing.publisher = game.publisher;
+            if (existing.releaseDate.empty()) existing.releaseDate = game.releaseDate;
+            if (existing.rating.empty()) existing.rating = game.rating;
+            if (existing.synopsis.empty()) existing.synopsis = game.synopsis;
+            if (existing.genres.empty()) existing.genres = game.genres;
+            if (existing.executablePath.empty()) existing.executablePath = game.executablePath;
+            if (existing.workingDirectory.empty()) existing.workingDirectory = game.workingDirectory;
+            if (existing.launchCommand.empty()) existing.launchCommand = game.launchCommand.empty() ? game.launchUri : game.launchCommand;
+            if (existing.launchArguments.empty()) existing.launchArguments = game.launchArguments;
+            if (existing.coverArtPath.empty()) existing.coverArtPath = game.coverArtPath;
+            if (existing.heroArtPath.empty()) existing.heroArtPath = game.heroArtPath;
+            if (existing.iconPath.empty()) existing.iconPath = game.iconPath;
+            if (existing.detailsArtPath.empty()) existing.detailsArtPath = game.detailsArtPath;
+            if (existing.storePageUrl.empty()) existing.storePageUrl = game.storePageUrl;
+            if (existing.platform == PlatformType::Unknown) existing.platform = game.platform;
+            if (existing.launchMethods.empty()) existing.launchMethods = game.launchMethods;
+            if (existing.diskSizeBytes == 0) existing.diskSizeBytes = game.diskSizeBytes;
+            if (!game.buildId.empty()) existing.buildId = game.buildId;
+
+            // Only fetch artwork/providers if artwork slots are still empty
+            if (existing.coverArtPath.empty() || existing.heroArtPath.empty() || existing.synopsis.empty()) {
+                EnrichGameMetadata(existing);
+            }
+
+            SavePerGameMetadata(existing);
+            deduped.push_back(std::move(existing));
+        }
     }
 
     return deduped;

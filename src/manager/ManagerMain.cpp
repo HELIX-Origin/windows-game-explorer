@@ -567,11 +567,11 @@ bool BrowseForFile(HWND hwnd, const wchar_t* title, const wchar_t* filter, std::
     wchar_t szFile[MAX_PATH] = { 0 };
     OPENFILENAMEW ofn{};
     ofn.lStructSize = sizeof(ofn);
-    ofn.hwndOwner = hwnd;
+    ofn.hwndOwner = hwnd ? GetAncestor(hwnd, GA_ROOT) : nullptr;
     ofn.lpstrFilter = filter;
     ofn.lpstrFile = szFile;
     ofn.nMaxFile = ARRAYSIZE(szFile);
-    ofn.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST;
+    ofn.Flags = OFN_EXPLORER | OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR;
     ofn.lpstrTitle = title;
 
     if (GetOpenFileNameW(&ofn)) {
@@ -584,7 +584,7 @@ bool BrowseForFile(HWND hwnd, const wchar_t* title, const wchar_t* filter, std::
 bool BrowseForFolder(HWND hwnd, const wchar_t* title, std::wstring& outPath) {
     wchar_t displayName[MAX_PATH] = { 0 };
     BROWSEINFOW bi{};
-    bi.hwndOwner = hwnd;
+    bi.hwndOwner = hwnd ? GetAncestor(hwnd, GA_ROOT) : nullptr;
     bi.pszDisplayName = displayName;
     bi.lpszTitle = title;
     bi.ulFlags = BIF_RETURNONLYFSDIRS | BIF_NEWDIALOGSTYLE;
@@ -1657,7 +1657,7 @@ LRESULT CALLBACK ManagerWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPar
 
         // The synopsis editor is a real wrapped multi-line field: it wraps at the field width and
         // Enter inserts a line break. Full markdown-style formatting is documented in
-        // docs/metadata-customization.md and rendered in the Explorer details pane.
+        // docs/user/metadata-customization.md and rendered in the Explorer details pane.
         createField(L"Synopsis:", g_hwndEditSynopsis, g_hwndLblSynopsis, IDC_EDIT_SYNOPSIS,
                     fullLabelX, fullEditX, 306, topY + 468,
                     ES_MULTILINE | ES_AUTOVSCROLL | ES_WANTRETURN | ES_NOHIDESEL);
@@ -2434,14 +2434,10 @@ LRESULT CALLBACK ManagerWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPar
                 L"Game Executables & Shortcuts (*.exe;*.lnk;*.bat;*.cmd)\0*.exe;*.lnk;*.bat;*.cmd\0All Files (*.*)\0*.*\0",
                 chosenExe
             )) {
-                if (StorefrontScanner::AddCustomLocalGame(chosenExe)) {
+                std::wstring newAppId;
+                if (StorefrontScanner::AddCustomLocalGame(chosenExe, L"", &newAppId)) {
                     EnumWindows(BroadcastRefreshToShellViews, 0);
-                    RefreshGameList(hwnd);
-                    if (!g_games.empty()) {
-                        g_selectedIndex = static_cast<int>(g_games.size() - 1);
-                        SendMessageW(g_hwndListGames, LB_SETCURSEL, static_cast<WPARAM>(g_selectedIndex), 0);
-                        PopulateEditorFromSelected(hwnd);
-                    }
+                    RefreshGameList(hwnd, newAppId);
                 }
             }
             return 0;
@@ -2450,12 +2446,10 @@ LRESULT CALLBACK ManagerWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPar
         if (id == IDC_BTN_REMOVE_GAME) {
             if (g_selectedIndex >= 0 && static_cast<size_t>(g_selectedIndex) < g_games.size()) {
                 const auto& g = g_games[static_cast<size_t>(g_selectedIndex)];
-                if (StorefrontScanner::RemoveCustomLocalGame(g.appId)) {
-                    EnumWindows(BroadcastRefreshToShellViews, 0);
-                    RefreshGameList(hwnd);
-                } else {
-                    MessageBoxW(hwnd, L"Storefront games are managed by their provider client. Only custom local games or saved metadata overrides can be removed.", L"Game Explorer Manager", MB_OK | MB_ICONINFORMATION);
-                }
+                const std::wstring appIdToRemove = g.appId;
+                StorefrontScanner::RemoveGame(appIdToRemove);
+                EnumWindows(BroadcastRefreshToShellViews, 0);
+                RefreshGameList(hwnd);
             }
             return 0;
         }

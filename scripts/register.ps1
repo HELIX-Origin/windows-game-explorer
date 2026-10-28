@@ -51,8 +51,32 @@ if ($process.ExitCode -ne 0) {
     exit $process.ExitCode
 }
 
+# Locate and register GameExplorerService.exe
+$ServiceExe = $null
+$serviceCandidates = @(
+    (Join-Path $PSScriptRoot '..\GameExplorerService.exe'),
+    (Join-Path $PSScriptRoot '..\build\Release\GameExplorerService.exe'),
+    (Join-Path $PSScriptRoot '..\Release\GameExplorerService.exe')
+)
+foreach ($candidate in $serviceCandidates) {
+    if (Test-Path -LiteralPath $candidate) {
+        $ServiceExe = (Resolve-Path -LiteralPath $candidate).Path
+        break
+    }
+}
+
+if ($ServiceExe) {
+    Write-Host ('Target Service : {0}' -f $ServiceExe) -ForegroundColor White
+    Write-Host 'Registering and starting the Game Explorer background service...' -ForegroundColor White
+    Start-Process -FilePath $ServiceExe -ArgumentList @('--install') -Wait
+    Start-Process -FilePath $ServiceExe -ArgumentList @('--start') -Wait
+}
+
 Write-GameExplorerSuccess -Action 'Registration'
 Write-Host 'The "Games" tab is now pinned to the File Explorer navigation pane.' -ForegroundColor White
 Write-Host 'Desktop and Start Menu shortcuts were created for Windows Game Explorer.' -ForegroundColor White
+if ($ServiceExe) {
+    Write-Host 'The Game Explorer Background Service is installed and running.' -ForegroundColor White
+}
 Write-Host ''
 exit 0

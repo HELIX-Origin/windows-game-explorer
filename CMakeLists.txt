@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.20)
 
 project(WindowsGameExplorer
-    VERSION 2.6.0
+    VERSION 2.7.0
     DESCRIPTION "Native Windows Game Explorer and Shell Extension"
     LANGUAGES C CXX RC
 )
@@ -43,6 +43,9 @@ add_library(GameExplorerCore STATIC
     src/core/DarkMode.cpp
     src/core/StorefrontScanner.cpp
     src/core/OwnedGames.cpp
+    src/core/GameUpdates.cpp
+    src/core/Notifications.cpp
+    src/core/ServiceClient.cpp
     src/core/PlatformLauncher.cpp
     src/core/Localization.cpp
     src/core/AchievementEngine.cpp
@@ -150,6 +153,7 @@ target_link_libraries(GameExplorerService PRIVATE
     Advapi32
     Shell32
     Ole32
+    Wtsapi32
 )
 
 add_library(GameExplorerLoader STATIC

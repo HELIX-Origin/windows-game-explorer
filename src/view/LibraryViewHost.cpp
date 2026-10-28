@@ -9,6 +9,7 @@
 #include "GameExplorerCore/AchievementEngine.h"
 #include "GameExplorerCore/ImageValidator.h"
 #include "GameExplorerCore/SynopsisFormatter.h"
+#include "GameExplorerCore/Notifications.h"
 
 #ifdef GetCurrentTime
 #undef GetCurrentTime
@@ -1552,6 +1553,238 @@ void LibraryViewHost::BuildXamlViewport() {
     rightToolbar.Orientation(wuxc::Orientation::Horizontal);
     rightToolbar.VerticalAlignment(wux::VerticalAlignment::Center);
     rightToolbar.Spacing(8);
+
+    // Notification bell button (opens Game Catalogue alerts)
+    NotificationFeed notifyFeed;
+    (void)LoadNotificationFeed(notifyFeed, NotificationFeedPath());
+    std::vector<std::wstring> seenNotifyIds;
+    (void)LoadSeenIds(seenNotifyIds, NotificationSeenPath());
+    int unreadNotifyCount = 0;
+    for (const auto& item : notifyFeed.items) {
+        if (!IsNotificationSeen(seenNotifyIds, item.id)) ++unreadNotifyCount;
+    }
+
+    wuxc::Button btnBell;
+    std::wstring bellText = L"\U0001F514";
+    if (unreadNotifyCount > 0) {
+        bellText += L" " + (unreadNotifyCount > 9 ? std::wstring(L"9+") : std::to_wstring(unreadNotifyCount));
+    }
+    btnBell.Content(winrt::box_value(bellText));
+    btnBell.Background(bgCard);
+    btnBell.Foreground(unreadNotifyCount > 0 ? accentBrush : textPrimary);
+    btnBell.BorderBrush(borderBrush);
+    btnBell.BorderThickness(wux::ThicknessHelper::FromUniformLength(1));
+    btnBell.CornerRadius(wux::CornerRadiusHelper::FromUniformRadius(6));
+    btnBell.Padding(wux::ThicknessHelper::FromLengths(10, 5, 10, 5));
+
+    // Child flyout window hosting notifications feed directly in the view
+    wuxc::Flyout bellFlyout;
+
+    wuxc::Grid flyoutRoot;
+    flyoutRoot.Width(380);
+    flyoutRoot.MaxHeight(480);
+
+    wuxc::RowDefinition fRowHeader;
+    fRowHeader.Height(wux::GridLengthHelper::Auto());
+    wuxc::RowDefinition fRowList;
+    fRowList.Height(wux::GridLengthHelper::FromValueAndType(1.0, wux::GridUnitType::Star));
+    wuxc::RowDefinition fRowFooter;
+    fRowFooter.Height(wux::GridLengthHelper::Auto());
+    flyoutRoot.RowDefinitions().Append(fRowHeader);
+    flyoutRoot.RowDefinitions().Append(fRowList);
+    flyoutRoot.RowDefinitions().Append(fRowFooter);
+
+    // Header (Title + Mark all read)
+    wuxc::Grid flyoutHeader;
+    wuxc::ColumnDefinition fCol1;
+    fCol1.Width(wux::GridLengthHelper::FromValueAndType(1.0, wux::GridUnitType::Star));
+    wuxc::ColumnDefinition fCol2;
+    fCol2.Width(wux::GridLengthHelper::Auto());
+    flyoutHeader.ColumnDefinitions().Append(fCol1);
+    flyoutHeader.ColumnDefinitions().Append(fCol2);
+    flyoutHeader.Margin(wux::ThicknessHelper::FromLengths(0, 0, 0, 10));
+
+    wuxc::TextBlock flyoutTitle;
+    std::wstring flyoutTitleText = L"Notifications";
+    if (unreadNotifyCount > 0) {
+        flyoutTitleText += L" (" + std::to_wstring(unreadNotifyCount) + L" new)";
+    }
+    flyoutTitle.Text(flyoutTitleText);
+    flyoutTitle.FontSize(15);
+    flyoutTitle.FontWeight(winrt::Windows::UI::Text::FontWeights::SemiBold());
+    flyoutTitle.Foreground(textPrimary);
+    flyoutTitle.VerticalAlignment(wux::VerticalAlignment::Center);
+    wuxc::Grid::SetColumn(flyoutTitle, 0);
+    flyoutHeader.Children().Append(flyoutTitle);
+
+    if (unreadNotifyCount > 0) {
+        wuxc::Button btnMarkAll;
+        btnMarkAll.Content(winrt::box_value(L"Mark all read"));
+        btnMarkAll.FontSize(11);
+        btnMarkAll.Background(bgCard);
+        btnMarkAll.Foreground(accentBrush);
+        btnMarkAll.BorderBrush(borderBrush);
+        btnMarkAll.BorderThickness(wux::ThicknessHelper::FromUniformLength(1));
+        btnMarkAll.CornerRadius(wux::CornerRadiusHelper::FromUniformRadius(4));
+        btnMarkAll.Padding(wux::ThicknessHelper::FromLengths(8, 3, 8, 3));
+        btnMarkAll.Click([this, bellFlyout](wf::IInspectable const&, wux::RoutedEventArgs const&) {
+            NotificationFeed feed;
+            (void)LoadNotificationFeed(feed, NotificationFeedPath());
+            std::vector<std::wstring> seen;
+            (void)LoadSeenIds(seen, NotificationSeenPath());
+            for (const auto& it : feed.items) {
+                if (!IsNotificationSeen(seen, it.id)) {
+                    seen.push_back(it.id);
+                }
+            }
+            (void)SaveSeenIds(seen, NotificationSeenPath());
+            bellFlyout.Hide();
+            BuildXamlViewport();
+        });
+        wuxc::Grid::SetColumn(btnMarkAll, 1);
+        flyoutHeader.Children().Append(btnMarkAll);
+    }
+    wuxc::Grid::SetRow(flyoutHeader, 0);
+    flyoutRoot.Children().Append(flyoutHeader);
+
+    // Notification Items List
+    wuxc::ScrollViewer flyoutScroll;
+    flyoutScroll.VerticalScrollBarVisibility(wuxc::ScrollBarVisibility::Auto);
+    flyoutScroll.HorizontalScrollBarVisibility(wuxc::ScrollBarVisibility::Disabled);
+
+    wuxc::StackPanel itemsPanel;
+    itemsPanel.Spacing(8);
+
+    if (notifyFeed.items.empty()) {
+        wuxc::TextBlock emptyText;
+        emptyText.Text(L"No notifications right now.");
+        emptyText.Foreground(textSec);
+        emptyText.FontSize(12);
+        emptyText.Margin(wux::ThicknessHelper::FromLengths(4, 20, 4, 20));
+        emptyText.HorizontalAlignment(wux::HorizontalAlignment::Center);
+        itemsPanel.Children().Append(emptyText);
+    } else {
+        for (const auto& item : notifyFeed.items) {
+            const bool isUnread = !IsNotificationSeen(seenNotifyIds, item.id);
+            wuxc::Border itemCard;
+            itemCard.Background(isUnread ? bgCardSel : bgCard);
+            itemCard.BorderBrush(isUnread ? accentBrush : borderBrush);
+            itemCard.BorderThickness(wux::ThicknessHelper::FromUniformLength(1));
+            itemCard.CornerRadius(wux::CornerRadiusHelper::FromUniformRadius(6));
+            itemCard.Padding(wux::ThicknessHelper::FromLengths(10, 8, 10, 8));
+
+            wuxc::StackPanel cardStack;
+            cardStack.Spacing(4);
+
+            // Kind badge and source row
+            wuxc::Grid metaGrid;
+            wuxc::ColumnDefinition mc1;
+            mc1.Width(wux::GridLengthHelper::Auto());
+            wuxc::ColumnDefinition mc2;
+            mc2.Width(wux::GridLengthHelper::FromValueAndType(1.0, wux::GridUnitType::Star));
+            metaGrid.ColumnDefinitions().Append(mc1);
+            metaGrid.ColumnDefinitions().Append(mc2);
+
+            wuxc::Border badge;
+            badge.Background(accentBrush);
+            badge.CornerRadius(wux::CornerRadiusHelper::FromUniformRadius(3));
+            badge.Padding(wux::ThicknessHelper::FromLengths(5, 1, 5, 1));
+            wuxc::TextBlock badgeText;
+            badgeText.Text(NotificationKindLabel(item.kind));
+            badgeText.FontSize(10);
+            badgeText.FontWeight(winrt::Windows::UI::Text::FontWeights::SemiBold());
+            badgeText.Foreground(whiteBrush);
+            badge.Child(badgeText);
+            wuxc::Grid::SetColumn(badge, 0);
+            metaGrid.Children().Append(badge);
+
+            std::wstring sourceLabel = item.source;
+            if (!item.gameTitle.empty()) {
+                if (!sourceLabel.empty()) sourceLabel += L" \u2022 ";
+                sourceLabel += item.gameTitle;
+            }
+            if (!sourceLabel.empty()) {
+                wuxc::TextBlock sourceText;
+                sourceText.Text(sourceLabel);
+                sourceText.FontSize(11);
+                sourceText.Foreground(textSec);
+                sourceText.Margin(wux::ThicknessHelper::FromLengths(8, 0, 0, 0));
+                sourceText.VerticalAlignment(wux::VerticalAlignment::Center);
+                sourceText.TextTrimming(wux::TextTrimming::CharacterEllipsis);
+                wuxc::Grid::SetColumn(sourceText, 1);
+                metaGrid.Children().Append(sourceText);
+            }
+            cardStack.Children().Append(metaGrid);
+
+            // Item Title
+            wuxc::TextBlock itemTitle;
+            itemTitle.Text(item.title);
+            itemTitle.FontSize(12);
+            itemTitle.FontWeight(winrt::Windows::UI::Text::FontWeights::SemiBold());
+            itemTitle.Foreground(textPrimary);
+            itemTitle.TextWrapping(wux::TextWrapping::Wrap);
+            cardStack.Children().Append(itemTitle);
+
+            // Item Body summary
+            if (!item.body.empty()) {
+                wuxc::TextBlock itemBody;
+                itemBody.Text(item.body);
+                itemBody.FontSize(11);
+                itemBody.Foreground(textSec);
+                itemBody.TextWrapping(wux::TextWrapping::Wrap);
+                itemBody.MaxLines(3);
+                itemBody.TextTrimming(wux::TextTrimming::CharacterEllipsis);
+                cardStack.Children().Append(itemBody);
+            }
+
+            // Tapping card opens the alert link and marks it as read
+            const std::wstring itemId = item.id;
+            const std::wstring itemUrl = item.url;
+            itemCard.Tapped([this, itemId, itemUrl, bellFlyout](wf::IInspectable const&, wuxi::TappedRoutedEventArgs const&) {
+                std::vector<std::wstring> seen;
+                (void)LoadSeenIds(seen, NotificationSeenPath());
+                if (!IsNotificationSeen(seen, itemId)) {
+                    seen.push_back(itemId);
+                    (void)SaveSeenIds(seen, NotificationSeenPath());
+                }
+                if (!itemUrl.empty()) {
+                    ShellExecuteW(nullptr, L"open", itemUrl.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+                }
+                bellFlyout.Hide();
+                BuildXamlViewport();
+            });
+
+            itemCard.Child(cardStack);
+            itemsPanel.Children().Append(itemCard);
+        }
+    }
+
+    flyoutScroll.Content(itemsPanel);
+    wuxc::Grid::SetRow(flyoutScroll, 1);
+    flyoutRoot.Children().Append(flyoutScroll);
+
+    // Footer link to Studio Catalogue
+    wuxc::Button btnStudio;
+    btnStudio.Content(winrt::box_value(L"Manage alerts in Studio \u2192"));
+    btnStudio.FontSize(11);
+    btnStudio.HorizontalAlignment(wux::HorizontalAlignment::Right);
+    btnStudio.Margin(wux::ThicknessHelper::FromLengths(0, 8, 0, 0));
+    btnStudio.Background(bgCard);
+    btnStudio.Foreground(textSec);
+    btnStudio.BorderBrush(borderBrush);
+    btnStudio.BorderThickness(wux::ThicknessHelper::FromUniformLength(1));
+    btnStudio.CornerRadius(wux::CornerRadiusHelper::FromUniformRadius(4));
+    btnStudio.Padding(wux::ThicknessHelper::FromLengths(8, 3, 8, 3));
+    btnStudio.Click([this, bellFlyout](wf::IInspectable const&, wux::RoutedEventArgs const&) {
+        bellFlyout.Hide();
+        LaunchCompanionExe(L"GameExplorerStudio.exe", L"--tab=catalogue");
+    });
+    wuxc::Grid::SetRow(btnStudio, 2);
+    flyoutRoot.Children().Append(btnStudio);
+
+    bellFlyout.Content(flyoutRoot);
+    btnBell.Flyout(bellFlyout);
+    rightToolbar.Children().Append(btnBell);
 
     wuxc::Button btnManager;
     btnManager.Content(winrt::box_value(std::wstring(L"\u2795 ") + loc.manageMetadataBtn));

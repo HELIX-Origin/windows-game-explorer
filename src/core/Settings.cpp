@@ -47,6 +47,21 @@ AppSettings SettingsManager::Load() {
         s.igdbClientSecret = *val;
     }
 
+    // Notification toggles default to on; only an explicit stored "0" turns one off.
+    auto readToggle = [&db](const wchar_t* key, bool& value) {
+        if (auto val = db.GetSetting(key)) {
+            value = (*val == L"1" || *val == L"true");
+        }
+    };
+    readToggle(L"notify_game_updates", s.notifyGameUpdates);
+    readToggle(L"notify_news", s.notifyNews);
+    readToggle(L"notify_news_steam", s.notifySteamNews);
+    readToggle(L"notify_news_gog", s.notifyGogNews);
+    readToggle(L"notify_news_epic", s.notifyEpicNews);
+    readToggle(L"notify_news_xbox", s.notifyXboxNews);
+    readToggle(L"notify_free_games", s.notifyFreeGames);
+    readToggle(L"notify_promotions", s.notifyPromotions);
+
     return s;
 }
 
@@ -67,6 +82,14 @@ bool SettingsManager::Save(const AppSettings& settings) {
     db.SetSetting(L"sgdb_api_key", settings.steamGridDbApiKey);
     db.SetSetting(L"igdb_client_id", settings.igdbClientId);
     db.SetSetting(L"igdb_client_secret", settings.igdbClientSecret);
+    db.SetSetting(L"notify_game_updates", settings.notifyGameUpdates ? L"1" : L"0");
+    db.SetSetting(L"notify_news", settings.notifyNews ? L"1" : L"0");
+    db.SetSetting(L"notify_news_steam", settings.notifySteamNews ? L"1" : L"0");
+    db.SetSetting(L"notify_news_gog", settings.notifyGogNews ? L"1" : L"0");
+    db.SetSetting(L"notify_news_epic", settings.notifyEpicNews ? L"1" : L"0");
+    db.SetSetting(L"notify_news_xbox", settings.notifyXboxNews ? L"1" : L"0");
+    db.SetSetting(L"notify_free_games", settings.notifyFreeGames ? L"1" : L"0");
+    db.SetSetting(L"notify_promotions", settings.notifyPromotions ? L"1" : L"0");
 
     return true;
 }
