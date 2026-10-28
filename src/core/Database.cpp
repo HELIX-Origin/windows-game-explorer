@@ -406,6 +406,23 @@ bool Database::DeleteGame(int64_t id) {
     return (rc == SQLITE_DONE);
 }
 
+bool Database::DeleteGameByAppId(const std::wstring& appId) {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    if (m_db == nullptr) return false;
+
+    const char* sql = "DELETE FROM games WHERE app_id = ?;";
+    sqlite3_stmt* stmt = nullptr;
+    if (sqlite3_prepare_v2(m_db, sql, -1, &stmt, nullptr) != SQLITE_OK) {
+        return false;
+    }
+
+    const std::string appIdUtf8 = WideToUtf8(appId);
+    sqlite3_bind_text(stmt, 1, appIdUtf8.c_str(), -1, SQLITE_STATIC);
+    const int rc = sqlite3_step(stmt);
+    sqlite3_finalize(stmt);
+    return (rc == SQLITE_DONE);
+}
+
 bool Database::SetInstalled(int64_t id, bool installed) {
     std::lock_guard<std::mutex> lock(m_mutex);
     if (m_db == nullptr) return false;

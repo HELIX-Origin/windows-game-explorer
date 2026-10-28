@@ -2,7 +2,7 @@
 
 > Authoritative conventions for **Windows Game Explorer** (`projects/windows-game-explorer`).
 > Follows the v2.0.0 architecture: completely native to Windows (C++20 Win32 + COM Shell Extension).
-> Recreates and modernizes the classic Windows 7/Vista Game Explorer directly inside Windows 11 File Explorer.
+> Recreates and modernizes the classic Windows 7/Vista Game Explorer inside Windows 10 1903+ and Windows 11 File Explorer.
 
 ---
 
@@ -14,30 +14,35 @@ Windows Game Explorer is fundamentally an authentic, rich, visual **Game Library
 > **Generic Shortcuts Folder Degradation is Strictly Prohibited.**
 > Falling back to vanilla Windows Explorer list views (`SHCreateShellFolderView` / `CDefView`) without proper Game Explorer categorization, vertical box art thumbnails, and game properties reduces the virtual folder to nothing more than a plain folder of file shortcuts. Any implementation that results in a generic shortcuts folder is classified as a design regression and is rejected.
 
-The shell integration must deliver an authentic game library experience:
+The shell integration must deliver an authentic game library experience while allowing Windows to
+control Explorer chrome, tabs, and presentation:
 - Two explicit collapsible sections (`▾ Game Providers (N)` and `▾ Games (N)`) powered by `ICategoryProvider` and `ICategorizer`.
 - Dedicated visual presentation (tall ~2:3 box art covers for games and authentic client icons for storefront providers).
 - Persistent Details / Preview integration featuring complete game metadata (title, platform, rating, developer, release date, disk footprint) and one-click launch controls.
-- Active system accent colorization and dark/light mode synchronization with Windows 11 DWM.
+- Active system accent colorization and dark/light mode synchronization with the installed Windows version.
 
 ---
 
-## 2. Ban on Blind Trial-and-Error Shell Extension Code Loops
+## 2. Mandatory Research-First Invariant & Ban on Trial-and-Error Code Loops
+
+> [!CAUTION]
+> **Guesswork is Strictly Banned — Research Online Documentation First.**
+> Never edit code, modify window styles, change XAML Island hosting, or alter Shell COM interfaces based on guesses or unverified assumptions. Before making ANY code edit, you **MUST** first conduct online documentation research (`search_web` on official Microsoft Learn / Windows SDK / Win32 / COM / WinRT XAML Islands documentation) and empirical runtime inspection to establish the verified root cause.
 
 > [!IMPORTANT]
 > **No Speculative Guessing on Shell COM Interfaces.**
 > Windows Explorer (`explorer.exe`) hosts shell extensions in-process within its critical Single-Threaded Apartment (STA) main UI thread. A crash or stack overflow in a shell extension crashes the entire Windows shell interface.
 
-When a shell crash occurs (e.g. `0xc00000fd` `STATUS_STACK_OVERFLOW` in `ntdll.dll` or access violations):
-1. **Never Make Blind Guesses**: Agents must **NEVER** repeatedly toggle between raw `IShellView` hacks and default `CDefView` fallbacks in iterative guesswork loops.
-2. **Mandatory Documentation Research**: Before touching or altering shell extension view or folder code, agents must thoroughly research official Microsoft technical documentation, Windows SDK architecture specifications, and verified Win32/COM shell contracts.
-3. **Analyze Root Causes Thoroughly**: Inspect exact crash offsets, event logs, call stacks, and COM interface query sequences (`QueryInterface` requests for `IFolderView`, `IFolderView2`, `ICategoryProvider`, `IThumbnailProvider`, `IPropertyStore`).
+When a shell bug, layout issue, or crash occurs (e.g. `0xc00000fd` `STATUS_STACK_OVERFLOW` in `ntdll.dll` or access violations):
+1. **Never Make Blind Guesses**: Agents must **NEVER** edit code in speculative trial-and-error loops or use build/register cycles to test unresearched hypotheses.
+2. **Mandatory Online Documentation Research First**: Before touching or altering any shell extension view, folder, or XAML Island code, agents must first search and verify official Microsoft technical documentation (`learn.microsoft.com`), Windows SDK architecture specifications, and verified Win32/COM shell contracts.
+3. **Analyze Root Causes Empirically**: Inspect exact window rects, DPI scaling, GDI regions, crash offsets, event logs, call stacks, and COM interface query sequences (`QueryInterface` requests for `IFolderView`, `IFolderView2`, `ICategoryProvider`, `IThumbnailProvider`, `IPropertyStore`) before proposing or writing a fix.
 
 ---
 
 ## 3. Official Microsoft Shell Contracts for Game Explorer Revival
 
-Recreating the authentic Windows 7 Game Explorer inside modern Windows 11 requires implementing the standard Microsoft Shell COM interfaces:
+Recreating the authentic Windows 7 Game Explorer inside Windows 10 1903+ and Windows 11 requires implementing the standard Microsoft Shell COM interfaces:
 - **`FOLDERTYPEID_Games` (`{b689b0d0-76d3-4cbb-87f7-585d0e0ce070}`):** The canonical Windows folder type for games, defining default columns (Name, Platform, Developer, Release Date, Rating, Size) and tile/icon presentation.
 - **`ICategoryProvider` & `ICategorizer`:** Groups items by `PKEY_ItemTypeText` into `▾ Game Providers` (`itemKind = 0`) and `▾ Games` (`itemKind = 1`).
 - **`IThumbnailProvider` & `IShellItemImageFactory`:** Supplies high-resolution vertical game box art (~2:3 / 600×900) and storefront logos as bitmaps so File Explorer renders game covers directly in Icon and Tile views.

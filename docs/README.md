@@ -25,7 +25,7 @@ flowchart TD
 ### 1. 🌟 [Project Overview & Architecture](./overview.md)
 Learn about the motivation, architectural design, and core philosophy of Windows Game Explorer:
 - **Historical Context**: Why reviving the classic Windows 7/Vista Game Explorer in Windows 11 matters.
-- **System Architecture**: Shell Extension COM layer, native C++20 core engine, WinUI 3 XAML Islands, and the Game Explorer Studio GUI.
+- **System Architecture**: Shell Extension COM layer, native C++20 core engine, UWP XAML Islands, and the Game Explorer Studio GUI.
 - **Design Principles**: Storefront-first discovery, zero third-party scrapers required, native isolation invariant, and two-section categorization.
 - **Supported Platforms**: Steam, Epic Games, GOG Galaxy, Ubisoft Connect, EA App, Battle.net, Itch.io, Amazon Games, Xbox/PC Game Pass, and Retro ROMs.
 - **Universal Achievements**: Multi-source achievement tracking with live trophy cards.
@@ -64,7 +64,8 @@ Detailed manual covering advanced features and the Game Explorer Studio pages:
 ### 4. 🛠️ [Developer & Technical Reference](./developer-guide.md)
 Complete engineering reference for contributors and integrators:
 - **Codebase Organization**: Target directory breakdown and CMake configuration.
-- **WinUI 3 XAML Islands Shell Architecture**: Hosting `DesktopWindowXamlSource` within Win32 `IShellView`, DirectComposition rendering, tab switching lifecycle management, and avoiding `0xc000027b` and `0xc00000fd` exceptions.
+- **UWP XAML Islands Shell Architecture**: Hosting `DesktopWindowXamlSource` within Win32 `IShellView`, DirectComposition rendering, view lifecycle management, and avoiding `0xc000027b` and `0xc00000fd` exceptions.
+- **[Windows Version Compatibility](./research/windows-version-compatibility.md)**: XAML hosting minimum, native Explorer presentation, DWM styling, and outstanding OS validation.
 - **Core Engine Internals**: Storefront manifest parsing, multi-source `AchievementEngine`, text/mojibake sanitizer (`SanitizeGameText`), and `ImageValidator` aspect-ratio standards.
 - **SQLite Database Schema**: Relational schema diagram and field definitions for `games`, `achievements`, and `settings` tables in `library.db`.
 - **Build Pipelines & Quality Gates**: Windows 11 SDK prerequisites, MSVC `/W4 /WX /permissive- /utf-8` zero-warning invariant, and the single root CLI dispatcher (`game-explorer.bat`) backed by the `scripts/*.ps1` runbooks.

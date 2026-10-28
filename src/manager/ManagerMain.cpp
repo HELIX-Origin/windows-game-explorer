@@ -374,14 +374,9 @@ void SetActiveArtworkType(const std::wstring& typeName) {
     } else if (typeName == L"Hero") {
         syncCombo(g_hwndComboType, L"Hero Banner");
         syncCombo(g_hwndComboWebFilter, L"Hero Banners");
-    } else if (typeName == L"Details") {
-        syncCombo(g_hwndComboType, L"Details");
-        syncCombo(g_hwndComboWebFilter, L"Details");
     } else if (typeName == L"Icon") {
         syncCombo(g_hwndComboType, L"Icon");
         syncCombo(g_hwndComboWebFilter, L"Icons");
-    } else if (typeName == L"Patreon") {
-        syncCombo(g_hwndComboWebFilter, L"Patreon");
     } else {
         syncCombo(g_hwndComboType, L"All Types");
         syncCombo(g_hwndComboWebFilter, L"All Web Sources");
@@ -851,9 +846,7 @@ void TriggerArtworkSearch(
             std::wstring s = GetComboSelectedText(combo);
             if (s.find(L"Box Art") != std::wstring::npos) typeF = L"Cover";
             else if (s.find(L"Hero") != std::wstring::npos) typeF = L"Hero";
-            else if (s.find(L"Patreon") != std::wstring::npos) typeF = L"Patreon";
             else if (s.find(L"Icon") != std::wstring::npos || s.find(L"Logo") != std::wstring::npos) typeF = L"Icon";
-            else if (s.find(L"Details") != std::wstring::npos || s.find(L"Screenshot") != std::wstring::npos) typeF = L"Details";
         }
     }
     SetActiveArtworkType(typeF);
@@ -874,7 +867,7 @@ void TriggerArtworkSearch(
     g_selectedCandidateIdx = -1;
     g_galleryScrollY = 0;
     if (g_hwndGalleryStatus != nullptr) {
-        SetWindowTextW(g_hwndGalleryStatus, includeWebSearch ? (safeOff ? L"Searching web & NSFW images (SafeSearch OFF)..." : L"Searching web & Patreon images...") : (safeOff ? L"Searching metadata providers (NSFW unblocked)..." : L"Searching metadata providers..."));
+        SetWindowTextW(g_hwndGalleryStatus, includeWebSearch ? (safeOff ? L"Searching web & NSFW images (SafeSearch OFF)..." : L"Searching web images...") : (safeOff ? L"Searching metadata providers (NSFW unblocked)..." : L"Searching metadata providers..."));
     }
     if (g_hwndGalleryCanvas != nullptr) {
         InvalidateRect(g_hwndGalleryCanvas, nullptr, TRUE);
@@ -978,10 +971,8 @@ void GetGalleryCardDimensions(int& cardW, int& cardH, int& imgH, HWND hwndCanvas
         const std::wstring s1 = GetComboSelectedText(g_hwndComboType);
         const std::wstring s2 = GetComboSelectedText(g_hwndComboWebFilter);
         if (s1.find(L"Hero") != std::wstring::npos || s2.find(L"Hero") != std::wstring::npos) typeStr = L"Hero";
-        else if (s1.find(L"Details") != std::wstring::npos || s2.find(L"Details") != std::wstring::npos || s1.find(L"Screenshot") != std::wstring::npos || s2.find(L"Screenshot") != std::wstring::npos) typeStr = L"Details";
         else if (s1.find(L"Icon") != std::wstring::npos || s2.find(L"Icon") != std::wstring::npos || s1.find(L"Logo") != std::wstring::npos) typeStr = L"Icon";
         else if (s1.find(L"Cover") != std::wstring::npos || s2.find(L"Cover") != std::wstring::npos || s1.find(L"Box") != std::wstring::npos) typeStr = L"Cover";
-        else if (s2.find(L"Patreon") != std::wstring::npos) typeStr = L"Details";
     }
 
     constexpr int padX = 8;
@@ -995,14 +986,6 @@ void GetGalleryCardDimensions(int& cardW, int& cardH, int& imgH, HWND hwndCanvas
         }
         imgH = (std::max)(75, static_cast<int>(static_cast<double>(cardW) / 3.096)); // ~3.1:1 ratio
         cardH = imgH + 26;
-    } else if (typeStr == L"Details" || typeStr.find(L"Details") != std::wstring::npos || typeStr.find(L"Screenshot") != std::wstring::npos) {
-        if (usableW >= 380) {
-            cardW = (usableW - padX - 16) / 2; // 2 columns (16:9 ratio)
-        } else {
-            cardW = usableW - 16;
-        }
-        imgH = static_cast<int>(static_cast<double>(cardW) / (16.0 / 9.0)); // 16:9 ratio
-        cardH = imgH + 26;
     } else if (typeStr == L"Icon" || typeStr.find(L"Icon") != std::wstring::npos || typeStr.find(L"Logo") != std::wstring::npos) {
         cardW = 105;
         imgH = 105; // 1:1 ratio
@@ -1013,22 +996,16 @@ void GetGalleryCardDimensions(int& cardW, int& cardH, int& imgH, HWND hwndCanvas
         cardH = 248;
     } else if (!g_galleryCandidates.empty()) {
         int heroCount = 0;
-        int detailsCount = 0;
         int iconCount = 0;
         int coverCount = 0;
         for (const auto& c : g_galleryCandidates) {
-            if (c.type == L"Hero" || (c.width > 0 && c.height > 0 && static_cast<double>(c.width) / c.height >= 2.4)) heroCount++;
-            else if (c.type == L"Details" || (c.width > 0 && c.height > 0 && static_cast<double>(c.width) / c.height >= 1.25)) detailsCount++;
+            if (c.type == L"Hero" || (c.width > 0 && c.height > 0 && static_cast<double>(c.width) / c.height >= 1.25)) heroCount++;
             else if (c.type == L"Icon" || (c.width > 0 && c.height > 0 && static_cast<double>(c.width) / c.height >= 0.85 && static_cast<double>(c.width) / c.height <= 1.25)) iconCount++;
             else coverCount++;
         }
-        if (heroCount > coverCount && heroCount >= detailsCount) {
+        if (heroCount > coverCount) {
             cardW = (usableW >= 700) ? ((usableW - padX) / 2) : (std::max)(280, usableW - 16);
             imgH = static_cast<int>(static_cast<double>(cardW) / 3.096);
-            cardH = imgH + 26;
-        } else if (detailsCount > coverCount) {
-            cardW = (usableW >= 380) ? ((usableW - padX - 16) / 2) : (usableW - 16);
-            imgH = static_cast<int>(static_cast<double>(cardW) / (16.0 / 9.0));
             cardH = imgH + 26;
         } else if (iconCount > coverCount) {
             cardW = 105; imgH = 105; cardH = 131;
@@ -1171,22 +1148,9 @@ LRESULT CALLBACK GalleryCanvasWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARA
                 if (fs::exists(thumbPath)) {
                     Gdiplus::Image gImg(thumbPath.c_str());
                     if (gImg.GetLastStatus() == Gdiplus::Ok && gImg.GetWidth() > 0 && gImg.GetHeight() > 0) {
-                        const UINT srcW = gImg.GetWidth();
-                        const UINT srcH = gImg.GetHeight();
-                        const float srcAspect = static_cast<float>(srcW) / static_cast<float>(srcH);
                         const int dstW = cardW - 4;
                         const int dstH = imgH;
-                        const float dstAspect = static_cast<float>(dstW) / static_cast<float>(dstH);
-
-                        if (srcAspect > dstAspect) {
-                            const int cropW = static_cast<int>(static_cast<float>(srcH) * dstAspect);
-                            const int cropX = (static_cast<int>(srcW) - cropW) / 2;
-                            graphics.DrawImage(&gImg, Gdiplus::Rect(x + 2, y + 2, dstW, dstH), cropX, 0, cropW, static_cast<int>(srcH), Gdiplus::UnitPixel);
-                        } else {
-                            const int cropH = static_cast<int>(static_cast<float>(srcW) / dstAspect);
-                            const int cropY = (static_cast<int>(srcH) - cropH) / 2;
-                            graphics.DrawImage(&gImg, Gdiplus::Rect(x + 2, y + 2, dstW, dstH), 0, cropY, static_cast<int>(srcW), cropH, Gdiplus::UnitPixel);
-                        }
+                        graphics.DrawImage(&gImg, x + 2, y + 2, dstW, dstH);
                         drewImage = true;
                     }
                 }
@@ -1788,7 +1752,6 @@ LRESULT CALLBACK ManagerWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPar
         SendMessageW(g_hwndComboType, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"Box Art (~2:3 Cover)"));
         SendMessageW(g_hwndComboType, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"Hero Banner (~3.1:1)"));
         SendMessageW(g_hwndComboType, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"Icon / Logo (1:1)"));
-        SendMessageW(g_hwndComboType, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"Details / Screenshots"));
         SendMessageW(g_hwndComboType, CB_SETCURSEL, 0, 0);
         ThemeControls::AttachCombo(g_hwndComboType);
 
@@ -1843,8 +1806,6 @@ LRESULT CALLBACK ManagerWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPar
         SendMessageW(g_hwndComboWebFilter, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"All Web Sources"));
         SendMessageW(g_hwndComboWebFilter, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"Box Art (~2:3 Cover)"));
         SendMessageW(g_hwndComboWebFilter, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"Hero Banners"));
-        SendMessageW(g_hwndComboWebFilter, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"Details / Screenshots"));
-        SendMessageW(g_hwndComboWebFilter, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"Patreon Campaign Media"));
         SendMessageW(g_hwndComboWebFilter, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"Icons / Logos"));
         SendMessageW(g_hwndComboWebFilter, CB_SETCURSEL, 0, 0);
         ThemeControls::AttachCombo(g_hwndComboWebFilter);
@@ -2372,8 +2333,6 @@ LRESULT CALLBACK ManagerWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPar
             std::wstring t = L"All";
             if (s.find(L"Box Art") != std::wstring::npos) t = L"Cover";
             else if (s.find(L"Hero") != std::wstring::npos) t = L"Hero";
-            else if (s.find(L"Details") != std::wstring::npos || s.find(L"Screenshot") != std::wstring::npos) t = L"Details";
-            else if (s.find(L"Patreon") != std::wstring::npos) t = L"Patreon";
             else if (s.find(L"Icon") != std::wstring::npos || s.find(L"Logo") != std::wstring::npos) t = L"Icon";
             SetActiveArtworkType(t);
             SendMessageW(hwnd, WM_COMMAND, MAKEWPARAM(IDC_BTN_GALLERY_WEB, BN_CLICKED), 0);
@@ -2435,8 +2394,6 @@ LRESULT CALLBACK ManagerWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPar
                 const std::wstring s = GetComboSelectedText(g_hwndComboWebFilter);
                 if (s.find(L"Box Art") != std::wstring::npos) webFilter = L"Cover";
                 else if (s.find(L"Hero") != std::wstring::npos) webFilter = L"Hero";
-                else if (s.find(L"Details") != std::wstring::npos || s.find(L"Screenshot") != std::wstring::npos) webFilter = L"Details";
-                else if (s.find(L"Patreon") != std::wstring::npos) webFilter = L"Patreon";
                 else if (s.find(L"Icon") != std::wstring::npos || s.find(L"Logo") != std::wstring::npos) webFilter = L"Icon";
             }
             SetActiveArtworkType(webFilter);
@@ -2458,7 +2415,6 @@ LRESULT CALLBACK ManagerWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPar
             HMENU hMenu = CreatePopupMenu();
             AppendMenuW(hMenu, MF_STRING, IDM_APPLY_COVER,   L"Apply as Box Art (~2:3 Cover)");
             AppendMenuW(hMenu, MF_STRING, IDM_APPLY_HERO,    L"Apply as Hero Banner (~3.1:1 Widescreen)");
-            AppendMenuW(hMenu, MF_STRING, IDM_APPLY_DETAILS, L"Apply as Details Art");
             AppendMenuW(hMenu, MF_STRING, IDM_APPLY_ICON,    L"Apply as Icon / Logo");
 
             const int cmd = TrackPopupMenu(hMenu, TPM_RIGHTBUTTON | TPM_RETURNCMD, rcBtn.left, rcBtn.bottom + 2, 0, hwnd, nullptr);
@@ -2522,7 +2478,7 @@ LRESULT CALLBACK ManagerWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPar
 
         if (id == IDC_BTN_BROWSE_COVER) {
             std::wstring path;
-            if (BrowseForFile(hwnd, L"Select Vertical Box Art (~2:3 Cover Image)", L"Image Files (*.png;*.jpg;*.jpeg;*.webp;*.bmp)\0*.png;*.jpg;*.jpeg;*.webp;*.bmp\0All Files (*.*)\0*.*\0", path)) {
+            if (BrowseForFile(hwnd, L"Select Vertical Box Art (~2:3 Cover Image)", L"Image Files (*.png;*.jpg;*.jpeg;*.gif;*.webp;*.svg;*.bmp;*.jfif;*.avif;*.tiff;*.tif;*.ico)\0*.png;*.jpg;*.jpeg;*.gif;*.webp;*.svg;*.bmp;*.jfif;*.avif;*.tiff;*.tif;*.ico\0All Files (*.*)\0*.*\0", path)) {
                 SetWindowTextW(g_hwndEditCoverPath, path.c_str());
                 RECT rcPreview = { PREVIEW_BOX_X - 4, g_previewBoxY - 4, PREVIEW_BOX_X + PREVIEW_BOX_W + 4, g_previewBoxY + PREVIEW_BOX_H + 4 };
                 InvalidateRect(hwnd, &rcPreview, FALSE);
@@ -2532,7 +2488,7 @@ LRESULT CALLBACK ManagerWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPar
 
         if (id == IDC_BTN_BROWSE_HERO) {
             std::wstring path;
-            if (BrowseForFile(hwnd, L"Select Widescreen Hero Banner (~3.1:1 / 16:9 Banner)", L"Image Files (*.png;*.jpg;*.jpeg;*.webp;*.bmp)\0*.png;*.jpg;*.jpeg;*.webp;*.bmp\0All Files (*.*)\0*.*\0", path)) {
+            if (BrowseForFile(hwnd, L"Select Widescreen Hero Banner (~3.1:1 / 16:9 Banner)", L"Image Files (*.png;*.jpg;*.jpeg;*.gif;*.webp;*.svg;*.bmp;*.jfif;*.avif;*.tiff;*.tif;*.ico)\0*.png;*.jpg;*.jpeg;*.gif;*.webp;*.svg;*.bmp;*.jfif;*.avif;*.tiff;*.tif;*.ico\0All Files (*.*)\0*.*\0", path)) {
                 SetWindowTextW(g_hwndEditHeroPath, path.c_str());
             }
             return 0;
@@ -2540,7 +2496,7 @@ LRESULT CALLBACK ManagerWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPar
 
         if (id == IDC_BTN_BROWSE_DETAILS) {
             std::wstring path;
-            if (BrowseForFile(hwnd, L"Select Details Pane Preview Image or Animated GIF", L"Image Files (*.png;*.jpg;*.jpeg;*.gif;*.webp;*.bmp)\0*.png;*.jpg;*.jpeg;*.gif;*.webp;*.bmp\0All Files (*.*)\0*.*\0", path)) {
+            if (BrowseForFile(hwnd, L"Select Details Pane Preview Image or Animated GIF", L"Image Files (*.png;*.jpg;*.jpeg;*.gif;*.webp;*.svg;*.bmp;*.jfif;*.avif;*.tiff;*.tif;*.ico)\0*.png;*.jpg;*.jpeg;*.gif;*.webp;*.svg;*.bmp;*.jfif;*.avif;*.tiff;*.tif;*.ico\0All Files (*.*)\0*.*\0", path)) {
                 SetWindowTextW(g_hwndEditDetailsPath, path.c_str());
             }
             return 0;
@@ -2548,7 +2504,7 @@ LRESULT CALLBACK ManagerWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPar
 
         if (id == IDC_BTN_BROWSE_ICON) {
             std::wstring path;
-            if (BrowseForFile(hwnd, L"Select Game Icon or Executable", L"Icons & Images (*.ico;*.png;*.jpg;*.jpeg;*.webp;*.bmp;*.exe)\0*.ico;*.png;*.jpg;*.jpeg;*.webp;*.bmp;*.exe\0All Files (*.*)\0*.*\0", path)) {
+            if (BrowseForFile(hwnd, L"Select Game Icon or Executable", L"Icons & Images (*.ico;*.png;*.jpg;*.jpeg;*.gif;*.webp;*.svg;*.bmp;*.jfif;*.avif;*.tiff;*.tif;*.exe)\0*.ico;*.png;*.jpg;*.jpeg;*.gif;*.webp;*.svg;*.bmp;*.jfif;*.avif;*.tiff;*.tif;*.exe\0All Files (*.*)\0*.*\0", path)) {
                 SetWindowTextW(g_hwndEditIconPath, path.c_str());
             }
             return 0;

@@ -6,10 +6,9 @@
 namespace GameExplorer {
 
 enum class ArtworkSlot {
-    Cover,   // Vertical box art (~2:3 ratio, e.g. 600x900, 300x450). MUST NOT be animated GIF.
-    Hero,    // Widescreen banner (~16:9 ratio, e.g. 1920x1080, 960x540). MUST NOT be animated GIF.
-    Icon,    // Square icon (~1:1 ratio, e.g. 256x256, .ico). MUST NOT be animated GIF.
-    Details  // Details sidepane image (300px width). CAN be an animated GIF or high-res showcase.
+    Cover,   // Box art (~2:3 ratio or custom storefront aspect). Animated GIFs supported.
+    Hero,    // Widescreen banner (~16:9 ratio). Animated GIFs supported.
+    Icon     // Square icon (~1:1 ratio, e.g. 256x256, .ico). MUST NOT be animated GIF.
 };
 
 struct ImageDimensions {
@@ -34,7 +33,6 @@ public:
     static bool IsValidCover(const std::wstring& path);
     static bool IsValidHero(const std::wstring& path);
     static bool IsValidIcon(const std::wstring& path);
-    static bool IsValidDetails(const std::wstring& path);
 
     // Smart-crop generators: creates fitting images without clipping title text
     static std::wstring GenerateFittingCover(const std::wstring& appId, const std::wstring& sourceImagePath);

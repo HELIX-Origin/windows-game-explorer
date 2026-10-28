@@ -61,26 +61,22 @@ TEST_CASE(ImageValidatorSlotDimensionsAndAspectRatios) {
     ASSERT_TRUE(SaveDummyImage(iconImg, 256, 256, Gdiplus::Color(255, 50, 180, 70)));
     ASSERT_TRUE(SaveDummyImage(cardImg, 315, 250, Gdiplus::Color(255, 120, 120, 120)));
 
-    // 1. Cover validation (loose aspect ratio 0.25 - 2.50 to support itch.io and custom covers)
+    // 1. Cover validation (tall portrait and square covers, ratio 0.45 - 1.15)
     ASSERT_TRUE(ImageValidator::IsValidCover(coverImg));
     ASSERT_TRUE(ImageValidator::IsValidCover(posterImg));
-    ASSERT_TRUE(ImageValidator::IsValidCover(cardImg)); // 315x250 (1.26) itch.io cover is valid
-    ASSERT_TRUE(ImageValidator::IsValidCover(iconImg));
+    ASSERT_TRUE(ImageValidator::IsValidCover(iconImg));  // 256x256 (1.00) square image is valid for cover
+    ASSERT_FALSE(ImageValidator::IsValidCover(cardImg)); // 315x250 (1.26) wide banner is not a cover
 
-    // 2. Hero validation (landscape widescreen, ratio 0.80 - 4.50)
+    // 2. Hero validation (strictly wide landscape heroes, ratio 1.20 - 4.50)
     ASSERT_TRUE(ImageValidator::IsValidHero(heroImg));
     ASSERT_TRUE(ImageValidator::IsValidHero(cardImg));
-    ASSERT_FALSE(ImageValidator::IsValidHero(coverImg)); // 2:3 (0.67) cannot be hero
+    ASSERT_FALSE(ImageValidator::IsValidHero(coverImg)); // 2:3 (0.67) tall cannot be hero
+    ASSERT_FALSE(ImageValidator::IsValidHero(iconImg));  // 1:1 square cannot be hero
 
     // 3. Icon validation (strictly square, 0.75 - 1.33)
     ASSERT_TRUE(ImageValidator::IsValidIcon(iconImg));
     ASSERT_FALSE(ImageValidator::IsValidIcon(coverImg)); // 2:3 cannot be icon
     ASSERT_FALSE(ImageValidator::IsValidIcon(heroImg));  // 16:9 cannot be icon
-
-    // 4. Details Pane validation (accepts all high-res showcase layouts)
-    ASSERT_TRUE(ImageValidator::IsValidDetails(coverImg));
-    ASSERT_TRUE(ImageValidator::IsValidDetails(heroImg));
-    ASSERT_TRUE(ImageValidator::IsValidDetails(cardImg));
 }
 
 TEST_CASE(ImageValidatorAssetPreservationAndNonDestructiveValidation) {
@@ -89,27 +85,33 @@ TEST_CASE(ImageValidatorAssetPreservationAndNonDestructiveValidation) {
     std::error_code ec;
     fs::create_directories(tempDir, ec);
 
-    // Source image: a 315x250 card with centered title text
-    const std::wstring cardImg = (tempDir / L"crop_source_315x250.png").wstring();
-    ASSERT_TRUE(SaveDummyImage(cardImg, 315, 250, Gdiplus::Color(255, 70, 90, 150)));
+    // Source images: a 600x900 tall cover and 960x310 wide hero
+    const std::wstring validCover = (tempDir / L"valid_cover_600x900.png").wstring();
+    const std::wstring validHero = (tempDir / L"valid_hero_960x310.png").wstring();
+    ASSERT_TRUE(SaveDummyImage(validCover, 600, 900, Gdiplus::Color(255, 70, 90, 150)));
+    ASSERT_TRUE(SaveDummyImage(validHero, 960, 310, Gdiplus::Color(255, 150, 90, 70)));
 
     // 1. Artificial cropping is intentionally disabled to prevent image resolution degradation
-    std::wstring genCover = ImageValidator::GenerateFittingCover(L"test_crop_game", cardImg);
+    std::wstring genCover = ImageValidator::GenerateFittingCover(L"test_crop_game", validCover);
     ASSERT_TRUE(genCover.empty());
 
-    // 2. Authentic itch.io covers (315x250) are preserved in coverArtPath under the loose ratio requirement
+    // 2. Authentic tall covers and wide heroes are preserved without unnecessary mutation
     GameItem item{};
     item.appId = L"test_fix_game";
     item.title = L"Test Artwork Fixing Game";
-    item.coverArtPath = cardImg; // 315x250 static cover
-    item.heroArtPath = cardImg;  // Shared hero/card
-    item.detailsArtPath = L"";
+    item.coverArtPath = validCover;
+    item.heroArtPath = validHero;
 
-    ASSERT_TRUE(ImageValidator::ValidateAndFixGameArtwork(item));
+    // Verify that valid artwork is preserved intact without unnecessary mutation
+    ASSERT_FALSE(ImageValidator::ValidateAndFixGameArtwork(item));
 
-    // Verify authentic static cover was preserved in coverArtPath and detailsArtPath
-    ASSERT_EQ(item.coverArtPath, cardImg);
+    ASSERT_EQ(item.coverArtPath, validCover);
     ASSERT_TRUE(ImageValidator::IsValidCover(item.coverArtPath));
-    ASSERT_EQ(item.detailsArtPath, cardImg);
-    ASSERT_TRUE(ImageValidator::IsValidDetails(item.detailsArtPath));
+    ASSERT_EQ(item.heroArtPath, validHero);
+    ASSERT_TRUE(ImageValidator::IsValidHero(item.heroArtPath));
+
+    // 3. Verify that ill-fitting or non-existent slots are cleared
+    item.iconPath = L"non_existent_fake_icon.ico";
+    ASSERT_TRUE(ImageValidator::ValidateAndFixGameArtwork(item));
+    ASSERT_TRUE(item.iconPath.empty());
 }

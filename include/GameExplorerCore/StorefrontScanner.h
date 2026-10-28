@@ -41,6 +41,14 @@ public:
     // Performs full scan of all installed storefronts and drives (internal and external) and persists to database
     static size_t ScanAll(Database& db);
 
+    // Smart differential scan: scans only for new or removed games against known database baseline.
+    // When forceManual is false, automated scans execute at most once per process session to prevent rate limits.
+    static size_t SmartScan(Database& db, bool forceManual = false);
+
+    // Session scan gate: automated scans run at most once per session
+    static bool HasSessionScanned();
+    static void ResetSessionScan();
+
     // Storefront scanners with multi-drive detection
     static std::vector<GameItem> ScanSteam();
     static std::vector<GameItem> ScanGOG();
@@ -57,9 +65,20 @@ public:
     static std::vector<GameItem> ScanGuildWars2();
     static std::vector<GameItem> ScanRiot();
     static std::vector<GameItem> ScanHoYoPlay();
+    static std::vector<GameItem> ScanGooglePlayGames();
+    static std::vector<GameItem> ScanWargaming();
+    static std::vector<GameItem> ScanParadox();
     static std::vector<GameItem> ScanStandaloneAndDrives();
+    static std::vector<GameItem> ScanCommonGameFolders();
+    static std::vector<GameItem> ScanUninstallRegistry();
     static std::vector<GameItem> ScanCustomGames();
     static std::vector<GameItem> ScanEmulatedGames();
+
+    // Game engine & smart installation heuristics
+    static bool IsProbableGameInstallation(const std::wstring& installDir, const std::wstring& primaryExe);
+    static bool IsKnownGameEnginePresent(const std::wstring& installDir, const std::wstring& primaryExe);
+    static bool IsCommonGameInstallationPath(const std::wstring& path);
+    static std::vector<std::wstring> GetCommonGameSearchDirectories();
 
     // Text sanitization (HTML entity decoding, UTF-8/CP1252 mojibake cleanup)
     static std::wstring SanitizeGameText(const std::wstring& text);
@@ -73,7 +92,7 @@ public:
     // Reset and purge artwork cache folder (%USERPROFILE%\Game Explorer\cache\art\)
     static bool ResetArtworkCache();
 
-    // Multi-provider online artwork search (SteamGridDB, Steam Store, IGDB by default; Bing/Patreon web search as supplemental)
+    // Multi-provider online artwork search (SteamGridDB, Steam Store, IGDB by default; Web image search as supplemental)
     static std::vector<OnlineArtworkCandidate> SearchOnlineArtwork(
         const std::wstring& query,
         const std::wstring& typeFilter = L"All",

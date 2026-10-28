@@ -10,6 +10,14 @@
   `.opencode/plugins/big-pickle-only.ts` removes every other model from the catalog.
 - Do not add providers, models, or model overrides to this repository.
 
+## Research-first mandate (all work)
+
+- Guesswork and trial-and-error edits are strictly banned across **all work** (every domain,
+  language, tool, script, configuration, asset, or documentation task — never limited to specific
+  fields).
+- Always research official primary documentation online (`search_web`) and empirically inspect the
+  live state before editing any file.
+
 ## Context discipline
 
 - Prefer targeted searches (`grep`/`glob`) over full-file dumps once a file has been summarised.

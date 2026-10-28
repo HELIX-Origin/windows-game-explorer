@@ -2,7 +2,7 @@
 
 Completely native Windows game library and File Explorer integration — C++20 Win32 application
 and Windows Shell Namespace Extension. Recreates the classic Windows 7/Vista Game Explorer (`shell:Games`, `FOLDERTYPEID_Games`)
-directly inside Windows 10 & 11 File Explorer with two collapsible sections (`▾ Game Providers` and `▾ Games`),
+inside Windows 10 version 1903+ and Windows 11 File Explorer using each OS's native presentation, with two collapsible sections (`▾ Game Providers` and `▾ Games`),
 high-resolution box art, rich properties, and automated multi-store discovery. MIT license.
 
 ## Architecture at a glance
@@ -42,5 +42,5 @@ See `.agents/rules/local-conventions.md` for full conventions and `.agents/rules
 
 ## Invariants
 
-MIT license · SemVer releases · zero-warning builds (`/W4 /WX`) · community-health files · non-invasive core.
+MIT license · SemVer releases · zero-warning builds (`/W4 /WX`) · mandatory online documentation research before any code change (zero guessing) · community-health files · non-invasive core.
 See `CONTRIBUTING.md` for full contributor guidelines.

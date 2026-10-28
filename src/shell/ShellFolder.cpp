@@ -2,6 +2,7 @@
 #include "ShellView.h"
 #include "GameItemUI.h"
 #include "CategoryProvider.h"
+#include "ShellStrings.h"
 #include "GameExplorerCore/Guid.h"
 #include "GameExplorerCore/Database.h"
 #include "GameExplorerCore/Storage.h"
@@ -214,6 +215,8 @@ IFACEMETHODIMP ShellFolder::QueryInterface(REFIID riid, void** ppv) {
         *ppv = static_cast<IPersistFolder2*>(this);
     } else if (riid == IID_IExtractIconW) {
         *ppv = static_cast<IExtractIconW*>(this);
+    } else if (riid == IID_IExplorerPaneVisibility) {
+        *ppv = static_cast<IExplorerPaneVisibility*>(this);
     }
 
     if (*ppv != nullptr) {
@@ -319,7 +322,11 @@ IFACEMETHODIMP ShellFolder::ParseDisplayName(
     if (ppidl != nullptr) *ppidl = nullptr;
     if (pszDisplayName == nullptr) return E_INVALIDARG;
 
-    if (pszDisplayName[0] == L'\0' || _wcsicmp(pszDisplayName, (std::wstring(L"::") + SZ_CLSID_GAME_EXPLORER).c_str()) == 0) {
+    if (pszDisplayName[0] == L'\0' ||
+        _wcsicmp(pszDisplayName, (std::wstring(L"::") + SZ_CLSID_GAME_EXPLORER).c_str()) == 0 ||
+        _wcsicmp(pszDisplayName, (std::wstring(L"shell:::") + SZ_CLSID_GAME_EXPLORER).c_str()) == 0 ||
+        _wcsicmp(pszDisplayName, SZ_CLSID_GAME_EXPLORER) == 0 ||
+        wcsstr(pszDisplayName, SZ_CLSID_GAME_EXPLORER) != nullptr) {
         auto* pidl = static_cast<PITEMID_CHILD>(CoTaskMemAlloc(sizeof(USHORT)));
         if (pidl == nullptr) return E_OUTOFMEMORY;
         pidl->mkid.cb = 0;
@@ -395,8 +402,15 @@ IFACEMETHODIMP ShellFolder::EnumObjects(HWND /*hwnd*/, SHCONTF grfFlags, IEnumID
         }
     }
 
-    // 2. Games section
-    auto games = StorefrontScanner::ScanAllInstalledGames();
+    // 2. Games section: instant retrieval from SQLite database / local metadata cache
+    auto& db = Database::Instance();
+    if (!db.IsOpen()) {
+        db.Open(Storage::GetDatabasePath());
+    }
+    auto games = db.GetAllGames();
+    if (games.empty()) {
+        games = StorefrontScanner::LoadAllGamesFromMetadata();
+    }
     for (const auto& g : games) {
         if (auto* pidl = CreateGamePidl(g)) {
             items.push_back(pidl);
@@ -462,14 +476,25 @@ IFACEMETHODIMP ShellFolder::CompareIDs(LPARAM /*lParam*/, PCUIDLIST_RELATIVE pid
     return MAKE_HRESULT(SEVERITY_SUCCESS, 0, static_cast<unsigned short>(code));
 }
 
-IFACEMETHODIMP ShellFolder::CreateViewObject(HWND /*hwndOwner*/, REFIID riid, void** ppv) {
+IFACEMETHODIMP ShellFolder::CreateViewObject(HWND hwndOwner, REFIID riid, void** ppv) {
     if (ppv == nullptr) return E_POINTER;
     *ppv = nullptr;
+
+    if (hwndOwner != nullptr) {
+        m_hwndOwner = hwndOwner;
+        (void)ShellView::IsExplorerTabNavigation(hwndOwner, nullptr, nullptr);
+    }
 
     if (riid == IID_ICategoryProvider) {
         auto* pCatProv = new (std::nothrow) GameCategoryProvider(this);
         if (pCatProv == nullptr) return E_OUTOFMEMORY;
         *ppv = static_cast<ICategoryProvider*>(pCatProv);
+        return S_OK;
+    }
+
+    if (riid == IID_IExplorerPaneVisibility) {
+        *ppv = static_cast<IExplorerPaneVisibility*>(this);
+        AddRef();
         return S_OK;
     }
 
@@ -769,19 +794,24 @@ IFACEMETHODIMP ShellFolder::GetUIObjectOf(
                     return hr;
                 }
             } else {
-                // Game Item
-                auto games = StorefrontScanner::ScanAllInstalledGames();
-                const GameItem* pGame = nullptr;
-                for (const auto& g : games) {
-                    if (g.id == data->gameId || _wcsicmp(g.title.c_str(), data->title) == 0) {
-                        pGame = &g;
-                        break;
+                // Game Item: resolved from local database / metadata cache without blocking UI
+                auto& db = Database::Instance();
+                if (!db.IsOpen()) {
+                    db.Open(Storage::GetDatabasePath());
+                }
+                auto optGame = db.GetGameById(data->gameId);
+                if (!optGame.has_value()) {
+                    for (const auto& g : StorefrontScanner::LoadAllGamesFromMetadata()) {
+                        if (g.id == data->gameId || _wcsicmp(g.title.c_str(), data->title) == 0) {
+                            optGame = g;
+                            break;
+                        }
                     }
                 }
 
-                if (pGame != nullptr) {
+                if (optGame.has_value()) {
                     if (riid == IID_IContextMenu) {
-                        auto* pMenu = new (std::nothrow) GameContextMenu(*pGame);
+                        auto* pMenu = new (std::nothrow) GameContextMenu(*optGame);
                         if (pMenu == nullptr) return E_OUTOFMEMORY;
                         const HRESULT hr = pMenu->QueryInterface(riid, ppv);
                         pMenu->Release();
@@ -793,7 +823,7 @@ IFACEMETHODIMP ShellFolder::GetUIObjectOf(
                         riid == IID_IPropertyStore ||
                         riid == IID_IExtractIconW ||
                         riid == IID_IQueryInfo) {
-                        auto* pUI = new (std::nothrow) GameItemUI(*pGame, 1);
+                        auto* pUI = new (std::nothrow) GameItemUI(*optGame, 1);
                         if (pUI == nullptr) return E_OUTOFMEMORY;
                         const HRESULT hr = pUI->QueryInterface(riid, ppv);
                         pUI->Release();
@@ -963,17 +993,22 @@ IFACEMETHODIMP ShellFolder::GetDetailsOf(PCUITEMID_CHILD pidl, UINT iColumn, SHE
         return S_OK;
     }
 
-    // Resolve game from live scanned games with enriched per-game metadata.json
-    auto games = StorefrontScanner::ScanAllInstalledGames();
-    const GameItem* pGame = nullptr;
-    for (const auto& g : games) {
-        if (g.id == data->gameId || _wcsicmp(g.title.c_str(), data->title) == 0) {
-            pGame = &g;
-            break;
+    // Resolve game from already-discovered local database or metadata cache
+    auto& db = Database::Instance();
+    if (!db.IsOpen()) {
+        db.Open(Storage::GetDatabasePath());
+    }
+    auto optGame = db.GetGameById(data->gameId);
+    if (!optGame.has_value()) {
+        for (const auto& g : StorefrontScanner::LoadAllGamesFromMetadata()) {
+            if (g.id == data->gameId || _wcsicmp(g.title.c_str(), data->title) == 0) {
+                optGame = g;
+                break;
+            }
         }
     }
-    if (pGame == nullptr) return E_FAIL;
-    const auto& game = *pGame;
+    if (!optGame.has_value()) return E_FAIL;
+    const auto& game = *optGame;
 
     std::wstring text;
     switch (iColumn) {
@@ -1035,6 +1070,10 @@ IFACEMETHODIMP ShellFolder::MapColumnToSCID(UINT iColumn, SHCOLUMNID* pscid) {
     default:
         return E_NOTIMPL;
     }
+}
+
+IFACEMETHODIMP ShellFolder::GetPaneState(REFEXPLORERPANE ep, EXPLORERPANESTATE* peps) {
+    return ShellView::EvaluatePaneState(m_hwndOwner, nullptr, ep, peps);
 }
 
 } // namespace GameExplorer

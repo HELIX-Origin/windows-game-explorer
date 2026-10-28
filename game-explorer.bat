@@ -41,6 +41,7 @@ if /i "%COMMAND%"=="package"      goto :cmd_package
 if /i "%COMMAND%"=="release"      goto :cmd_release
 if /i "%COMMAND%"=="register"     goto :cmd_register
 if /i "%COMMAND%"=="unregister"   goto :cmd_unregister
+if /i "%COMMAND%"=="watcher"      goto :cmd_watcher
 if /i "%COMMAND%"=="sign"         goto :cmd_sign
 if /i "%COMMAND%"=="art"          goto :cmd_art
 if /i "%COMMAND%"=="setup-signing" goto :cmd_setup_signing
@@ -66,6 +67,7 @@ echo     package [Debug^|Release]             Build the portable ZIP and NSIS se
 echo     release                             Build, test, lint, then package (Release).
 echo     register [DllPath]                   Register the shell extension (elevated).
 echo     unregister [DllPath]                 Unregister the shell extension (elevated).
+echo     watcher [Action]                     Manage Explorer lifecycle watcher (enable/disable/stop/inspect).
 echo     sign   [Debug^|Release]              Authenticode-sign the build outputs.
 echo     art                                  Regenerate installer sidecar/header art.
 echo     setup-signing [CertPath] [Password] [Repo]
@@ -76,6 +78,7 @@ echo   Examples:
 echo     %SCRIPT_NAME% build Release -Clean
 echo     %SCRIPT_NAME% release
 echo     %SCRIPT_NAME% register
+echo     %SCRIPT_NAME% watcher enable
 echo.
 echo   Registration needs an elevated terminal; this script never opens a second window.
 echo.
@@ -159,6 +162,14 @@ set "CODE=%ERRORLEVEL%"
 call :finish %CODE% "Unregistration"
 exit /b %CODE%
 
+:cmd_watcher
+call :require_script "watcher.ps1"
+if errorlevel 1 exit /b 1
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\watcher.ps1" %1 %2 %3 %4 %5 %6 %7 %8 %9
+set "CODE=%ERRORLEVEL%"
+call :finish %CODE% "Watcher"
+exit /b %CODE%
+
 :cmd_sign
 call :require_script "sign.ps1"
 if errorlevel 1 exit /b 1
@@ -219,4 +230,3 @@ echo.
 echo %C_RED%[ERROR] %~2 failed with exit code %~1.%C_RST%
 echo.
 exit /b %~1
-

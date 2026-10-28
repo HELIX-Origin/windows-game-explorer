@@ -48,7 +48,6 @@ public:
 
     HWND GetXamlIslandHwnd() const { return m_hwndXamlIsland; }
     HWND GetContainerHwnd() const { return m_hwndContainer; }
-    bool IsStandalone() const { return m_showCustomTitleBar; }
     const std::vector<GameItem>& GetGames() const { return m_games; }
 
 private:
@@ -59,7 +58,6 @@ private:
 
     HWND m_hwndContainer{ nullptr };
     HWND m_hwndXamlIsland{ nullptr };
-    bool m_showCustomTitleBar{ false };
 
     LayoutMode m_layoutMode{ LayoutMode::CoverArt };
     std::vector<ProviderViewModel> m_providers;

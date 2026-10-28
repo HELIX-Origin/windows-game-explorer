@@ -44,7 +44,8 @@ if (-not $DllPath -or -not (Test-Path -LiteralPath $DllPath)) {
 Write-Host ('Target DLL : {0}' -f $DllPath) -ForegroundColor White
 Write-Host 'Registering the Windows Shell extension with regsvr32...' -ForegroundColor White
 
-$process = Start-Process -FilePath 'regsvr32.exe' -ArgumentList @('/s', $DllPath) -PassThru -Wait
+$quotedDll = '"{0}"' -f $DllPath
+$process = Start-Process -FilePath 'regsvr32.exe' -ArgumentList @('/s', $quotedDll) -PassThru -Wait
 if ($process.ExitCode -ne 0) {
     Write-GameExplorerFailure -Action 'Registration' -Detail ('regsvr32 exited with code {0}' -f $process.ExitCode)
     exit $process.ExitCode

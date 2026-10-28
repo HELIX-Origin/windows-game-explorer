@@ -44,7 +44,8 @@ Stop-Process -Name 'GameExplorerService' -Force -ErrorAction SilentlyContinue
 if ($DllPath -and (Test-Path -LiteralPath $DllPath)) {
     Write-Host ('Target DLL : {0}' -f $DllPath) -ForegroundColor White
     Write-Host 'Unregistering the Windows Shell extension with regsvr32...' -ForegroundColor White
-    $process = Start-Process -FilePath 'regsvr32.exe' -ArgumentList @('/u', '/s', $DllPath) -PassThru -Wait
+    $quotedDll = '"{0}"' -f $DllPath
+    $process = Start-Process -FilePath 'regsvr32.exe' -ArgumentList @('/u', '/s', $quotedDll) -PassThru -Wait
     if ($process.ExitCode -ne 0) {
         Write-GameExplorerFailure -Action 'Unregistration' -Detail ('regsvr32 exited with code {0}' -f $process.ExitCode)
         exit $process.ExitCode

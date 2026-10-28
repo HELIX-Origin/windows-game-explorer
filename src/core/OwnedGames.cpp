@@ -1465,30 +1465,72 @@ std::wstring ExtractBaseTitle(const std::wstring& title, std::wstring* outEditio
         L"- with xbox game pass",
         // Edition keywords (preceded by " - " or ": ")
         L"- ultimate edition",
+        L": ultimate edition",
         L"- legendary edition",
+        L": legendary edition",
         L"- definitive edition",
+        L": definitive edition",
         L"- complete edition",
+        L": complete edition",
         L"- gold edition",
+        L": gold edition",
         L"- platinum edition",
+        L": platinum edition",
         L"- anniversary edition",
+        L": anniversary edition",
         L"- goty edition",
+        L": goty edition",
         L"- game of the year edition",
+        L": game of the year edition",
         L"- digital deluxe edition",
+        L": digital deluxe edition",
         L"- deluxe edition",
+        L": deluxe edition",
         L"- premium edition",
+        L": premium edition",
         L"- enhanced edition",
+        L": enhanced edition",
         L"- remastered edition",
+        L": remastered edition",
+        L"- remastered",
+        L": remastered",
         L"- director's cut",
+        L": director's cut",
         L"- directors cut",
+        L": directors cut",
         L"- expanded edition",
+        L": expanded edition",
         L"- extended edition",
+        L": extended edition",
         L"- special edition",
+        L": special edition",
         L"- collector's edition",
+        L": collector's edition",
         L"- collectors edition",
+        L": collectors edition",
         L"- standard edition",
+        L": standard edition",
         L"- base edition",
+        L": base edition",
         L"- console edition",
+        L": console edition",
         L"- pc edition",
+        L": pc edition",
+        // Parenthesized editions
+        L"(game of the year edition)",
+        L"(goty edition)",
+        L"(definitive edition)",
+        L"(complete edition)",
+        L"(deluxe edition)",
+        L"(digital deluxe edition)",
+        L"(ultimate edition)",
+        L"(special edition)",
+        L"(remastered)",
+        L"(enhanced edition)",
+        L"(anniversary edition)",
+        L"(collector's edition)",
+        L"(standard edition)",
+        L"(director's cut)",
         // Preview / beta tags
         L"- console edition (game preview)",
         L"- game preview",
@@ -1511,8 +1553,12 @@ std::wstring ExtractBaseTitle(const std::wstring& title, std::wstring* outEditio
         const size_t pos = lower.find(suffix);
         if (pos == std::wstring::npos || pos == 0) continue;
 
-        // The character immediately before the suffix must be a space so we don't clip mid-word.
-        if (lower[pos - 1] != L' ' && lower[pos - 1] != L':') continue;
+        // If suffix begins with a separator (':', '-', '(', '['), the preceding character
+        // can be alphanumeric (e.g. "Hunt: Complete Edition", "Game(GOTY)"). Otherwise,
+        // the character immediately before the suffix must be a space so we don't clip mid-word.
+        const wchar_t firstCh = suffix.empty() ? L'\0' : suffix[0];
+        const bool isPunctSep = (firstCh == L':' || firstCh == L'-' || firstCh == L'(' || firstCh == L'[');
+        if (!isPunctSep && lower[pos - 1] != L' ' && lower[pos - 1] != L':') continue;
 
         const std::wstring base = title.substr(0, pos);
 

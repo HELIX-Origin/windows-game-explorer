@@ -4,6 +4,20 @@ All notable changes to **Windows Game Explorer** are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.6.0] - 2026-10-27
+
+### Added
+- **Pure dynamic window sizing & responsive resizability**: Standalone `explorer.exe shell:games` now features 100% dynamic sizing and resizability (`WS_CAPTION | WS_THICKFRAME | WS_MINIMIZEBOX | WS_MAXIMIZEBOX | WS_SYSMENU`) with fluid `HorizontalAlignment::Stretch` / `VerticalAlignment::Stretch` across the XAML root grid, main scroll viewer, and responsive wrapping panels.
+- **Smart window resize synchronization**: Added a 1px size delta trigger in `LibraryViewHost::Resize` guaranteeing `DesktopWindowContentBridge` receives `WM_SIZE` and dynamically reflows XAML content across initial launch, shrunk, enlarged, and maximized states without clipping or dark bars.
+- **Standalone navigation pane and status bar suppression**: Suppresses the Left Navigation Pane (`NamespaceTreeControl`) and bottom status bar view-mode switcher (`msctls_statusbar32`) in standalone `shell:games` windows while automatically preserving the full navigation pane in File Explorer tab mode.
+- **Windows 11 Fluent 3D game controller iconography**: Authentically crafted Fluent 3D controller icon embedded in `GameExplorerShell.dll` (`IDI_GAME_EXPLORER` 100) with standard face button colors (Y=Yellow, B=Red, X=Blue, A=Green) and clean shadows across 7 multi-resolution layers (16px to 256px).
+- **Smart Game Engine & Multi-Drive Discovery Engine**: Integrated detection for Unity, Unreal Engine, Godot, GameMaker, RPG Maker, Ren'Py, Source/GoldSrc, CryEngine, REDengine, GOG manifests, and 16 game middleware signatures across all mounted drives.
+- **Storefront-validated artwork engine**: Added cross-storefront validation (Steam Store API, GOG, itch.io, VNDB) before metadata attachment, with strict slot aspect ratio filtering (cover 0.45..1.15, hero 1.20..4.50, icon 0.75..1.33) and zero-cropping stretching.
+
+### Changed
+- Rebuilt installer art and shortcuts with deduplicated desktop/Start Menu icons and clean elevation handling.
+- Formally dropped Windows 10 support in the NSIS installer and documentation following its end-of-life status.
+
 ## [2.5.0] - 2026-10-26
 
 ### Added

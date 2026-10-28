@@ -46,6 +46,7 @@ class DarkMode {
 public:
     static void Initialize();
     static bool IsSystemDarkMode();
+    static bool IsWindows11OrGreater();
     static COLORREF GetSystemAccentColor();
     static void ApplyWindowTheme(HWND hwnd, bool darkMode);
     static ThemePalette GetPalette(bool isDarkMode);

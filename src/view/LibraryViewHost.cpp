@@ -248,7 +248,7 @@ wuxm::SolidColorBrush MakeBrush(uint8_t a, uint8_t r, uint8_t g, uint8_t b) {
     return wuxm::SolidColorBrush(MakeColor(a, r, g, b));
 }
 
-wuxmi::BitmapImage LoadLocalBitmap(const std::wstring& path) {
+wuxm::ImageSource LoadLocalBitmap(const std::wstring& path) {
     if (path.empty()) return nullptr;
     std::error_code ec;
     if (!fs::exists(path, ec)) return nullptr;
@@ -257,7 +257,14 @@ wuxmi::BitmapImage LoadLocalBitmap(const std::wstring& path) {
         const fs::path p(path);
         const auto absPath = fs::absolute(p).wstring();
         wf::Uri uri(L"file:///" + absPath);
-        return wuxmi::BitmapImage(uri);
+        std::wstring ext = p.extension().wstring();
+        std::transform(ext.begin(), ext.end(), ext.begin(), ::towlower);
+        if (ext == L".svg") {
+            return wuxmi::SvgImageSource(uri);
+        }
+        wuxmi::BitmapImage bmp(uri);
+        bmp.AutoPlay(true);
+        return bmp;
     } catch (...) {
         return nullptr;
     }
@@ -270,11 +277,10 @@ bool GetLocalImageDimensions(const std::wstring& path, UINT* pWidth, UINT* pHeig
     std::error_code ec;
     if (!fs::exists(path, ec)) return false;
 
-    EnsureGdiplusInitialized();
-    Gdiplus::Image img(path.c_str());
-    if (img.GetLastStatus() == Gdiplus::Ok) {
-        if (pWidth) *pWidth = img.GetWidth();
-        if (pHeight) *pHeight = img.GetHeight();
+    ImageDimensions dims{};
+    if (ImageValidator::GetImageInfo(path, dims)) {
+        if (pWidth) *pWidth = dims.width;
+        if (pHeight) *pHeight = dims.height;
         return true;
     }
     return false;
@@ -346,7 +352,7 @@ static std::atomic<bool> s_isFetchingAchievements{ false };
 static std::atomic<bool> s_isMeasuringFootprints{ false };
 static std::mutex s_measuredSizesMutex;
 static std::vector<std::pair<std::wstring, uint64_t>> s_measuredSizes;
-static wux::Hosting::WindowsXamlManager s_xamlManager{ nullptr };
+static thread_local wux::Hosting::WindowsXamlManager s_xamlManager{ nullptr };
 
 } // namespace
 
@@ -375,6 +381,8 @@ void LibraryViewHost::Cleanup() {
                 m_xaml->rootGrid = nullptr;
             }
             m_xaml->sidepaneHost = nullptr;
+            m_xaml->mainScroll = nullptr;
+            m_xaml->sidepaneScroll = nullptr;
             m_xaml->providerCards.clear();
             m_xaml->gameCards.clear();
             if (m_xaml->xamlSource) {
@@ -389,9 +397,8 @@ void LibraryViewHost::Cleanup() {
     m_hwndContainer = nullptr;
 }
 
-bool LibraryViewHost::Initialize(HWND hwndContainer, bool showCustomTitleBar) {
+bool LibraryViewHost::Initialize(HWND hwndContainer, bool /*showCustomTitleBar*/) {
     m_hwndContainer = hwndContainer;
-    m_showCustomTitleBar = showCustomTitleBar;
 
     RECT rcClient{};
     GetClientRect(hwndContainer, &rcClient);
@@ -426,8 +433,19 @@ bool LibraryViewHost::Initialize(HWND hwndContainer, bool showCustomTitleBar) {
 }
 
 void LibraryViewHost::Resize(int width, int height) {
+    if (width <= 0 || height <= 0) return;
     if (m_hwndXamlIsland != nullptr && IsWindow(m_hwndXamlIsland)) {
-        SetWindowPos(m_hwndXamlIsland, nullptr, 0, 0, width, height, SWP_NOZORDER | SWP_SHOWWINDOW);
+        RECT rcIsland{};
+        if (GetClientRect(m_hwndXamlIsland, &rcIsland)) {
+            const int curW = rcIsland.right - rcIsland.left;
+            const int curH = rcIsland.bottom - rcIsland.top;
+            if (curW == width && curH == height && width > 1) {
+                SetWindowPos(m_hwndXamlIsland, nullptr, 0, 0, width - 1, height,
+                    SWP_NOZORDER | SWP_NOACTIVATE);
+            }
+        }
+        SetWindowPos(m_hwndXamlIsland, nullptr, 0, 0, width, height,
+            SWP_NOZORDER | SWP_NOACTIVATE | SWP_SHOWWINDOW);
     }
 }
 
@@ -453,6 +471,11 @@ void LibraryViewHost::RefreshData() {
     }
 
     m_games = db.GetAllGames();
+    std::sort(m_games.begin(), m_games.end(), [](const GameItem& a, const GameItem& b) {
+        const auto& sa = a.sortTitle.empty() ? a.title : a.sortTitle;
+        const auto& sb = b.sortTitle.empty() ? b.title : b.sortTitle;
+        return _wcsicmp(sa.c_str(), sb.c_str()) < 0;
+    });
     m_providers = s_cachedProviders;
 
     if (m_selectedGameIndex >= static_cast<int>(m_games.size())) {
@@ -590,6 +613,12 @@ void LibraryViewHost::LoadDataAsync(HWND hwndNotify) {
                 g.iconPath = EnsureExtractedIconPng(g.appId, g.iconPath);
             }
         }
+
+        std::sort(games.begin(), games.end(), [](const GameItem& a, const GameItem& b) {
+            const auto& sa = a.sortTitle.empty() ? a.title : a.sortTitle;
+            const auto& sb = b.sortTitle.empty() ? b.title : b.sortTitle;
+            return _wcsicmp(sa.c_str(), sb.c_str()) < 0;
+        });
 
         s_cachedProviders = std::move(provs);
         s_cachedGames = std::move(games);
@@ -873,28 +902,14 @@ void LibraryViewHost::RebuildSidepane() {
         artCard.BorderBrush(borderBrush);
         artCard.BorderThickness(wux::ThicknessHelper::FromUniformLength(1));
 
+        // Details section always uses the cover art (with fallback to hero or icon if cover is missing)
         std::wstring previewPath;
-        if (m_layoutMode == LayoutMode::HeroBanner) {
-            if (!game.heroArtPath.empty() && ImageValidator::IsValidHero(game.heroArtPath)) {
-                previewPath = game.heroArtPath;
-            } else if (!game.detailsArtPath.empty()) {
-                previewPath = game.detailsArtPath;
-            } else if (!game.coverArtPath.empty()) {
-                previewPath = game.coverArtPath;
-            } else {
-                previewPath = game.iconPath;
-            }
+        if (!game.coverArtPath.empty()) {
+            previewPath = game.coverArtPath;
+        } else if (!game.heroArtPath.empty()) {
+            previewPath = game.heroArtPath;
         } else {
-            // Cover Art mode: prioritize cover art matching Game Explorer Manager's 2:3 preview
-            if (!game.coverArtPath.empty()) {
-                previewPath = game.coverArtPath;
-            } else if (!game.detailsArtPath.empty()) {
-                previewPath = game.detailsArtPath;
-            } else if (!game.heroArtPath.empty()) {
-                previewPath = game.heroArtPath;
-            } else {
-                previewPath = game.iconPath;
-            }
+            previewPath = game.iconPath;
         }
 
         UINT imgW = 0, imgH = 0;
@@ -902,27 +917,12 @@ void LibraryViewHost::RebuildSidepane() {
         const double aspect = (hasDims && imgH > 0) ? (static_cast<double>(imgW) / static_cast<double>(imgH)) : 1.0;
 
         constexpr double sidepaneWidth = 300.0;
-        double frameW = sidepaneWidth;
-        double frameH = 169.0;
-        wuxm::Stretch imgStretch = wuxm::Stretch::Fill;
+        double frameW = 170.0;
+        double frameH = 255.0;
 
-        if (m_layoutMode == LayoutMode::HeroBanner) {
-            if (aspect >= 1.35) {
-                frameW = sidepaneWidth;
-                frameH = sidepaneWidth / aspect;
-                if (frameH > 180.0) frameH = 180.0;
-                if (frameH < 120.0) frameH = 120.0;
-                imgStretch = wuxm::Stretch::UniformToFill;
-            } else {
-                frameW = sidepaneWidth;
-                frameH = 104.0;
-                imgStretch = wuxm::Stretch::UniformToFill;
-            }
-        } else {
-            // Match Game Explorer Manager's 2:3 vertical box art preview frame and fit method
-            frameW = 170.0;
-            frameH = 255.0;
-            imgStretch = wuxm::Stretch::Fill;
+        if (aspect >= 1.35) {
+            frameW = sidepaneWidth;
+            frameH = (std::min)(180.0, (std::max)(120.0, sidepaneWidth / aspect));
         }
 
         artCard.Width(frameW);
@@ -932,9 +932,7 @@ void LibraryViewHost::RebuildSidepane() {
         if (auto bmp = LoadLocalBitmap(previewPath)) {
             wuxc::Image img;
             img.Source(bmp);
-            img.Stretch(imgStretch);
-            img.HorizontalAlignment(wux::HorizontalAlignment::Center);
-            img.VerticalAlignment(wux::VerticalAlignment::Center);
+            img.Stretch(wuxm::Stretch::Fill);
             artCard.Child(img);
         } else {
             wuxc::TextBlock noArt;
@@ -1495,141 +1493,15 @@ void LibraryViewHost::BuildXamlViewport() {
     const auto textSec     = m_isDarkMode ? MakeBrush(255, 170, 170, 170): MakeBrush(255, 100, 100, 100);
     const auto whiteBrush  = MakeBrush(255, 255, 255, 255);
 
-    HWND hwndTop = GetAncestor(m_hwndContainer, GA_ROOT);
-    if (hwndTop == nullptr) hwndTop = m_hwndContainer;
-    const bool isStandalone = m_showCustomTitleBar;
-
     m_xaml->rootGrid.RequestedTheme(m_isDarkMode ? wux::ElementTheme::Dark : wux::ElementTheme::Light);
     m_xaml->rootGrid.Background(bgCanvas);
 
-    if (isStandalone) {
-        wuxc::RowDefinition rowTitle;
-        rowTitle.Height(wux::GridLengthHelper::FromPixels(38));
-        m_xaml->rootGrid.RowDefinitions().Append(rowTitle);
-    }
     wuxc::RowDefinition rowTop;
     rowTop.Height(wux::GridLengthHelper::FromPixels(52));
     wuxc::RowDefinition rowMain;
     rowMain.Height(wux::GridLengthHelper::FromValueAndType(1.0, wux::GridUnitType::Star));
     m_xaml->rootGrid.RowDefinitions().Append(rowTop);
     m_xaml->rootGrid.RowDefinitions().Append(rowMain);
-
-    // =========================================================================
-    // STANDALONE CUSTOM TITLE BAR (Matching Companion GUI Styling)
-    // =========================================================================
-    if (isStandalone) {
-        wuxc::Border titleBar;
-        titleBar.Height(38);
-        titleBar.Background(bgCanvas);
-        titleBar.Padding(wux::ThicknessHelper::FromLengths(16, 0, 10, 0));
-
-        wuxc::Grid titleGrid;
-        wuxc::ColumnDefinition cTitleLeft, cTitleRight;
-        cTitleLeft.Width(wux::GridLengthHelper::FromValueAndType(1.0, wux::GridUnitType::Star));
-        cTitleRight.Width(wux::GridLengthHelper::Auto());
-        titleGrid.ColumnDefinitions().Append(cTitleLeft);
-        titleGrid.ColumnDefinitions().Append(cTitleRight);
-
-        wuxc::StackPanel leftTitle;
-        leftTitle.Orientation(wuxc::Orientation::Horizontal);
-        leftTitle.VerticalAlignment(wux::VerticalAlignment::Center);
-        leftTitle.Spacing(8);
-
-        wuxc::TextBlock iconTb;
-        iconTb.Text(L"\U0001F3AE");
-        iconTb.FontSize(14);
-        iconTb.VerticalAlignment(wux::VerticalAlignment::Center);
-        leftTitle.Children().Append(iconTb);
-
-        wuxc::TextBlock titleTb;
-        titleTb.Text(L"Windows Game Explorer");
-        titleTb.FontSize(12);
-        titleTb.FontWeight(winrt::Windows::UI::Text::FontWeights::SemiBold());
-        titleTb.Foreground(textPrimary);
-        titleTb.VerticalAlignment(wux::VerticalAlignment::Center);
-        leftTitle.Children().Append(titleTb);
-
-        wuxc::Grid::SetColumn(leftTitle, 0);
-        titleGrid.Children().Append(leftTitle);
-
-        wuxc::Border pillBorder;
-        pillBorder.CornerRadius(wux::CornerRadiusHelper::FromUniformRadius(6));
-        pillBorder.Background(m_isDarkMode ? MakeBrush(255, 32, 32, 32) : MakeBrush(255, 236, 236, 236));
-        pillBorder.BorderBrush(borderBrush);
-        pillBorder.BorderThickness(wux::ThicknessHelper::FromUniformLength(1));
-        pillBorder.Padding(wux::ThicknessHelper::FromLengths(2, 2, 2, 2));
-        pillBorder.VerticalAlignment(wux::VerticalAlignment::Center);
-
-        wuxc::StackPanel pillStack;
-        pillStack.Orientation(wuxc::Orientation::Horizontal);
-        pillStack.Spacing(2);
-
-        auto makeWinBtn = [&](const wchar_t* symbol, const std::function<void()>& onClick) {
-            wuxc::Button btn;
-            btn.Content(winrt::box_value(symbol));
-            btn.Width(28);
-            btn.Height(24);
-            btn.Padding(wux::ThicknessHelper::FromLengths(0, 0, 0, 0));
-            btn.CornerRadius(wux::CornerRadiusHelper::FromUniformRadius(4));
-            btn.Background(MakeBrush(0, 0, 0, 0));
-            btn.BorderThickness(wux::ThicknessHelper::FromUniformLength(0));
-            btn.Foreground(textPrimary);
-            btn.FontSize(10);
-            btn.Click([onClick](wf::IInspectable const&, wux::RoutedEventArgs const&) {
-                onClick();
-            });
-            return btn;
-        };
-
-        auto btnMin = makeWinBtn(L"\u2500", [hwndTop]() {
-            ShowWindow(hwndTop, SW_MINIMIZE);
-        });
-        pillStack.Children().Append(btnMin);
-
-        const bool isZoomed = IsZoomed(hwndTop);
-        auto btnMax = makeWinBtn(isZoomed ? L"\u2750" : L"\u25A2", [hwndTop]() {
-            if (IsZoomed(hwndTop)) {
-                ShowWindow(hwndTop, SW_RESTORE);
-            } else {
-                ShowWindow(hwndTop, SW_MAXIMIZE);
-            }
-        });
-        pillStack.Children().Append(btnMax);
-
-        auto btnClose = makeWinBtn(L"\u2715", [hwndTop]() {
-            PostMessageW(hwndTop, WM_CLOSE, 0, 0);
-        });
-        pillStack.Children().Append(btnClose);
-
-        pillBorder.Child(pillStack);
-        wuxc::Grid::SetColumn(pillBorder, 1);
-        titleGrid.Children().Append(pillBorder);
-
-        titleBar.Child(titleGrid);
-
-        auto handleDrag = [hwndTop](wf::IInspectable const&, wuxi::PointerRoutedEventArgs const& e) {
-            const auto pt = e.GetCurrentPoint(nullptr);
-            if (pt.Properties().IsLeftButtonPressed()) {
-                ReleaseCapture();
-                SendMessageW(hwndTop, WM_NCLBUTTONDOWN, HTCAPTION, 0);
-            }
-        };
-        titleBar.PointerPressed(handleDrag);
-        titleGrid.PointerPressed(handleDrag);
-
-        auto handleDblClick = [hwndTop](wf::IInspectable const&, wuxi::DoubleTappedRoutedEventArgs const&) {
-            if (IsZoomed(hwndTop)) {
-                ShowWindow(hwndTop, SW_RESTORE);
-            } else {
-                ShowWindow(hwndTop, SW_MAXIMIZE);
-            }
-        };
-        titleBar.DoubleTapped(handleDblClick);
-        titleGrid.DoubleTapped(handleDblClick);
-
-        wuxc::Grid::SetRow(titleBar, 0);
-        m_xaml->rootGrid.Children().Append(titleBar);
-    }
 
     // =========================================================================
     // TOP COMMAND BAR (Layout Mode Switcher + Game Explorer Manager + Refresh)
@@ -1724,30 +1596,8 @@ void LibraryViewHost::BuildXamlViewport() {
     wuxc::Grid::SetColumn(rightToolbar, 1);
     topGrid.Children().Append(rightToolbar);
 
-    if (isStandalone) {
-        auto handleTopDrag = [hwndTop](wf::IInspectable const&, wuxi::PointerRoutedEventArgs const& e) {
-            const auto pt = e.GetCurrentPoint(nullptr);
-            if (pt.Properties().IsLeftButtonPressed()) {
-                ReleaseCapture();
-                SendMessageW(hwndTop, WM_NCLBUTTONDOWN, HTCAPTION, 0);
-            }
-        };
-        topBar.PointerPressed(handleTopDrag);
-        topGrid.PointerPressed(handleTopDrag);
-
-        auto handleTopDblClick = [hwndTop](wf::IInspectable const&, wuxi::DoubleTappedRoutedEventArgs const&) {
-            if (IsZoomed(hwndTop)) {
-                ShowWindow(hwndTop, SW_RESTORE);
-            } else {
-                ShowWindow(hwndTop, SW_MAXIMIZE);
-            }
-        };
-        topBar.DoubleTapped(handleTopDblClick);
-        topGrid.DoubleTapped(handleTopDblClick);
-    }
-
     topBar.Child(topGrid);
-    wuxc::Grid::SetRow(topBar, isStandalone ? 1 : 0);
+    wuxc::Grid::SetRow(topBar, 0);
     m_xaml->rootGrid.Children().Append(topBar);
 
     // =========================================================================
@@ -1978,14 +1828,15 @@ void LibraryViewHost::BuildXamlViewport() {
                     : (!g.executablePath.empty() ? EnsureExtractedIconPng(g.appId, g.executablePath) : L"");
                 if (thumbPath.empty() || !fs::exists(thumbPath)) {
                     if (!g.iconPath.empty() && fs::exists(g.iconPath)) thumbPath = g.iconPath;
-                    else if (!g.detailsArtPath.empty() && fs::exists(g.detailsArtPath)) thumbPath = g.detailsArtPath;
                     else if (!g.coverArtPath.empty() && fs::exists(g.coverArtPath)) thumbPath = g.coverArtPath;
                 }
                 if (auto bmp = LoadLocalBitmap(thumbPath)) {
                     wuxc::Image ico;
                     ico.Source(bmp);
-                    ico.Width(28);
-                    ico.Height(28);
+                    ico.Width(32);
+                    ico.Height(32);
+                    ico.Stretch(wuxm::Stretch::Uniform);
+                    ico.HorizontalAlignment(wux::HorizontalAlignment::Center);
                     ico.VerticalAlignment(wux::VerticalAlignment::Center);
                     wuxc::Grid::SetColumn(ico, 0);
                     rowGrid.Children().Append(ico);
@@ -2075,11 +1926,7 @@ void LibraryViewHost::BuildXamlViewport() {
                         primaryArt = g.heroArtPath;
                     } else if (!g.heroArtPath.empty()) {
                         primaryArt = g.heroArtPath;
-                    } else if (ImageValidator::IsValidHero(g.detailsArtPath)) {
-                        primaryArt = g.detailsArtPath;
-                    } else if (!g.detailsArtPath.empty()) {
-                        primaryArt = g.detailsArtPath;
-                    } else if (!g.coverArtPath.empty()) {
+                    } else if (ImageValidator::IsValidHero(g.coverArtPath)) {
                         primaryArt = g.coverArtPath;
                     }
                 } else {
@@ -2087,8 +1934,6 @@ void LibraryViewHost::BuildXamlViewport() {
                         primaryArt = g.coverArtPath;
                     } else if (!g.coverArtPath.empty()) {
                         primaryArt = g.coverArtPath;
-                    } else if (!g.detailsArtPath.empty()) {
-                        primaryArt = g.detailsArtPath;
                     } else if (!g.heroArtPath.empty()) {
                         primaryArt = g.heroArtPath;
                     }
@@ -2097,7 +1942,7 @@ void LibraryViewHost::BuildXamlViewport() {
                 if (auto bmp = LoadLocalBitmap(primaryArt)) {
                     wuxc::Image artImg;
                     artImg.Source(bmp);
-                    artImg.Stretch(isHero ? wuxm::Stretch::UniformToFill : wuxm::Stretch::Fill);
+                    artImg.Stretch(wuxm::Stretch::Fill);
                     artHost.Child(artImg);
                 } else if (auto iconBmp = LoadLocalBitmap(g.iconPath)) {
                     wuxc::Image icoImg;
@@ -2107,10 +1952,10 @@ void LibraryViewHost::BuildXamlViewport() {
                     icoImg.HorizontalAlignment(wux::HorizontalAlignment::Center);
                     icoImg.VerticalAlignment(wux::VerticalAlignment::Center);
                     artHost.Child(icoImg);
-                } else if (auto fallbackBmp = LoadLocalBitmap(!g.detailsArtPath.empty() ? g.detailsArtPath : g.coverArtPath)) {
+                } else if (auto fallbackBmp = LoadLocalBitmap(!g.coverArtPath.empty() ? g.coverArtPath : g.heroArtPath)) {
                     wuxc::Image artImg;
                     artImg.Source(fallbackBmp);
-                    artImg.Stretch(isHero ? wuxm::Stretch::UniformToFill : wuxm::Stretch::Fill);
+                    artImg.Stretch(wuxm::Stretch::Fill);
                     artHost.Child(artImg);
                 }
                 wuxc::Grid::SetRow(artHost, 0);
@@ -2177,7 +2022,7 @@ void LibraryViewHost::BuildXamlViewport() {
     wuxc::Grid::SetColumn(m_xaml->sidepaneHost, 1);
     bodyGrid.Children().Append(m_xaml->sidepaneHost);
 
-    wuxc::Grid::SetRow(bodyGrid, isStandalone ? 2 : 1);
+    wuxc::Grid::SetRow(bodyGrid, 1);
     m_xaml->rootGrid.Children().Append(bodyGrid);
 }
 

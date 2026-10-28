@@ -17,7 +17,7 @@
 
 ## 🔭 Vision & Positioning Principles
 
-1. **Core Value Proposition**: Completely native to Windows. Recreates the classic Windows 7/Vista Game Explorer (`shell:Games`, `FOLDERTYPEID_Games`) directly inside the modern Windows 11 File Explorer canvas as a native Virtual Shell Namespace Extension (C++20, Win32 APIs, COM). Built with a dedicated dual-component architecture:
+1. **Core Value Proposition**: Completely native to Windows. Recreates the classic Windows 7/Vista Game Explorer (`shell:Games`, `FOLDERTYPEID_Games`) inside Windows 10 version 1903+ and Windows 11 File Explorer as a native Virtual Shell Namespace Extension (C++20, Win32 APIs, COM), using each OS's native Explorer presentation. Built with a dedicated dual-component architecture:
    - **`GameExplorerShell.dll`**: In-process File Explorer shell extension presenting two collapsible sections (`▾ Game Providers (N)` and `▾ Games (N)`) with vertical ~2:3 box art and rich properties.
    - **`GameExplorerStudio.exe`**: The single companion GUI, one custom-chrome window with three tabs — **Library Manager** (library management, local/custom games, box art/icons, metadata editing, artwork discovery), **Game Catalogue** (paged list of every owned storefront game with search/filter/sort toolbar and delegated storefront installs), and **Configuration** (shell integration registration, layout mode preference, storefront integration toggles, API credentials, OneDrive cloud sync). It also owns `--register` / `--unregister` / `--reset-cache`.
 2. **Design Principles**:
@@ -36,20 +36,35 @@
 | **M15** | Windows Game Explorer Shell Extension & Native Re-Architecture | Shell extension & Win32 apps | ✅ Released | `v2.0.0` | Native C++20 Win32 COM virtual namespace extension (`GameExplorerShell.dll`), two-section categorization (`Installed Providers` & `Games Library`), 17-platform scanner, `GameExplorerConfig.exe`, and `GameExplorerManager.exe` |
 | **M16** | Universal Multi-Source Achievement Tracking & Multi-Viewport Artwork Engine | Core, Shell & Config | ✅ Delivered | `v2.2.0` | Hybrid native storefront + external tracker integration (RetroAchievements, Steam Web API, GOG Galaxy), VNDB Kana API provider, itch storefront scraping, multi-viewport aspect ratio fitting, cache purge & rebuild engine, in-place scroll preservation, write-only OneDrive backup, config UI, and Inspector trophy rendering |
 | **M17** | Unified Tabbed GUI & Game Catalogue for All Owned Games | Unified companion GUI & Service | ✅ Released | `v2.5.0` | Unified companion app `GameExplorerStudio.exe` (Library Manager, Game Catalogue, Configuration), paged owned-games catalogue with search/filter/sort and delegated installs (Steam, GOG, itch, Xbox, Ubisoft Connect, Epic via optional legendary), Windows-installable gate, edition-aware multi-store deduplication, `GameExplorerService.exe` background service, single `game-explorer.bat` dispatcher, and Windows 10/11 platform bounds |
-| **M18** | Windows 10 vs 11 Shell Compatibility Research | Shell extension & Studio | ⬜ Planned (unscheduled) | TBD | Establish the minimum supported Windows 10 build for in-process XAML Island hosting inside `explorer.exe`, and document WinUI/XAML Island, DWM backdrop and File Explorer tab behaviour across Windows 10 and 11 |
+| **M18** | Windows 10 vs 11 Shell Compatibility Research | Shell extension & Studio | ✅ Complete | TBD | Windows 10 version 1903 (build 18362) is the documented UWP XAML hosting API floor; Explorer retains each OS's native presentation; see `docs/research/windows-version-compatibility.md` |
+| **M19** | Shell Performance, Dynamic Resizing & Fluent Iconography | Shell extension, service & scanner | ✅ Released | `v2.6.0` | Standalone responsive dynamic window sizing, automatic navigation pane and status bar suppression, authentic Windows 11 Fluent 3D controller iconography, multi-drive discovery, and storefront-validated artwork |
 
 ---
 
-## 🚀 Active Milestones
+## ✅ Completed Milestones
 
-### [windows-game-explorer] — Milestone M18: Windows 10 vs 11 Shell Compatibility Research (planned)
+### [windows-game-explorer] — Milestone M18: Windows 10 vs 11 Shell Compatibility Research (complete)
 
-> **Status: planned, unscheduled.** M17 shipped in `v2.5.0`. The only planned work is `ARCH-01`:
-> establish the minimum supported Windows 10 build for in-process XAML Island hosting inside
-> `explorer.exe`, and document WinUI/XAML Island, DWM backdrop and File Explorer tab behaviour across
-> Windows 10 and Windows 11. Game relocation/move and in-app installation progress tracking were
-> dropped (user decision 2026-10-26) together with in-app install-location handling. Tasks live in
-> [`TODO.md`](./TODO.md) (`ARCH-01`).
+> **Status: complete.** Microsoft documents Windows 10 version 1903 (build 18362) as the runtime
+> floor for the UWP XAML hosting API used by `explorer.exe`; build 19041 is not required by that API.
+> The extension leaves Explorer's mode and chrome to the OS, does not delete the OS Games folder
+> type, and no longer writes app-specific flags intended to favor Windows 11 tabbed hosting. The
+> installer rejects older builds. Explorer-hosted validation on build 18362 remains outstanding;
+> findings and the support caveat are in [`docs/research/windows-version-compatibility.md`](./docs/research/windows-version-compatibility.md).
+
+---
+
+## 🚧 Proposed Milestones
+
+### [windows-game-explorer] — Milestone M19: Shell Performance & Explorer Lifecycle
+
+> User-directed scope: optimize performance (`PERF-01`), build an independent project-owned Explorer watcher/loader
+> (`HOST-01`) with zero external dependencies, and suppress the left navigation sidebar when launched standalone via `shell:games`
+> or shortcuts (`NAV-01`) to maximize installed games grid canvas space. Watcher-managed lifecycle
+> loading is the architectural focus. Preserve COM namespace activation, native
+> Explorer presentation, multi-user isolation, and reversible installation.
+> The active workstreams remain tracked in [`TODO.md`](./TODO.md)
+> and Sprint 39 in [`PLAN.md`](./PLAN.md); blockers must not be reported as completed features.
 
 ---
 
@@ -118,5 +133,3 @@ flowchart TD
 - 🎯 **[windows-game-explorer] Phase 5 — Front-End Custom Gallery & Details Side Pane**: Native Fluent Design game view supporting selectable layouts (Cover Art, Hero Banner, Details View), authentic native Windows light and dark styles, keyboard navigation hooks, and contextual details side panel.
 - 🎯 **[windows-game-explorer] Phase 6 — Integration Configuration Utility (`GameExplorerConfig.exe`)**: Standalone lightweight Win32 configuration utility dedicated to enabling/disabling shell integration, selecting library layout mode, toggling storefront integrations, and managing OneDrive cloud sync.
 - 🎯 **[windows-game-explorer] Phase 7 — Advanced Execution, OneDrive Sync & OS Integration**: Client-executable launch invocation (`steam.exe -applaunch <appId>`, etc.), custom Explorer right-click context menus, and dynamic OneDrive cloud-save backup.
-
-

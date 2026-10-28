@@ -6,7 +6,7 @@
 
 ## 📑 Table of Contents
 1. [Codebase Organization](#1-codebase-organization)
-2. [WinUI 3 XAML Islands Shell Architecture](#2-winui-3-xaml-islands-shell-architecture)
+2. [UWP XAML Islands Shell Architecture](#2-uwp-xaml-islands-shell-architecture)
 3. [Core Engine Internals](#3-core-engine-internals)
 4. [SQLite Database Schema](#4-sqlite-database-schema)
 5. [Build Pipelines & Quality Gates](#5-build-pipelines--quality-gates)
@@ -72,7 +72,7 @@ projects/windows-game-explorer/
 │   │   ├── GameItemUI.cpp          <- Game cards, artwork and Inspector sidepane
 │   │   ├── Registration.cpp        <- DllRegisterServer / DllUnregisterServer COM keys
 │   │   ├── ShellFolder.cpp         <- IShellFolder / IPersistFolder2 / IPersistIDList
-│   │   ├── ShellView.cpp           <- IShellView / WinUI 3 XAML Island implementation
+│   │   ├── ShellView.cpp           <- IShellView / UWP XAML Island implementation
 │   │   └── Resource.rc             <- Icons, manifest and version resource
 │   ├── view/                       <- LibraryViewHost (shell view hosting glue)
 │   ├── studio/                     <- GameExplorerStudio.exe frame and pages
@@ -101,9 +101,9 @@ projects/windows-game-explorer/
 
 ---
 
-## 2. WinUI 3 XAML Islands Shell Architecture
+## 2. UWP XAML Islands Shell Architecture
 
-Windows Game Explorer delivers a native Windows 11 WinUI 3 interface directly inside the classic File Explorer process (`explorer.exe`) using **XAML Islands** (`DesktopWindowXamlSource`).
+Windows Game Explorer uses the UWP XAML hosting API (`DesktopWindowXamlSource`) from its native C++ shell view inside the active File Explorer process (`explorer.exe`). Windows 10 version 1903 (build 18362) is the documented API floor; the OS retains control of Explorer's chrome and presentation.
 
 ```mermaid
 flowchart TD
@@ -111,8 +111,8 @@ flowchart TD
         DefView["Explorer Host Window (CDefView parent)"]
         ShellView["ShellView : IShellView"]
         XamlSource["DesktopWindowXamlSource"]
-        IslandWindow["XAML Island Child Window<br/>(Class: Windows.UI.Core.CoreWindow)"]
-        RootGrid["Microsoft.UI.Xaml.Controls.Grid"]
+        IslandWindow["XAML Island Child Window"]
+        RootGrid["Windows.UI.Xaml.Controls.Grid"]
         
         DefView -->|CreateViewWindow| ShellView
         ShellView -->|Initialize| XamlSource
@@ -126,7 +126,7 @@ flowchart TD
 ```
 
 ### DirectComposition & Lifecycle Management
-Embedding modern WinUI 3 XAML Islands into an unmanaged Win32 host requires strict lifecycle and composition handling:
+Embedding UWP XAML Islands into an unmanaged Win32 host requires strict lifecycle and composition handling:
 - **Zero Win32 `SetParent` on XAML Island Windows**: Direct calls to `SetParent` on XAML Island windows break the DirectComposition visual tree and throw uncatchable `0xc000027b` stowed exceptions. Instead, the HWND host relationship is established strictly via `IDesktopWindowXamlSourceNative::AttachToWindow`.
 - **Thread Singleton `WindowsXamlManager`**: `WindowsXamlManager::InitializeForCurrentThread()` must be held alive as a thread singleton. Tearing it down prematurely causes heap corruption on subsequent tab openings.
 - **Clean Content Disconnection**: When switching tabs or closing a folder view, `DesktopWindowXamlSource::Content(nullptr)` is called first, followed by `.Close()`, ensuring all composition surfaces release cleanly without memory leaks or crashes.
@@ -135,6 +135,20 @@ Embedding modern WinUI 3 XAML Islands into an unmanaged Win32 host requires stri
 ---
 
 ## 3. Core Engine Internals
+
+### Background service scheduling and messages
+`GameExplorerService` routes startup, `RESCAN`/`PRELOAD`, and directory-change requests through
+`src/service/PreloadWorker.h`: one joined scan thread, with at most one pending follow-up scan.
+Stopping rejects new requests, discards pending work, and waits for an active scan to return.
+Directory monitoring waits on all registered change notifications and the stop event together,
+instead of blocking sequentially inside `ReadDirectoryChangesW`.
+
+Service command/response tokens, diagnostic text, and display strings live in
+`src/service/ServiceMessages.h`. IPC tokens are protocol constants and must not be localized;
+user-facing GUI text continues to use `GameExplorerCore/Localization.h`.
+Preload failures are reported through debug output. The current IPC publishes counts only;
+the scanned vectors are not a shared shell/Studio cache. Named-pipe I/O remains synchronous,
+and active scans are joined rather than forcibly interrupted.
 
 ### `StorefrontScanner`
 The scanner locates and parses local manifests without launching storefront clients or making network requests:
@@ -209,10 +223,10 @@ erDiagram
 ## 5. Build Pipelines & Quality Gates
 
 ### Compiler Requirements
-- **Operating System**: Windows 11 (Version 22H2 or later recommended, Build 22000+)
+- **Operating System**: Windows 10 or Windows 11 development environment
 - **Compiler**: Visual Studio 2022 (MSVC v143+) or Visual Studio 2026 Build Tools
 - **C++ Standard**: C++20 (`/std:c++20 /permissive-`)
-- **Windows SDK**: Version 10.0.22000.0 or later (Targeting 10.0.26100.0)
+- **Windows SDK**: Version 10.0.22000.0 or later (current build environment targets 10.0.26100.0; this is not the runtime minimum)
 - **CMake**: Version 3.25 or later
 
 ### MSVC Zero-Warning Quality Gate
@@ -351,9 +365,9 @@ Execute the full suite through the dispatcher (or the underlying script):
 sequenceDiagram
     autonumber
     actor User
-    participant Explorer as Windows 11 File Explorer
+    participant Explorer as File Explorer (native OS presentation)
     participant Shell as GameExplorerShell.dll
-    participant Xaml as WinUI 3 XAML Island
+    participant Xaml as UWP XAML Island
     participant DB as SQLite (library.db)
     participant Worker as Background Worker Thread
 

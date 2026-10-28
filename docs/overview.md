@@ -1,6 +1,6 @@
 # Project Overview & Architecture
 
-> An architectural and functional overview of **Windows Game Explorer**, a native C++20 shell extension that brings the classic Windows 7/Vista Game Explorer experience into Windows 11 File Explorer.
+> An architectural and functional overview of **Windows Game Explorer**, a native C++20 shell extension that brings the classic Windows 7/Vista Game Explorer experience into Windows 10 and Windows 11 File Explorer.
 
 ---
 
@@ -10,7 +10,7 @@ During the Windows Vista and Windows 7 era, Windows shipped with a dedicated, sy
 
 In modern Windows versions, Game Explorer was deprecated and eventually removed, leaving users dependent on fragmented, heavy, web-based launchers (Steam, Epic Games Launcher, Ubisoft Connect, EA App, Battle.net, GOG Galaxy) or cluttered desktop shortcuts.
 
-**Windows Game Explorer** revives this classic capability natively inside Windows 11. Instead of creating another heavy electron application, it integrates directly into **Windows 11 File Explorer** as an in-process native C++ shell extension (`GameExplorerShell.dll`). It embeds modern **WinUI 3 controls via XAML Islands**, presenting an authentic, performant, and privacy-respecting game library.
+**Windows Game Explorer** revives this classic capability natively inside Windows 10 version 1903 and later and Windows 11. Instead of creating another heavy electron application, it integrates directly into **File Explorer** as an in-process native C++ shell extension (`GameExplorerShell.dll`). It embeds **UWP XAML controls via XAML Islands** and leaves Explorer's window chrome and presentation to the installed OS.
 
 ---
 
@@ -20,10 +20,10 @@ The project consists of three primary layers: the Shell Extension (`GameExplorer
 
 ```mermaid
 flowchart TD
-    subgraph ExplorerHost["Windows 11 File Explorer Process"]
+    subgraph ExplorerHost["Windows File Explorer Process (native OS presentation)"]
         ShellFolder["GameExplorerShell.dll<br/>(IShellFolder / IPersistFolder2)"]
         ShellView["ShellView<br/>(IShellView / DirectComposition)"]
-        XamlIsland["DesktopWindowXamlSource<br/>(WinUI 3 XAML Island)"]
+        XamlIsland["DesktopWindowXamlSource<br/>(UWP XAML Island)"]
         ShellFolder --> ShellView
         ShellView --> XamlIsland
     end

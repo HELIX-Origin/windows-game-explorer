@@ -1,7 +1,7 @@
 # Architecture â€” Windows Game Explorer (`projects/windows-game-explorer`)
 
 > Authoritative architectural specification for **Windows Game Explorer** (`projects/windows-game-explorer`).
-> Recreates and modernizes the classic Windows 7/Vista Game Explorer (`shell:Games`, `FOLDERTYPEID_Games`) inside Windows 11 File Explorer.
+> Recreates and modernizes the classic Windows 7/Vista Game Explorer (`shell:Games`, `FOLDERTYPEID_Games`) inside Windows 10 1903+ and Windows 11 File Explorer using each OS's native presentation.
 > Single-window native Windows architecture: File Explorer Shell Extension (`GameExplorerShell.dll`) + Game Explorer Studio GUI (`GameExplorerStudio.exe`) hosting the Library Manager, Game Catalogue and Configuration pages.
 > Generic shortcuts folder degradation is strictly banned by rule.
 
@@ -11,7 +11,7 @@
 
 ```mermaid
 flowchart TD
-    subgraph Explorer["Windows 11 File Explorer Canvas (GameExplorerShell.dll)"]
+    subgraph Explorer["File Explorer Canvas (native OS presentation, GameExplorerShell.dll)"]
         NSE["Virtual Shell Namespace Extension (IShellFolder2 / IPersistFolder2)"]
         Cat["Two-Section Categorizer (ICategoryProvider / ICategorizer)"]
         Sec1["â–¾ Game Providers (Steam, Epic, GOG, Battle.net, EA, Ubisoft, itch.io)"]

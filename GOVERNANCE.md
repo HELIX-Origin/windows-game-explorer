@@ -6,21 +6,21 @@ This document describes how **Windows Game Explorer** (a [HELIX Origin](https://
 
 | Role | Responsibilities |
 | --- | --- |
-| **Maintainers** | Set direction, review and merge pull requests, manage releases and tags, triage issues, and uphold the Code of Conduct. |
+| **Maintainer** | Sets project direction, reviews and merges pull requests, publishes releases and tags, triages issues, and upholds project standards. |
 | **Contributors** | Submit issues, discussions, documentation, and pull requests under the project's license and contribution guidelines. |
-| **Users** | Use the software and report bugs/feature requests through the project's issue forms. |
+| **Users** | Use the software, provide feedback, and report bugs or feature requests through the project's issue forms. |
 
 ## Decision Making
 
-- Day-to-day changes are decided in pull requests through review and discussion.
-- Significant design or scope decisions are opened as an issue or discussion first to gather input.
-- Maintainers aim for **lazy consensus**: a proposal proceeds if no maintainer objects within a reasonable review window. When consensus is not reachable, maintainers decide by simple majority.
+- Day-to-day changes, bug fixes, and feature proposals are discussed and reviewed via issues and pull requests.
+- Significant design or architectural decisions are discussed in GitHub issues or discussions to gather feedback.
+- The project maintainer sets the roadmap, guides architecture, reviews contributions, and has final decision-making authority on scope and implementation.
 
 ## Releases
 
 - Releases follow [Semantic Versioning](https://semver.org/) (`vMAJOR.MINOR.PATCH`).
-- **Only maintainers** create releases and push tags.
-- Every release has human-written release notes; changelog entries follow [Keep a Changelog](https://keepachangelog.com/).
+- Releases and git tags are published by the project maintainer.
+- Every release includes curated release notes; changelog entries follow [Keep a Changelog](https://keepachangelog.com/).
 
 ## Contributions
 
@@ -28,4 +28,4 @@ All contributions are made under the project's [MIT License](./LICENSE) and must
 
 ## Changes to this Document
 
-Governance changes are proposed via pull request and require maintainer approval.
+Governance updates are maintained to reflect actual project practices and operations.
