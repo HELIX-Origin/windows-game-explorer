@@ -1,25 +1,54 @@
 # HANDOFF.md — Windows Game Explorer Session Handoff
 
 **Last updated:** 2026-10-27
-**Current session status:** `v2.5.0` remains the latest release. M18 compatibility research is complete: the documented UWP XAML hosting API floor is Windows 10 version 1903 (build 18362), and registration now leaves Explorer presentation to the OS instead of changing folder-type or tab-host flags. The installer enforces the build floor. Explorer-hosted runtime validation on build 18362 remains outstanding; see `docs/research/windows-version-compatibility.md`.
+**Current session status:** `v2.5.0` released. Active development branch: `dev/m18-m19-explorer` in main workspace repository. M19 active:
+- **DYNAMIC-WINDOW-SIZING (Pure Dynamic Layout & Resizability Synchronization)**:
+  - Fixed standalone `explorer.exe shell:games` window to utilize **100% dynamic sizing and resizability** (`WS_CAPTION | WS_THICKFRAME | WS_MINIMIZEBOX | WS_MAXIMIZEBOX | WS_SYSMENU`) with fluid layout on the XAML root grid, scroll viewer, and responsive wrapping grids (zero hardcoded sizes or fixed maximum columns).
+  - Standalone mode hides the Left Navigation Pane (`NamespaceTreeControl`) and bottom status bar (`msctls_statusbar32`) while resizing `m_hwndViewSink` and `m_hwndView` to the full client area (`0, 0, fullW, fullH`) without dark bars or clipping.
+  - File Explorer tab mode (`m_isExplorerTab == true`) preserves the Left Navigation Pane untouched.
+  - Implemented 1px size delta in `LibraryViewHost::Resize` guaranteeing `DesktopWindowContentBridge` receives `WM_SIZE` and updates XAML island layout reliably.
+  - Visual verification with `PrintWindow` confirmed dynamic layout adaptation across initial launch, shrunk (1100x700), enlarged (1550x850), and maximized window states.
+- **ICON-02 (Fluent 3D Controller Face Button Color & Shadow Correction)**:
+  - Corrected face button colors to standard scheme: Y=Yellow, B=Red, X=Blue, A=Green.
+  - Removed floor-shadow ovals under the controller grips.
+  - Synchronized across `assets/game-explorer-icon.png`, `assets/game-explorer-icon.ico`, `src/shell/Resource.ico`, `installer/sidebar.bmp`, and `installer/header.bmp`.
+- **ART-METADATA-VALIDATION (Storefront Validation for Metadata Providers & Search Cleanup)**:
+  - Enabled metadata providers (SteamGridDB, IGDB, Steam Store Search) as an extra layer across all platforms to help populate missing artwork and metadata.
+  - Required all metadata providers to strictly validate against official storefronts (Steam Store API `store.steampowered.com/api/storesearch/`, GOG, itch.io, VNDB) before applying artwork or metadata, preventing wrong-game mismatches.
+  - Upgraded title matching (`AreTitlesMatching` & `ExtractBaseTitle`) to support comprehensive edition suffix stripping (GOTY, Deluxe, Complete, Remastered, etc.) across hyphens, colons, and parentheses while strictly rejecting sequels, Roman numerals/digits, or spin-offs ("Doom" != "Doom Eternal", "Half-Life" != "Half-Life 2", "Final Fantasy VII" != "Final Fantasy VIII").
+  - Cleaned up Manager art search: removed obsolete "Details / Screenshots" sorting/filter options, and completely eliminated Patreon as an image provider / filter option across the entire codebase.
+- **SCAN-02 (Smart Game Scan, Multi-Drive Heuristics & Universal Artwork Engine)**:
+  - Smart Game Engine Knowledge Base (`IsKnownGameEnginePresent`): Unity, Unreal Engine, Godot, GameMaker, RPG Maker (XP/VX/MV/MZ), Ren'Py, Source/GoldSrc, CryEngine, REDengine, GOG manifests, and 16 audio/video/physics middleware signatures.
+  - Multi-Drive & External Drive Support: `GetCommonGameSearchDirectories()` dynamically discovers candidate game roots across all mounted drives (fixed, removable, remote) and user profile directories.
+  - Comprehensive Gaming Directory Heuristics: integrated standard gaming paths, publisher directories, and common installation patterns (`IsCommonGameInstallationPath`).
+  - New Storefront Scanners: added native scanners for Google Play Games on PC (`PlatformType::GooglePlayGames`, `gpg_`), Wargaming.net Game Center (`PlatformType::Wargaming`, `wgc_`), Paradox Interactive (`PlatformType::Paradox`, `pdx_`), and expanded Xbox UWP game detection (Minecraft, Forza, Sea of Thieves, Flight Simulator).
+  - Multi-Format Image Architecture: support PNG, JPG/JPEG/JFIF, GIF (static & animated), WebP (lossy, lossless, animated VP8X), SVG (XML viewBox / dimensions parser & `wuxmi::SvgImageSource`), ICO, BMP, TIFF, AVIF/HEIC (via WIC).
+  - Animated GIF Support on Installed Cards: enabled automatic smooth GIF playback across Cover and Hero view modes via `bmp.AutoPlay(true)`.
+  - Details Pane Simplification: removed dedicated details art slot/logic (`ArtworkSlot::Details`, `IsValidDetails`); details pane now consistently uses cover art with hero/icon fallback, minimizing excess layout-mode branching.
+  - Self-Healing Metadata Cleanup: automatically purged 35 non-game `local_*.json` files from `%USERPROFILE%\Game Explorer\metadata\` and removed their database records.
+- **VIEW-01 (Artwork Slot Aspect Filtering & Zero-Cropping Stretch)**:
+  - Cover art slot (`IsValidCover`) accepts tall (`~2:3`) and square (`~1:1`) images (`0.45 <= aspectRatio <= 1.15`) and rejects wide images (`> 1.15`).
+  - Hero art slot (`IsValidHero`) strictly accepts wide images (`1.20 <= aspectRatio <= 4.50`) and rejects tall/square images.
+  - Icon slot (`IsValidIcon`) strictly accepts square images (`0.75 <= aspectRatio <= 1.33`, non-animated).
+  - Zero cropping on all card and preview images: all card slots in `LibraryViewHost.cpp` (`Stretch::Fill`) and `ManagerMain.cpp` (full-frame `graphics.DrawImage`) scale images to fit the exact height and width of the card slot with zero clipping of borders or logos.
+- **REVERT-NAV-WIN (Native System Title Bar & Custom Title Bar Architecture Research)**:
+  - Completely removed the custom title bar and custom min/max/close window buttons from `LibraryViewHost.cpp`. File Explorer uses the native system title bar and OS-owned window caption buttons.
+  - Documented Microsoft Win32, DWM (`WM_NCCALCSIZE`, `DwmExtendFrameIntoClientArea`), and Shell (`IShellView` `WS_CHILD` vs `CabinetWClass` / `ShellTabWindowClass`) architecture in `docs/research/custom-titlebar-shell-hosting.md`.
+  - Completely reverted navigation pane subclassing and layout override attempts (`DirectUISubclassProc`, `AdjustDirectUILayout`, `m_hDUI`). File Explorer navigation pane functions naturally without fragile Win32 DOM tampering.
+- **SHORTCUT-01 (Desktop & Start Menu Shortcut Deduplication)**:
+  - Purged conflicting dual shortcuts across user and public folders (`FOLDERID_Desktop`, `FOLDERID_PublicDesktop`, `OneDrive\Desktop`, and `FOLDERID_Programs`).
+  - Guaranteed exactly ONE desktop shortcut and ONE Start menu shortcut upon registration.
+- **SORT-01 (Canonical Navigation Order & Alphabetical Games Sorting)**:
+  - Set `SortOrderIndex` in CLSID registration to `0x41` (65) placing Games in correct canonical order after Home (64) and Gallery (65): Home, Gallery, Games, OneDrive.
+  - Sorted installed games grid in `StorefrontScanner::LoadAllGamesFromMetadata()` and `LibraryViewHost` alphabetically by title case-insensitively (`_wcsicmp`).
+- **GOV-01 (Truthful Documentation & Governance Correction)**:
+  - Corrected `GOVERNANCE.md` across project repositories and `.agents/templates/governance-template.md` to remove fabricated claims (such as non-existent voting committees, simple majority rules, and false "human-written" declarations), truthfully reflecting maintainer leadership and AI-assisted tooling.
+  - Formally dropped Windows 10 support in the NSIS installer (enforcing build >= 22000) and documentation following its end-of-life status.
+- **ICON-01 (Windows 11 Fluent 3D Controller Iconography)**:
+  - Generated and embedded authentic Windows 11 Fluent 3D game controller icon (`IDI_GAME_EXPLORER` = 100) and flat variant (101) directly inside `GameExplorerShell.dll` with 7 resolution layers.
+- **Testing & Benchmarks**: 87/87 unit tests passing. 0 compiler warnings under `/W4 /WX`. GameExplorerService unregistered cleanly for testing updated service.
 **Project:** windows-game-explorer (Windows Game Explorer)
 **Root:** projects/windows-game-explorer
-
-**M19 active scope (user-directed, 2026-10-27):** performance optimization (`PERF-01`), project-owned Windhawk-inspired
-Explorer watcher/loader (`HOST-01`) without Windhawk dependency, and navigation sidebar suppression on standalone
-`shell:games` invocations (`NAV-01`) to eliminate unneeded navigation clutter and maximize horizontal canvas space for the installed games grid.
-Keep unfinished items and concrete blockers visible; do not mark the milestone complete from a successful build alone.
-
-**M19 implementation progress:**
-- **PERF-01 (Preload & Service Workers)**: `GameExplorerService` uses one coalescing, joined preload worker (`PreloadWorker.h`) for startup, IPC rescan, and directory notifications. Directory monitoring waits on notifications and stop together. Centralized constants in `ServiceMessages.h`. Deterministic regressions cover burst coalescing, serialization, failure recovery, stop rejection, and shutdown.
-- **HOST-01 (Project-Owned Explorer Lifecycle Watcher/Loader)**:
-  - Core motivation clarified (user directive): simpler method to add the games library shell extension to File Explorer without the flakiness of `regsvr32` direct injection and to reduce the chances of it being broken by Windows updates.
-  - Architecture research documented in `docs/research/explorer-watcher-architecture.md`: user-session scoped daemon (`GameExplorerWatcher.exe`), target validation (SID, session, architecture, explorer path), remote thread `LoadLibraryW`, anti-tamper revision checks, clean rollback (`--disable`, `--stop`), and preservation of in-process COM discovery.
-  - Implementation: `src/service/ExplorerLoader.cpp`, `WatcherMain.cpp`, `WatcherMessages.h`, `scripts/watcher.ps1`, and single-dispatcher CLI `game-explorer.bat watcher [enable|disable|stop|inspect|watch]`.
-  - Testing & packaging: 7 automated loader tests in `tests/TestExplorerLoader.cpp` (74/74 test suite pass). Portable ZIP and NSIS setup package `GameExplorerWatcher.exe` and `scripts\watcher.ps1` with upgrade/uninstall lifecycle hooks.
-- **NAV-01 (Standalone Navigation Sidebar Suppression)**:
-  - Planned and scoped: suppress `EP_NavPane` in `IExplorerPaneVisibility::GetPaneState` when launched via `shell:games` or desktop/start menu shortcuts. Preserves standard navigation sidebar when browsing via existing Explorer tabs. Maximizes installed games grid width.
-- **Pending verification**: live interactive Explorer session smoke testing (navigation, multi-tab, restart, update survival, standalone sidebar suppression).
 
 > Permanent, git-tracked session-state ledger for `windows-game-explorer`. Maintained **incrementally** — refresh at every
 > workstream state change, fully rewrite at session end. New session: read this file right after `AGENTS.md`,

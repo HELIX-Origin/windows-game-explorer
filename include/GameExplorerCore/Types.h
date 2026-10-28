@@ -70,7 +70,9 @@ enum class PlatformType : uint32_t {
     Flycast = 32,
     RPCS3 = 33,
     Xemu = 34,
-    Vice = 35
+    Vice = 35,
+    GooglePlayGames = 36,
+    Wargaming = 37
 };
 
 [[nodiscard]] constexpr std::wstring_view PlatformToString(PlatformType platform) noexcept {
@@ -139,6 +141,10 @@ enum class PlatformType : uint32_t {
         return L"HoYoPlay";
     case PlatformType::Paradox:
         return L"Paradox Launcher";
+    case PlatformType::GooglePlayGames:
+        return L"Google Play Games";
+    case PlatformType::Wargaming:
+        return L"Wargaming";
     case PlatformType::ESDE:
         return L"ES-DE";
     case PlatformType::CustomExecutable:
@@ -167,6 +173,8 @@ enum class PlatformType : uint32_t {
     if (str == L"Riot Client" || str == L"Riot Games") return PlatformType::Riot;
     if (str == L"HoYoPlay" || str == L"HoYoverse") return PlatformType::HoYoPlay;
     if (str == L"Paradox Launcher" || str == L"Paradox") return PlatformType::Paradox;
+    if (str == L"Google Play Games" || str == L"Play Games") return PlatformType::GooglePlayGames;
+    if (str == L"Wargaming" || str == L"Wargaming.net") return PlatformType::Wargaming;
     if (str == L"ES-DE") return PlatformType::ESDE;
     if (str == L"RetroArch") return PlatformType::RetroArch;
     if (str == L"Dolphin") return PlatformType::Dolphin;

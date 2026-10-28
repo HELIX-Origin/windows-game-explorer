@@ -1,0 +1,42 @@
+#pragma once
+
+// String Table Resource Identifiers for Windows Multilingual User Interface (MUI)
+#define IDS_APP_TITLE                   101
+#define IDS_FOLDER_GAMES                102
+#define IDS_HEADER_PROVIDERS            103
+#define IDS_HEADER_GAMES                104
+#define IDS_BTN_PLAY                    105
+#define IDS_BTN_EDIT_METADATA           106
+#define IDS_BTN_OPEN_FOLDER             107
+#define IDS_BTN_OPEN_STORE              108
+#define IDS_BTN_REFRESH                 109
+#define IDS_BTN_SETTINGS                110
+#define IDS_BTN_ADD_GAME                111
+#define IDS_COL_TITLE                   112
+#define IDS_COL_DEVELOPER               113
+#define IDS_COL_STOREFRONT              114
+#define IDS_COL_RELEASE_DATE            115
+#define IDS_COL_RATING                  116
+#define IDS_VIEW_TILES                  117
+#define IDS_VIEW_LIST                   118
+#define IDS_VIEW_DETAILS                119
+#define IDS_LBL_SYNOPSIS                120
+#define IDS_LBL_DEVELOPER               121
+#define IDS_LBL_PUBLISHER               122
+#define IDS_LBL_STOREFRONT              123
+#define IDS_LBL_GENRES                  124
+#define IDS_LBL_RELEASE_DATE            125
+#define IDS_LBL_PLAY_TIME               126
+#define IDS_LBL_RATING                  127
+#define IDS_LBL_EXECUTABLE              128
+#define IDS_LBL_OVERVIEW                129
+#define IDS_LBL_TOTAL_GAMES             130
+#define IDS_LBL_STOREFRONTS             131
+#define IDS_LBL_STORAGE                 132
+#define IDS_TAB_MANAGER                 133
+#define IDS_TAB_CATALOGUE               134
+#define IDS_TAB_CONFIG                  135
+#define IDS_UNKNOWN_DEV                 136
+#define IDS_UNRATED                     137
+#define IDS_UNKNOWN_DATE                138
+#define IDS_GENERAL_GAMING              139

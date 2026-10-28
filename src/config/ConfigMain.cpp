@@ -19,6 +19,8 @@
 #include "GameExplorerCore/StorefrontScanner.h"
 #include "GameExplorerCore/Localization.h"
 #include "GameExplorerCore/StudioPages.h"
+#include "GameExplorerCore/UpdateChecker.h"
+#include "GameExplorerCore/UpdateStrings.h"
 
 #pragma comment(lib, "dwmapi.lib")
 
@@ -156,6 +158,9 @@ constexpr int IDC_BTN_SYNC_ACHIEVEMENTS  = 2033;
 
 constexpr int WM_APP_ACHIEVEMENT_SYNC_PROGRESS = WM_APP + 51;
 constexpr int WM_APP_ACHIEVEMENT_SYNC_COMPLETE = WM_APP + 52;
+constexpr int WM_APP_UPDATE_CHECK_DONE         = WM_APP + 60;
+constexpr int WM_APP_UPDATE_PROGRESS           = WM_APP + 61;
+constexpr int WM_APP_UPDATE_APPLY_DONE         = WM_APP + 62;
 
 constexpr int IDC_EDT_STEAM_KEY          = 2040;
 constexpr int IDC_EDT_STEAM_ID           = 2041;
@@ -165,6 +170,11 @@ constexpr int IDC_EDT_SGDB_KEY           = 2044;
 constexpr int IDC_EDT_IGDB_CLIENT_ID     = 2045;
 constexpr int IDC_EDT_IGDB_CLIENT_SECRET = 2046;
 constexpr int IDC_BTN_RESET_CACHE        = 2047;
+
+constexpr int IDC_LBL_UPDATE_STATUS      = 2050;
+constexpr int IDC_BTN_CHECK_UPDATES      = 2051;
+constexpr int IDC_BTN_INSTALL_UPDATE     = 2052;
+constexpr int IDC_BTN_RELEASE_NOTES      = 2053;
 
 HWND g_hwndLblIntegrationStatus = nullptr;
 HWND g_hwndBtnScanLibrary       = nullptr;
@@ -192,6 +202,13 @@ HWND g_hwndEdtSgdbKey           = nullptr;
 HWND g_hwndEdtIgdbClientId      = nullptr;
 HWND g_hwndEdtIgdbClientSecret  = nullptr;
 
+// Update checker state
+GameExplorer::UpdateInfo g_lastUpdateInfo{};
+HWND g_hwndLblUpdateStatus  = nullptr;
+HWND g_hwndBtnCheckUpdates  = nullptr;
+HWND g_hwndBtnInstallUpdate = nullptr;
+HWND g_hwndBtnReleaseNotes  = nullptr;
+
 // Controls that only need to exist for layout (no command handling) still need a stable handle
 // so the page can be re-flowed whenever the Studio frame resizes it.
 HWND g_hwndBtnOpenExplorer     = nullptr;
@@ -211,8 +228,8 @@ HWND g_hwndLblFallbackHelp     = nullptr;
 
 // Card geometry is computed on every resize and shared by the layout and paint paths, so the
 // rounded card panels and the controls inside them can never drift apart.
-constexpr int CARD_COUNT = 5;
-constexpr int CARD_HEIGHTS[CARD_COUNT] = { 100, 152, 110, 190, 122 };
+constexpr int CARD_COUNT = 6;
+constexpr int CARD_HEIGHTS[CARD_COUNT] = { 100, 148, 106, 186, 122, 102 };
 constexpr int CARD_GAP = 12;
 constexpr int PAGE_MARGIN = 20;
 constexpr int CARD_PADDING = 16;
@@ -323,6 +340,14 @@ void LayoutConfigControls(HWND hwnd) {
     place(g_hwndEdtIgdbClientSecret, igdbSecretEditX, card4.top + 64,
           innerLeft + innerWidth - igdbSecretEditX, fieldH);
     place(g_hwndLblFallbackHelp, innerLeft, card4.top + 98, innerWidth, 20);
+
+    // Card 5: updates and releases.
+    const RECT card5 = g_cardRects[5];
+    place(g_hwndLblUpdateStatus, innerLeft, card5.top + 34, innerWidth, 20);
+    const int updateBtnW = (innerWidth - 16) / 3;
+    place(g_hwndBtnCheckUpdates, innerLeft, card5.top + 58, updateBtnW, 32);
+    place(g_hwndBtnInstallUpdate, innerLeft + updateBtnW + 8, card5.top + 58, updateBtnW, 32);
+    place(g_hwndBtnReleaseNotes, innerLeft + (updateBtnW + 8) * 2, card5.top + 58, innerWidth - (updateBtnW + 8) * 2, 32);
 
     placeRect(g_hwndBtnSave, g_saveRect);
     placeRect(g_hwndBtnResetCache, g_resetCacheRect);
@@ -594,6 +619,19 @@ LRESULT CALLBACK ConfigWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPara
         g_hwndEdtIgdbClientSecret = makeEdit(IDC_EDT_IGDB_CLIENT_SECRET, true);
         g_hwndLblFallbackHelp = makeStatic(
             L"Optional fallbacks when storefronts lack native box art. Keys are stored locally.", 0);
+
+        // Card 5: Application Updates & Releases
+        const std::wstring initialVer = std::wstring(UpdateStrings::kCurrentVersionLabel) + L" v" +
+                                        UpdateChecker::GetCurrentVersion() + L" \u2014 " + UpdateStrings::kStatusUpToDate;
+        g_hwndLblUpdateStatus = makeStatic(initialVer.c_str(), IDC_LBL_UPDATE_STATUS);
+        g_hwndBtnCheckUpdates = makeButton(UpdateStrings::kBtnCheckUpdates, IDC_BTN_CHECK_UPDATES,
+                                           BS_OWNERDRAW, g_hFontBold);
+        g_hwndBtnInstallUpdate = makeButton(UpdateStrings::kBtnInstallUpdate, IDC_BTN_INSTALL_UPDATE,
+                                            BS_OWNERDRAW, g_hFontBold);
+        g_hwndBtnReleaseNotes = makeButton(UpdateStrings::kBtnReleaseNotes, IDC_BTN_RELEASE_NOTES,
+                                           BS_OWNERDRAW, g_hFont);
+        EnableWindow(g_hwndBtnInstallUpdate, FALSE);
+        EnableWindow(g_hwndBtnReleaseNotes, FALSE);
 
         // Save Button & Reset Cache Button
         g_hwndBtnSave = makeButton(Localization::GetStrings().configSaveAndRefreshBtn, IDC_BTN_SAVE,
@@ -896,7 +934,8 @@ LRESULT CALLBACK ConfigWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPara
             { &g_cardRects[1], L"Default WinUI XAML Viewport Layout & Game Explorer Manager" },
             { &g_cardRects[2], L"Cloud Sync, Game Installs & Local Storage" },
             { &g_cardRects[3], L"Universal Multi-Source Achievement Credentials & API Keys" },
-            { &g_cardRects[4], L"Fallback Artwork & Metadata Providers (Optional)" }
+            { &g_cardRects[4], L"Fallback Artwork & Metadata Providers (Optional)" },
+            { &g_cardRects[5], UpdateStrings::kCardTitle }
         };
 
         for (const auto& c : cards) {
@@ -1131,7 +1170,102 @@ LRESULT CALLBACK ConfigWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPara
             }
             return 0;
         }
+
+        if (id == IDC_BTN_CHECK_UPDATES) {
+            SetWindowTextW(g_hwndLblUpdateStatus, UpdateStrings::kStatusChecking);
+            EnableWindow(g_hwndBtnCheckUpdates, FALSE);
+            EnableWindow(g_hwndBtnInstallUpdate, FALSE);
+            EnableWindow(g_hwndBtnReleaseNotes, FALSE);
+            InvalidateRect(hwnd, nullptr, FALSE);
+
+            UpdateChecker::CheckForUpdatesAsync([hwnd](const UpdateInfo& info) {
+                PostMessageW(hwnd, WM_APP_UPDATE_CHECK_DONE, 0, reinterpret_cast<LPARAM>(new UpdateInfo(info)));
+            });
+            return 0;
+        }
+
+        if (id == IDC_BTN_INSTALL_UPDATE) {
+            if (!g_lastUpdateInfo.updateAvailable || g_lastUpdateInfo.downloadUrl.empty()) return 0;
+            SetWindowTextW(g_hwndLblUpdateStatus, UpdateStrings::kStatusDownloading);
+            EnableWindow(g_hwndBtnInstallUpdate, FALSE);
+            EnableWindow(g_hwndBtnCheckUpdates, FALSE);
+            InvalidateRect(hwnd, nullptr, FALSE);
+
+            std::thread([hwnd]() {
+                std::wstring err;
+                const bool ok = UpdateChecker::DownloadAndApplyUpdate(
+                    g_lastUpdateInfo,
+                    [hwnd](uint64_t down, uint64_t total) {
+                        PostMessageW(hwnd, WM_APP_UPDATE_PROGRESS,
+                                     static_cast<WPARAM>(down / 1024),
+                                     static_cast<LPARAM>(total / 1024));
+                    },
+                    err);
+                PostMessageW(hwnd, WM_APP_UPDATE_APPLY_DONE, ok ? 1 : 0, reinterpret_cast<LPARAM>(new std::wstring(err)));
+            }).detach();
+            return 0;
+        }
+
+        if (id == IDC_BTN_RELEASE_NOTES) {
+            if (!g_lastUpdateInfo.releaseUrl.empty()) {
+                ShellExecuteW(hwnd, L"open", g_lastUpdateInfo.releaseUrl.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+            }
+            return 0;
+        }
         break;
+    }
+
+    case WM_APP_UPDATE_CHECK_DONE: {
+        std::unique_ptr<UpdateInfo> info(reinterpret_cast<UpdateInfo*>(lParam));
+        if (info) {
+            g_lastUpdateInfo = *info;
+            if (info->updateAvailable) {
+                const std::wstring status = std::wstring(UpdateStrings::kStatusUpdateAvailable) +
+                                            L" (" + info->latestVersion + L")";
+                SetWindowTextW(g_hwndLblUpdateStatus, status.c_str());
+                EnableWindow(g_hwndBtnInstallUpdate, TRUE);
+                EnableWindow(g_hwndBtnReleaseNotes, TRUE);
+            } else if (info->error.empty()) {
+                const std::wstring status = std::wstring(UpdateStrings::kStatusUpToDate) +
+                                            L" (v" + UpdateChecker::GetCurrentVersion() + L")";
+                SetWindowTextW(g_hwndLblUpdateStatus, status.c_str());
+                EnableWindow(g_hwndBtnInstallUpdate, FALSE);
+                EnableWindow(g_hwndBtnReleaseNotes, FALSE);
+            } else {
+                SetWindowTextW(g_hwndLblUpdateStatus, info->error.c_str());
+                EnableWindow(g_hwndBtnInstallUpdate, FALSE);
+                EnableWindow(g_hwndBtnReleaseNotes, FALSE);
+            }
+        }
+        EnableWindow(g_hwndBtnCheckUpdates, TRUE);
+        InvalidateRect(hwnd, nullptr, FALSE);
+        return 0;
+    }
+
+    case WM_APP_UPDATE_PROGRESS: {
+        const uint64_t downKb = static_cast<uint64_t>(wParam);
+        const uint64_t totalKb = static_cast<uint64_t>(lParam);
+        std::wstring progress = std::wstring(UpdateStrings::kStatusDownloading) +
+                                std::to_wstring(downKb / 1024) + L" MB";
+        if (totalKb > 0) {
+            progress += L" / " + std::to_wstring(totalKb / 1024) + L" MB";
+        }
+        SetWindowTextW(g_hwndLblUpdateStatus, progress.c_str());
+        return 0;
+    }
+
+    case WM_APP_UPDATE_APPLY_DONE: {
+        std::unique_ptr<std::wstring> err(reinterpret_cast<std::wstring*>(lParam));
+        if (wParam == 1) {
+            SetWindowTextW(g_hwndLblUpdateStatus, UpdateStrings::kStatusInstalling);
+        } else {
+            const std::wstring msg = (err && !err->empty()) ? *err : UpdateStrings::kStatusDownloadFailed;
+            SetWindowTextW(g_hwndLblUpdateStatus, msg.c_str());
+            EnableWindow(g_hwndBtnInstallUpdate, TRUE);
+            EnableWindow(g_hwndBtnCheckUpdates, TRUE);
+        }
+        InvalidateRect(hwnd, nullptr, FALSE);
+        return 0;
     }
 
     case WM_APP_ACHIEVEMENT_SYNC_PROGRESS: {

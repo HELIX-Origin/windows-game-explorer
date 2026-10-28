@@ -14,6 +14,7 @@
 
 #include "GameExplorerCore/DarkMode.h"
 #include "GameExplorerCore/Localization.h"
+#include "GameExplorerCore/LocalizationEngine.h"
 #include "GameExplorerCore/StorefrontScanner.h"
 #include "GameExplorerCore/StudioPages.h"
 
@@ -382,8 +383,9 @@ LRESULT CALLBACK StudioWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPara
         ncm.lfMessageFont.lfWeight = FW_BOLD;
         g_hFontBold = CreateFontIndirectW(&ncm.lfMessageFont);
 
+        const int iconResId = DarkMode::IsWindows11OrGreater() ? 100 : 101;
         g_hAppIcon = static_cast<HICON>(LoadImageW(
-            GetModuleHandleW(nullptr), MAKEINTRESOURCEW(100), IMAGE_ICON, 16, 16, LR_DEFAULTCOLOR));
+            GetModuleHandleW(nullptr), MAKEINTRESOURCEW(iconResId), IMAGE_ICON, 16, 16, LR_DEFAULTCOLOR));
 
         g_pages[0] = Studio::CreateManagerPage(hwnd);
         g_pages[1] = Studio::CreateCataloguePage(hwnd);
@@ -776,15 +778,19 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE /*hPrevInstance*/, PWSTR /*lp
     InitCommonControlsEx(&icex);
 
     DarkMode::Initialize();
+    LocalizationEngine::SetInstance(hInstance);
     g_isDarkMode = DarkMode::IsSystemDarkMode();
     g_palette = DarkMode::GetPalette(g_isDarkMode);
     g_hBgBrush = CreateSolidBrush(g_palette.canvasBg);
 
+    const int iconResId = DarkMode::IsWindows11OrGreater() ? 100 : 101;
     WNDCLASSEXW wc{};
     wc.cbSize = sizeof(wc);
     wc.style = CS_HREDRAW | CS_VREDRAW;
     wc.lpfnWndProc = StudioWndProc;
     wc.hInstance = hInstance;
+    wc.hIcon = static_cast<HICON>(LoadImageW(hInstance, MAKEINTRESOURCEW(iconResId), IMAGE_ICON, 32, 32, LR_DEFAULTCOLOR));
+    wc.hIconSm = static_cast<HICON>(LoadImageW(hInstance, MAKEINTRESOURCEW(iconResId), IMAGE_ICON, 16, 16, LR_DEFAULTCOLOR));
     wc.hCursor = LoadCursorW(nullptr, IDC_ARROW);
     wc.hbrBackground = g_hBgBrush;
     wc.lpszClassName = STUDIO_WINDOW_CLASS;

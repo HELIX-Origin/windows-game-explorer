@@ -11,10 +11,12 @@
 #include <vector>
 
 #include "GameExplorerCore/DarkMode.h"
+#include "GameExplorerCore/Database.h"
 #include "GameExplorerCore/Models.h"
 #include "GameExplorerCore/OwnedGames.h"
 #include "GameExplorerCore/PlatformLauncher.h"
 #include "GameExplorerCore/Settings.h"
+#include "GameExplorerCore/Storage.h"
 #include "GameExplorerCore/StorefrontScanner.h"
 #include "PreloadWorker.h"
 #include "ServiceMessages.h"
@@ -95,9 +97,14 @@ void LogMonitorError(DWORD error) {
     OutputDebugStringW(message.c_str());
 }
 
-// Scans currently publish counts, not a shared cache for the shell or Studio.
+// Background service cache preload: executes fast SmartScan against database without blocking shell or UI
 void PreloadCache() {
-    const auto installedGames = GameExplorer::StorefrontScanner::ScanAllInstalledGames();
+    auto& db = GameExplorer::Database::Instance();
+    if (!db.IsOpen()) {
+        db.Open(GameExplorer::Storage::GetDatabasePath());
+    }
+    GameExplorer::StorefrontScanner::SmartScan(db);
+    const auto installedGames = db.GetAllGames();
     const auto ownedGames = GameExplorer::ScanAllOwnedGamesDirect();
     g_preloadedInstalledCount = installedGames.size();
     g_preloadedOwnedCount = ownedGames.size();

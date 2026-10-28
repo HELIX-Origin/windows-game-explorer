@@ -23,16 +23,20 @@ control Explorer chrome, tabs, and presentation:
 
 ---
 
-## 2. Ban on Blind Trial-and-Error Shell Extension Code Loops
+## 2. Mandatory Research-First Invariant & Ban on Trial-and-Error Code Loops
+
+> [!CAUTION]
+> **Guesswork is Strictly Banned — Research Online Documentation First.**
+> Never edit code, modify window styles, change XAML Island hosting, or alter Shell COM interfaces based on guesses or unverified assumptions. Before making ANY code edit, you **MUST** first conduct online documentation research (`search_web` on official Microsoft Learn / Windows SDK / Win32 / COM / WinRT XAML Islands documentation) and empirical runtime inspection to establish the verified root cause.
 
 > [!IMPORTANT]
 > **No Speculative Guessing on Shell COM Interfaces.**
 > Windows Explorer (`explorer.exe`) hosts shell extensions in-process within its critical Single-Threaded Apartment (STA) main UI thread. A crash or stack overflow in a shell extension crashes the entire Windows shell interface.
 
-When a shell crash occurs (e.g. `0xc00000fd` `STATUS_STACK_OVERFLOW` in `ntdll.dll` or access violations):
-1. **Never Make Blind Guesses**: Agents must **NEVER** repeatedly toggle between raw `IShellView` hacks and default `CDefView` fallbacks in iterative guesswork loops.
-2. **Mandatory Documentation Research**: Before touching or altering shell extension view or folder code, agents must thoroughly research official Microsoft technical documentation, Windows SDK architecture specifications, and verified Win32/COM shell contracts.
-3. **Analyze Root Causes Thoroughly**: Inspect exact crash offsets, event logs, call stacks, and COM interface query sequences (`QueryInterface` requests for `IFolderView`, `IFolderView2`, `ICategoryProvider`, `IThumbnailProvider`, `IPropertyStore`).
+When a shell bug, layout issue, or crash occurs (e.g. `0xc00000fd` `STATUS_STACK_OVERFLOW` in `ntdll.dll` or access violations):
+1. **Never Make Blind Guesses**: Agents must **NEVER** edit code in speculative trial-and-error loops or use build/register cycles to test unresearched hypotheses.
+2. **Mandatory Online Documentation Research First**: Before touching or altering any shell extension view, folder, or XAML Island code, agents must first search and verify official Microsoft technical documentation (`learn.microsoft.com`), Windows SDK architecture specifications, and verified Win32/COM shell contracts.
+3. **Analyze Root Causes Empirically**: Inspect exact window rects, DPI scaling, GDI regions, crash offsets, event logs, call stacks, and COM interface query sequences (`QueryInterface` requests for `IFolderView`, `IFolderView2`, `ICategoryProvider`, `IThumbnailProvider`, `IPropertyStore`) before proposing or writing a fix.
 
 ---
 

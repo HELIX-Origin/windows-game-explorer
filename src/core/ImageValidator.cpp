@@ -3,6 +3,7 @@
 #include <objidl.h>
 #include <propidl.h>
 #include <gdiplus.h>
+#include <wincodec.h>
 #include "GameExplorerCore/ImageValidator.h"
 #include "GameExplorerCore/Storage.h"
 #include <filesystem>
@@ -10,6 +11,7 @@
 #include <algorithm>
 #include <mutex>
 #include <cmath>
+#include <cstdio>
 
 namespace fs = std::filesystem;
 
@@ -140,9 +142,10 @@ bool ImageValidator::GetImageInfo(const std::wstring& path, ImageDimensions& out
     std::error_code ec;
     if (!fs::exists(path, ec)) return false;
 
-    // Check if .ico
     std::wstring ext = fs::path(path).extension().wstring();
     std::transform(ext.begin(), ext.end(), ext.begin(), ::towlower);
+
+    // 1. Check if .ico (Win32 icon resource)
     if (ext == L".ico") {
         HICON hIcon = static_cast<HICON>(LoadImageW(nullptr, path.c_str(), IMAGE_ICON, 0, 0, LR_LOADFROMFILE));
         if (hIcon) {
@@ -159,59 +162,172 @@ bool ImageValidator::GetImageInfo(const std::wstring& path, ImageDimensions& out
                 if (ii.hbmMask) DeleteObject(ii.hbmMask);
             }
             DestroyIcon(hIcon);
-            return (outInfo.width > 0 && outInfo.height > 0);
+            if (outInfo.width > 0 && outInfo.height > 0) return true;
         }
     }
 
+    // 2. Check if .svg (Scalable Vector Graphics)
+    if (ext == L".svg") {
+        outInfo.isAnimated = false;
+        FILE* f = nullptr;
+        if (_wfopen_s(&f, path.c_str(), L"rt") == 0 && f) {
+            char buf[8192] = { 0 };
+            const size_t bytesRead = fread(buf, 1, sizeof(buf) - 1, f);
+            fclose(f);
+            if (bytesRead > 0) {
+                buf[bytesRead] = '\0';
+                std::string content(buf);
+                size_t vb = content.find("viewBox=\"");
+                if (vb == std::string::npos) vb = content.find("viewBox=\'");
+                if (vb != std::string::npos) {
+                    float vx = 0, vy = 0, vw = 0, vh = 0;
+                    if (sscanf_s(content.c_str() + vb + 9, "%f %f %f %f", &vx, &vy, &vw, &vh) == 4 ||
+                        sscanf_s(content.c_str() + vb + 9, "%f, %f, %f, %f", &vx, &vy, &vw, &vh) == 4) {
+                        if (vw > 0 && vh > 0) {
+                            outInfo.width = static_cast<unsigned int>(vw);
+                            outInfo.height = static_cast<unsigned int>(vh);
+                            outInfo.aspectRatio = vw / vh;
+                            return true;
+                        }
+                    }
+                }
+                // Fallback for scalable vector art without explicit viewBox
+                outInfo.width = 512;
+                outInfo.height = 512;
+                outInfo.aspectRatio = 1.0f;
+                return true;
+            }
+        }
+    }
+
+    // 3. Try GDI+ (PNG, JPEG, GIF, BMP, TIFF)
     EnsureGdiplusInternal();
     try {
         Gdiplus::Image img(path.c_str());
-        if (img.GetLastStatus() != Gdiplus::Ok) return false;
-
-        outInfo.width = img.GetWidth();
-        outInfo.height = img.GetHeight();
-        if (outInfo.width == 0 || outInfo.height == 0) return false;
-        outInfo.aspectRatio = static_cast<float>(outInfo.width) / static_cast<float>(outInfo.height);
-
-        // Check if multi-frame animated (GIF / WebP)
-        GUID dimTime = Gdiplus::FrameDimensionTime;
-        const UINT frameCount = img.GetFrameCount(&dimTime);
-        outInfo.isAnimated = (frameCount > 1);
-        if (!outInfo.isAnimated && (ext == L".gif")) {
-            // Also inspect raw header for animated GIF blocks if GDI+ reports 1
-            FILE* f = nullptr;
-            if (_wfopen_s(&f, path.c_str(), L"rb") == 0 && f) {
-                char magic[6] = { 0 };
-                if (fread(magic, 1, 6, f) == 6) {
-                    if (strncmp(magic, "GIF87a", 6) == 0 || strncmp(magic, "GIF89a", 6) == 0) {
-                        // Check for Graphic Control Extension (21 F9 04) indicating multiple frames
-                        fseek(f, 0, SEEK_END);
-                        long sz = ftell(f);
-                        fseek(f, 0, SEEK_SET);
-                        if (sz > 0 && sz < 10 * 1024 * 1024) {
-                            std::vector<unsigned char> data(sz);
-                            if (fread(data.data(), 1, sz, f) == static_cast<size_t>(sz)) {
-                                int gceCount = 0;
-                                for (size_t i = 0; i + 3 < data.size(); ++i) {
-                                    if (data[i] == 0x21 && data[i + 1] == 0xF9 && data[i + 2] == 0x04) {
-                                        gceCount++;
-                                        if (gceCount > 1) {
-                                            outInfo.isAnimated = true;
-                                            break;
+        if (img.GetLastStatus() == Gdiplus::Ok) {
+            outInfo.width = img.GetWidth();
+            outInfo.height = img.GetHeight();
+            if (outInfo.width > 0 && outInfo.height > 0) {
+                outInfo.aspectRatio = static_cast<float>(outInfo.width) / static_cast<float>(outInfo.height);
+                GUID dimTime = Gdiplus::FrameDimensionTime;
+                const UINT frameCount = img.GetFrameCount(&dimTime);
+                outInfo.isAnimated = (frameCount > 1);
+                if (!outInfo.isAnimated && (ext == L".gif")) {
+                    FILE* f = nullptr;
+                    if (_wfopen_s(&f, path.c_str(), L"rb") == 0 && f) {
+                        char magic[6] = { 0 };
+                        if (fread(magic, 1, 6, f) == 6) {
+                            if (strncmp(magic, "GIF87a", 6) == 0 || strncmp(magic, "GIF89a", 6) == 0) {
+                                fseek(f, 0, SEEK_END);
+                                long sz = ftell(f);
+                                fseek(f, 0, SEEK_SET);
+                                if (sz > 0 && sz < 10 * 1024 * 1024) {
+                                    std::vector<unsigned char> data(sz);
+                                    if (fread(data.data(), 1, sz, f) == static_cast<size_t>(sz)) {
+                                        int gceCount = 0;
+                                        for (size_t i = 0; i + 3 < data.size(); ++i) {
+                                            if (data[i] == 0x21 && data[i + 1] == 0xF9 && data[i + 2] == 0x04) {
+                                                gceCount++;
+                                                if (gceCount > 1) {
+                                                    outInfo.isAnimated = true;
+                                                    break;
+                                                }
+                                            }
                                         }
                                     }
                                 }
                             }
                         }
+                        fclose(f);
                     }
                 }
-                fclose(f);
+                return true;
             }
         }
-        return true;
-    } catch (...) {
-        return false;
+    } catch (...) {}
+
+    // 4. Try WIC (Windows Imaging Component) - supports WebP, AVIF, HEIC, TIFF, etc.
+    try {
+        IWICImagingFactory* pFactory = nullptr;
+        HRESULT hr = CoCreateInstance(
+            CLSID_WICImagingFactory,
+            nullptr,
+            CLSCTX_INPROC_SERVER,
+            IID_PPV_ARGS(&pFactory)
+        );
+        if (SUCCEEDED(hr) && pFactory) {
+            IWICBitmapDecoder* pDecoder = nullptr;
+            hr = pFactory->CreateDecoderFromFilename(
+                path.c_str(),
+                nullptr,
+                GENERIC_READ,
+                WICDecodeMetadataCacheOnDemand,
+                &pDecoder
+            );
+            if (SUCCEEDED(hr) && pDecoder) {
+                UINT frameCount = 0;
+                pDecoder->GetFrameCount(&frameCount);
+                outInfo.isAnimated = (frameCount > 1);
+
+                IWICBitmapFrameDecode* pFrame = nullptr;
+                hr = pDecoder->GetFrame(0, &pFrame);
+                if (SUCCEEDED(hr) && pFrame) {
+                    pFrame->GetSize(&outInfo.width, &outInfo.height);
+                    if (outInfo.height > 0) {
+                        outInfo.aspectRatio = static_cast<float>(outInfo.width) / static_cast<float>(outInfo.height);
+                    }
+                    pFrame->Release();
+                }
+                pDecoder->Release();
+            }
+            pFactory->Release();
+            if (outInfo.width > 0 && outInfo.height > 0) return true;
+        }
+    } catch (...) {}
+
+    // 5. Binary WebP Header Parser (RIFF....WEBP: VP8, VP8L, VP8X animated)
+    FILE* f = nullptr;
+    if (_wfopen_s(&f, path.c_str(), L"rb") == 0 && f) {
+        unsigned char hdr[32] = { 0 };
+        if (fread(hdr, 1, sizeof(hdr), f) >= 30) {
+            if (memcmp(hdr, "RIFF", 4) == 0 && memcmp(hdr + 8, "WEBP", 4) == 0) {
+                if (memcmp(hdr + 12, "VP8X", 4) == 0) {
+                    const unsigned char flags = hdr[20];
+                    outInfo.isAnimated = (flags & 0x02) != 0;
+                    outInfo.width = 1 + (hdr[24] | (hdr[25] << 8) | (hdr[26] << 16));
+                    outInfo.height = 1 + (hdr[27] | (hdr[28] << 8) | (hdr[29] << 16));
+                    outInfo.aspectRatio = (outInfo.height > 0) ? (static_cast<float>(outInfo.width) / static_cast<float>(outInfo.height)) : 1.0f;
+                    fclose(f);
+                    return true;
+                } else if (memcmp(hdr + 12, "VP8 ", 4) == 0) {
+                    if (hdr[23] == 0x9D && hdr[24] == 0x01 && hdr[25] == 0x2A) {
+                        outInfo.width = (hdr[26] | (hdr[27] << 8)) & 0x3FFF;
+                        outInfo.height = (hdr[28] | (hdr[29] << 8)) & 0x3FFF;
+                        outInfo.aspectRatio = (outInfo.height > 0) ? (static_cast<float>(outInfo.width) / static_cast<float>(outInfo.height)) : 1.0f;
+                        outInfo.isAnimated = false;
+                        fclose(f);
+                        return true;
+                    }
+                } else if (memcmp(hdr + 12, "VP8L", 4) == 0) {
+                    if (hdr[20] == 0x2F) {
+                        const uint32_t b0 = hdr[21];
+                        const uint32_t b1 = hdr[22];
+                        const uint32_t b2 = hdr[23];
+                        const uint32_t b3 = hdr[24];
+                        outInfo.width = 1 + (b0 | ((b1 & 0x3F) << 8));
+                        outInfo.height = 1 + (((b1 >> 6) | (b2 << 2) | ((b3 & 0x0F) << 10)));
+                        outInfo.aspectRatio = (outInfo.height > 0) ? (static_cast<float>(outInfo.width) / static_cast<float>(outInfo.height)) : 1.0f;
+                        outInfo.isAnimated = false;
+                        fclose(f);
+                        return true;
+                    }
+                }
+            }
+        }
+        fclose(f);
     }
+
+    return false;
 }
 
 bool ImageValidator::IsAnimatedImage(const std::wstring& path) {
@@ -223,11 +339,10 @@ bool ImageValidator::IsAnimatedImage(const std::wstring& path) {
 bool ImageValidator::IsValidCover(const std::wstring& path) {
     ImageDimensions info{};
     if (!GetImageInfo(path, info)) return false;
-    // Cover MUST NOT be animated GIF (grid/list view strictly uses static images)
-    if (info.isAnimated) return false;
-    // Ratio enforcement is a loose requirement to fully support itch.io (e.g. 315x250, aspect ratio ~1.26)
-    // and various custom storefront box art without artificial rejection (0.25f to 2.50f).
-    if (info.aspectRatio < 0.25f || info.aspectRatio > 2.50f) return false;
+    // Animated GIFs are supported in cover view mode
+    // Covers are tall (portrait) or square: ratio must respect the cover viewport (0.45f to 1.15f).
+    // Wide (>1.15f) images do not fit the cover slot.
+    if (info.aspectRatio < 0.45f || info.aspectRatio > 1.15f) return false;
     // Minimum resolution
     if (info.width < 32 || info.height < 32) return false;
     return true;
@@ -236,10 +351,10 @@ bool ImageValidator::IsValidCover(const std::wstring& path) {
 bool ImageValidator::IsValidHero(const std::wstring& path) {
     ImageDimensions info{};
     if (!GetImageInfo(path, info)) return false;
-    // Hero MUST NOT be animated GIF
-    if (info.isAnimated) return false;
-    // Loose landscape ratio requirement (0.80f to 4.50f)
-    if (info.aspectRatio < 0.80f || info.aspectRatio > 4.50f) return false;
+    // Animated GIFs are supported in hero view mode
+    // Heroes are wide (landscape): ratio must respect the wide viewport (1.20f to 4.50f).
+    // Tall (<1.0) and square (1.0) images do not fit the hero slot.
+    if (info.aspectRatio < 1.20f || info.aspectRatio > 4.50f) return false;
     // Minimum resolution
     if (info.width < 64 || info.height < 32) return false;
     return true;
@@ -258,15 +373,6 @@ bool ImageValidator::IsValidIcon(const std::wstring& path) {
     if (info.aspectRatio < 0.75f || info.aspectRatio > 1.33f) return false;
     // Minimum resolution
     if (info.width < 16 || info.height < 16) return false;
-    return true;
-}
-
-bool ImageValidator::IsValidDetails(const std::wstring& path) {
-    ImageDimensions info{};
-    if (!GetImageInfo(path, info)) return false;
-    // Details CAN be animated GIF!
-    // Minimum resolution to avoid tiny 16x16 / 32x32 icons in 300px sidepane
-    if (info.width < 100 && info.height < 100) return false;
     return true;
 }
 
@@ -290,69 +396,28 @@ std::wstring ImageValidator::GenerateFittingIcon(const std::wstring& /*appId*/, 
 bool ImageValidator::ValidateAndFixGameArtwork(GameItem& item) {
     bool modified = false;
 
-    // 1. Process Details Pane Art:
-    // Details pane CAN use animated GIFs, high-res static cards, or widescreen banners
-    if (!item.detailsArtPath.empty()) {
-        if (!IsValidDetails(item.detailsArtPath)) {
-            item.detailsArtPath = L"";
-            modified = true;
-        }
-    }
-
-    // If an animated GIF was set on cover or hero, relocate it to detailsArtPath!
-    if (IsAnimatedImage(item.coverArtPath)) {
-        if (item.detailsArtPath.empty()) {
-            item.detailsArtPath = item.coverArtPath;
-        }
-        item.coverArtPath = L"";
-        modified = true;
-    }
-    if (IsAnimatedImage(item.heroArtPath)) {
-        if (item.detailsArtPath.empty()) {
-            item.detailsArtPath = item.heroArtPath;
-        }
-        item.heroArtPath = L"";
-        modified = true;
-    }
+    // Square icons must not be animated GIFs
     if (IsAnimatedImage(item.iconPath)) {
         item.iconPath = L"";
         modified = true;
     }
 
-    // 2. Validate Cover Art (~2:3 vertical box art, MUST NOT be animated GIF):
+    // 1. Validate Cover Art (~2:3 vertical box art or custom storefront aspect, animated GIFs supported):
     if (!item.coverArtPath.empty() && !IsValidCover(item.coverArtPath)) {
-        // If the image is ill-fitting for vertical cover, preserve original in detailsArtPath
-        if (item.detailsArtPath.empty() && IsValidDetails(item.coverArtPath)) {
-            item.detailsArtPath = item.coverArtPath;
-        }
         item.coverArtPath = L"";
         modified = true;
     }
 
-    // 3. Validate Hero Art (~3.1:1 / 16:9 widescreen banner, MUST NOT be animated GIF):
+    // 2. Validate Hero Art (~3.1:1 / 16:9 widescreen banner, animated GIFs supported):
     if (!item.heroArtPath.empty() && !IsValidHero(item.heroArtPath)) {
-        if (item.detailsArtPath.empty() && IsValidDetails(item.heroArtPath)) {
-            item.detailsArtPath = item.heroArtPath;
-        }
         item.heroArtPath = L"";
         modified = true;
     }
 
-    // 4. Validate Icon Art (~1:1 square icon, MUST NOT be animated GIF):
+    // 3. Validate Icon Art (~1:1 square icon, MUST NOT be animated GIF):
     if (!item.iconPath.empty() && !IsValidIcon(item.iconPath)) {
         item.iconPath = L"";
         modified = true;
-    }
-
-    // 5. Ensure Details Pane has a fallback if still empty:
-    if (item.detailsArtPath.empty()) {
-        if (!item.heroArtPath.empty() && IsValidDetails(item.heroArtPath)) {
-            item.detailsArtPath = item.heroArtPath;
-            modified = true;
-        } else if (!item.coverArtPath.empty() && IsValidDetails(item.coverArtPath)) {
-            item.detailsArtPath = item.coverArtPath;
-            modified = true;
-        }
     }
 
     return modified;

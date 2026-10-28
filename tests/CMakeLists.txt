@@ -11,6 +11,9 @@ add_executable(GameExplorerTests
     TestThemeScroll.cpp
     TestPreloadWorker.cpp
     TestExplorerLoader.cpp
+    TestUpdateChecker.cpp
+    TestLocalizationEngine.cpp
+    ../src/shell/Resource.rc
 )
 
 target_include_directories(GameExplorerTests PRIVATE
@@ -28,6 +31,10 @@ target_link_libraries(GameExplorerTests PRIVATE
     Comctl32
     GameExplorerLoader
 )
+
+if(MSVC)
+    target_link_options(GameExplorerTests PRIVATE /MANIFEST:NO)
+endif()
 
 add_test(NAME GameExplorerUnitTests COMMAND GameExplorerTests)
 

@@ -49,7 +49,8 @@ Detailed user guides, engineering specifications, and customization references a
 ## ⚡ Quick Start & Development
 
 ### Prerequisites
-- Windows 10 (1903+ / Build 18362+) or Windows 11 (Build 22000+) *(earlier Windows versions are not supported due to modern XAML shell architecture)*
+- Windows 11 (Build 22000+) — **Primary field-verified platform**
+- Windows 10 (1903+ / Build 18362+) — *Note: Windows 10 shell integration is currently untested on hardware; File Explorer navigation pane registration and shell extension hosting cannot be guaranteed on Windows 10 without field verification.*
 - Visual Studio 2022 / Build Tools (MSVC v143+ with C++20)
 - CMake 3.25+
 

@@ -33,6 +33,7 @@ public:
     [[nodiscard]] std::optional<GameItem> GetGameById(int64_t id);
     [[nodiscard]] std::optional<GameItem> GetGameByAppId(const std::wstring& appId);
     bool DeleteGame(int64_t id);
+    bool DeleteGameByAppId(const std::wstring& appId);
     bool SetInstalled(int64_t id, bool installed);
     bool SetFavorite(int64_t id, bool favorite);
 

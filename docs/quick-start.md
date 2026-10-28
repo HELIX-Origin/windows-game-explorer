@@ -6,10 +6,13 @@
 
 ## 📥 Installation
 
+> [!NOTE]
+> **Windows Compatibility Notice**: Windows 11 (Build 22000+) is the primary, fully verified target environment. Windows 10 (1903+ / Build 18362+) provides the theoretical UWP XAML hosting API floor, but Windows 10 shell integration remains currently untested on physical hardware; File Explorer navigation pane registration is not guaranteed on Windows 10.
+
 Windows Game Explorer is distributed in two official formats: an automated installer and a portable standalone archive.
 
 ### Option A: Standard Setup Installer (Recommended)
-1. Download the latest installer: `windows-game-explorer-v2.5.0-setup.exe` from the [GitHub Releases](https://github.com/HELIX-Origin/windows-game-explorer/releases).
+1. Download the latest installer: `windows-game-explorer-v2.6.0-setup.exe` from the [GitHub Releases](https://github.com/HELIX-Origin/windows-game-explorer/releases).
 2. Run the installer.
 3. The setup automatically:
    - Installs the shell extension (`GameExplorerShell.dll`) and Game Explorer Studio (`GameExplorerStudio.exe`) to `%LOCALAPPDATA%\Programs\Windows Game Explorer\`.
@@ -17,7 +20,7 @@ Windows Game Explorer is distributed in two official formats: an automated insta
    - Adds **Games** to File Explorer's navigation pane; Explorer positions and presents it according to the installed Windows version.
 
 ### Option B: Portable ZIP Package
-1. Download `windows-game-explorer-v2.5.0-win64.zip`.
+1. Download `windows-game-explorer-v2.6.0-win64.zip`.
 2. Extract the archive to any permanent folder (e.g. `C:\Tools\Windows Game Explorer`).
 3. Open an elevated terminal in the extracted folder and run **`game-explorer.bat register`** to register the shell extension and set up the desktop namespace keys.
 4. *(To remove later, run `game-explorer.bat unregister` from an elevated terminal).*

@@ -42,5 +42,5 @@ See `.agents/rules/local-conventions.md` for full conventions and `.agents/rules
 
 ## Invariants
 
-MIT license · SemVer releases · zero-warning builds (`/W4 /WX`) · community-health files · non-invasive core.
+MIT license · SemVer releases · zero-warning builds (`/W4 /WX`) · mandatory online documentation research before any code change (zero guessing) · community-health files · non-invasive core.
 See `CONTRIBUTING.md` for full contributor guidelines.

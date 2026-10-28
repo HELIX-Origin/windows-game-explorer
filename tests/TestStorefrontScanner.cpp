@@ -2,8 +2,10 @@
 #include "GameExplorerCore/StorefrontScanner.h"
 #include "GameExplorerCore/Storage.h"
 #include "GameExplorerCore/Database.h"
+#include "GameExplorerCore/OwnedGames.h"
 #include <filesystem>
 #include <fstream>
+#include <chrono>
 
 namespace fs = std::filesystem;
 
@@ -29,6 +31,92 @@ TEST_CASE(ScannerBlacklistExecutableFilter) {
     ASSERT_TRUE(GameExplorer::StorefrontScanner::IsBlacklistedExecutable(L"dxsetup.exe"));
     ASSERT_FALSE(GameExplorer::StorefrontScanner::IsBlacklistedExecutable(L"MyGame.exe"));
     ASSERT_FALSE(GameExplorer::StorefrontScanner::IsBlacklistedExecutable(L"EldenRing.exe"));
+}
+
+TEST_CASE(ScannerCommonGameInstallationPaths) {
+    ASSERT_TRUE(GameExplorer::StorefrontScanner::IsCommonGameInstallationPath(L"D:\\Games\\Portal2\\portal2.exe"));
+    ASSERT_TRUE(GameExplorer::StorefrontScanner::IsCommonGameInstallationPath(L"E:\\SteamLibrary\\steamapps\\common\\Half-Life 2"));
+    ASSERT_TRUE(GameExplorer::StorefrontScanner::IsCommonGameInstallationPath(L"C:\\Program Files\\2K Games\\BioShock"));
+    ASSERT_TRUE(GameExplorer::StorefrontScanner::IsCommonGameInstallationPath(L"C:\\Program Files (x86)\\Wargaming.net\\World_of_Tanks"));
+    ASSERT_TRUE(GameExplorer::StorefrontScanner::IsCommonGameInstallationPath(L"C:\\Program Files\\Google\\Play Games\\Bootstrapper.exe"));
+    ASSERT_TRUE(GameExplorer::StorefrontScanner::IsCommonGameInstallationPath(L"D:\\XboxGames\\Halo\\Content\\gamelaunchhelper.exe"));
+    ASSERT_TRUE(GameExplorer::StorefrontScanner::IsCommonGameInstallationPath(L"C:\\Users\\User\\Saved Games\\DwarfFortress"));
+    ASSERT_TRUE(GameExplorer::StorefrontScanner::IsCommonGameInstallationPath(L"F:\\itch\\games\\celeste\\Celeste.exe"));
+    ASSERT_TRUE(GameExplorer::StorefrontScanner::IsCommonGameInstallationPath(L"G:\\Emulation\\ROMs\\snes\\SuperMarioWorld.sfc"));
+
+    // Should reject non-game directories
+    ASSERT_FALSE(GameExplorer::StorefrontScanner::IsCommonGameInstallationPath(L"C:\\Users\\User\\AppData\\Local\\Programs\\antigravity\\Antigravity.exe"));
+    ASSERT_FALSE(GameExplorer::StorefrontScanner::IsCommonGameInstallationPath(L"C:\\Program Files\\Microsoft Visual Studio\\2022\\Community"));
+    ASSERT_FALSE(GameExplorer::StorefrontScanner::IsCommonGameInstallationPath(L"C:\\Program Files\\Git\\bin\\git.exe"));
+    ASSERT_FALSE(GameExplorer::StorefrontScanner::IsCommonGameInstallationPath(L"C:\\Windows\\System32\\calc.exe"));
+}
+
+TEST_CASE(ScannerKnownGameEngineDetection) {
+    const fs::path tempDir = fs::temp_directory_path() / L"GameExplorer_Engine_Test";
+    fs::create_directories(tempDir);
+
+    // 1. Unity engine detection
+    const fs::path unityDir = tempDir / L"UnityGame";
+    fs::create_directories(unityDir);
+    {
+        std::ofstream f(unityDir / L"UnityPlayer.dll");
+        std::ofstream g(unityDir / L"Game.exe");
+    }
+    ASSERT_TRUE(GameExplorer::StorefrontScanner::IsKnownGameEnginePresent(unityDir.wstring(), (unityDir / L"Game.exe").wstring()));
+
+    // 2. GameMaker engine detection
+    const fs::path gmDir = tempDir / L"GMGame";
+    fs::create_directories(gmDir);
+    {
+        std::ofstream f(gmDir / L"data.win");
+        std::ofstream g(gmDir / L"MyGMGame.exe");
+    }
+    ASSERT_TRUE(GameExplorer::StorefrontScanner::IsKnownGameEnginePresent(gmDir.wstring(), (gmDir / L"MyGMGame.exe").wstring()));
+
+    // 3. Godot engine detection
+    const fs::path godotDir = tempDir / L"GodotGame";
+    fs::create_directories(godotDir);
+    {
+        std::ofstream f(godotDir / L"godot_project.pck");
+        std::ofstream g(godotDir / L"GodotGame.exe");
+    }
+    ASSERT_TRUE(GameExplorer::StorefrontScanner::IsKnownGameEnginePresent(godotDir.wstring(), (godotDir / L"GodotGame.exe").wstring()));
+
+    // 4. Non-game directory should return false
+    const fs::path toolDir = tempDir / L"NonGameTool";
+    fs::create_directories(toolDir);
+    {
+        std::ofstream f(toolDir / L"tool.exe");
+        std::ofstream g(toolDir / L"tool.dll");
+    }
+    ASSERT_FALSE(GameExplorer::StorefrontScanner::IsKnownGameEnginePresent(toolDir.wstring(), (toolDir / L"tool.exe").wstring()));
+
+    std::error_code ec;
+    fs::remove_all(tempDir, ec);
+}
+
+TEST_CASE(DatabaseDeleteGameByAppId) {
+    auto& db = GameExplorer::Database::Instance();
+    const fs::path testDbPath = fs::temp_directory_path() / L"GameExplorer_Test_DeleteAppId.db";
+    std::error_code ec;
+    fs::remove(testDbPath, ec);
+    ASSERT_TRUE(db.Open(testDbPath));
+
+    GameExplorer::GameItem item{};
+    item.appId = L"local_dummy_non_game";
+    item.title = L"Dummy Non-Game Software";
+    item.platform = GameExplorer::PlatformType::CustomExecutable;
+    ASSERT_TRUE(db.UpsertGame(item));
+
+    auto retrieved = db.GetGameByAppId(L"local_dummy_non_game");
+    ASSERT_TRUE(retrieved.has_value());
+
+    ASSERT_TRUE(db.DeleteGameByAppId(L"local_dummy_non_game"));
+    auto deleted = db.GetGameByAppId(L"local_dummy_non_game");
+    ASSERT_FALSE(deleted.has_value());
+
+    db.Close();
+    fs::remove(testDbPath, ec);
 }
 
 TEST_CASE(PerGameMetadataSerializationAndPriority) {
@@ -60,9 +148,7 @@ TEST_CASE(PerGameMetadataSerializationAndPriority) {
     ASSERT_EQ(incoming.rating, L"90");
 
     // Cleanup
-    if (fs::exists(jsonPath)) {
-        fs::remove(jsonPath);
-    }
+    GameExplorer::StorefrontScanner::RemoveCustomLocalGame(testAppId);
 }
 
 TEST_CASE(LaunchMethodMetadataRoundTrip) {
@@ -113,9 +199,7 @@ TEST_CASE(LaunchMethodMetadataRoundTrip) {
     ASSERT_TRUE(GameExplorer::StorefrontScanner::LoadPerGameMetadata(cleared));
     ASSERT_TRUE(cleared.launchMethods.empty());
 
-    if (fs::exists(jsonPath)) {
-        fs::remove(jsonPath);
-    }
+    GameExplorer::StorefrontScanner::RemoveCustomLocalGame(testAppId);
 }
 
 TEST_CASE(CustomLocalGameLifecycle) {
@@ -301,28 +385,30 @@ TEST_CASE(ItchArtworkProtectionAndStrictTitleMatching) {
 TEST_CASE(ArtworkSourcingPolicyForStoreVersusLocalGames) {
     using GameExplorer::PlatformType;
     using GameExplorer::StorefrontScanner;
+    using GameExplorer::ExtractBaseTitle;
 
-    // Store-discovered games keep their storefront-provided artwork: metadata providers never auto-fill.
-    ASSERT_FALSE(StorefrontScanner::AllowsAutoArtFromMetadataProviders(PlatformType::Steam));
-    ASSERT_FALSE(StorefrontScanner::AllowsAutoArtFromMetadataProviders(PlatformType::Epic));
-    ASSERT_FALSE(StorefrontScanner::AllowsAutoArtFromMetadataProviders(PlatformType::GOG));
-    ASSERT_FALSE(StorefrontScanner::AllowsAutoArtFromMetadataProviders(PlatformType::BattleNet));
-    ASSERT_FALSE(StorefrontScanner::AllowsAutoArtFromMetadataProviders(PlatformType::EAApp));
-    ASSERT_FALSE(StorefrontScanner::AllowsAutoArtFromMetadataProviders(PlatformType::Xbox));
-    ASSERT_FALSE(StorefrontScanner::AllowsAutoArtFromMetadataProviders(PlatformType::Itch));
-    ASSERT_FALSE(StorefrontScanner::AllowsAutoArtFromMetadataProviders(PlatformType::SquareEnix));
-    ASSERT_FALSE(StorefrontScanner::AllowsAutoArtFromMetadataProviders(PlatformType::Ubisoft));
-    ASSERT_FALSE(StorefrontScanner::AllowsAutoArtFromMetadataProviders(PlatformType::Rockstar));
-    ASSERT_FALSE(StorefrontScanner::AllowsAutoArtFromMetadataProviders(PlatformType::Amazon));
-    ASSERT_FALSE(StorefrontScanner::AllowsAutoArtFromMetadataProviders(PlatformType::LegacyGames));
-    ASSERT_FALSE(StorefrontScanner::AllowsAutoArtFromMetadataProviders(PlatformType::Jagex));
-    ASSERT_FALSE(StorefrontScanner::AllowsAutoArtFromMetadataProviders(PlatformType::XIVLauncher));
-    ASSERT_FALSE(StorefrontScanner::AllowsAutoArtFromMetadataProviders(PlatformType::GuildWars2));
-    ASSERT_FALSE(StorefrontScanner::AllowsAutoArtFromMetadataProviders(PlatformType::Riot));
-    ASSERT_FALSE(StorefrontScanner::AllowsAutoArtFromMetadataProviders(PlatformType::HoYoPlay));
-    ASSERT_FALSE(StorefrontScanner::AllowsAutoArtFromMetadataProviders(PlatformType::Paradox));
+    // Metadata providers CAN be used as an extra layer to help across all platforms,
+    // strictly validating against official storefronts to prevent wrong-game matches.
+    ASSERT_TRUE(StorefrontScanner::AllowsAutoArtFromMetadataProviders(PlatformType::Steam));
+    ASSERT_TRUE(StorefrontScanner::AllowsAutoArtFromMetadataProviders(PlatformType::Epic));
+    ASSERT_TRUE(StorefrontScanner::AllowsAutoArtFromMetadataProviders(PlatformType::GOG));
+    ASSERT_TRUE(StorefrontScanner::AllowsAutoArtFromMetadataProviders(PlatformType::BattleNet));
+    ASSERT_TRUE(StorefrontScanner::AllowsAutoArtFromMetadataProviders(PlatformType::EAApp));
+    ASSERT_TRUE(StorefrontScanner::AllowsAutoArtFromMetadataProviders(PlatformType::Xbox));
+    ASSERT_TRUE(StorefrontScanner::AllowsAutoArtFromMetadataProviders(PlatformType::Itch));
+    ASSERT_TRUE(StorefrontScanner::AllowsAutoArtFromMetadataProviders(PlatformType::SquareEnix));
+    ASSERT_TRUE(StorefrontScanner::AllowsAutoArtFromMetadataProviders(PlatformType::Ubisoft));
+    ASSERT_TRUE(StorefrontScanner::AllowsAutoArtFromMetadataProviders(PlatformType::Rockstar));
+    ASSERT_TRUE(StorefrontScanner::AllowsAutoArtFromMetadataProviders(PlatformType::Amazon));
+    ASSERT_TRUE(StorefrontScanner::AllowsAutoArtFromMetadataProviders(PlatformType::LegacyGames));
+    ASSERT_TRUE(StorefrontScanner::AllowsAutoArtFromMetadataProviders(PlatformType::Jagex));
+    ASSERT_TRUE(StorefrontScanner::AllowsAutoArtFromMetadataProviders(PlatformType::XIVLauncher));
+    ASSERT_TRUE(StorefrontScanner::AllowsAutoArtFromMetadataProviders(PlatformType::GuildWars2));
+    ASSERT_TRUE(StorefrontScanner::AllowsAutoArtFromMetadataProviders(PlatformType::Riot));
+    ASSERT_TRUE(StorefrontScanner::AllowsAutoArtFromMetadataProviders(PlatformType::HoYoPlay));
+    ASSERT_TRUE(StorefrontScanner::AllowsAutoArtFromMetadataProviders(PlatformType::Paradox));
 
-    // Locally added and emulated games may auto-source artwork from metadata providers.
+    // Locally added and emulated games may also auto-source artwork from metadata providers.
     ASSERT_TRUE(StorefrontScanner::AllowsAutoArtFromMetadataProviders(PlatformType::Unknown));
     ASSERT_TRUE(StorefrontScanner::AllowsAutoArtFromMetadataProviders(PlatformType::CustomExecutable));
     ASSERT_TRUE(StorefrontScanner::AllowsAutoArtFromMetadataProviders(PlatformType::RetroArch));
@@ -340,4 +426,97 @@ TEST_CASE(ArtworkSourcingPolicyForStoreVersusLocalGames) {
     ASSERT_TRUE(StorefrontScanner::AllowsAutoArtFromMetadataProviders(PlatformType::RPCS3));
     ASSERT_TRUE(StorefrontScanner::AllowsAutoArtFromMetadataProviders(PlatformType::Xemu));
     ASSERT_TRUE(StorefrontScanner::AllowsAutoArtFromMetadataProviders(PlatformType::Vice));
+
+    // Strict title matching: editions match their base game, but sequels and spin-offs do not
+    ASSERT_EQ(ExtractBaseTitle(L"The Witcher 3: Wild Hunt - Game of the Year Edition"), L"The Witcher 3: Wild Hunt");
+    ASSERT_EQ(ExtractBaseTitle(L"The Witcher 3: Wild Hunt: Complete Edition"), L"The Witcher 3: Wild Hunt");
+    ASSERT_EQ(ExtractBaseTitle(L"Cyberpunk 2077: Ultimate Edition"), L"Cyberpunk 2077");
+    ASSERT_EQ(ExtractBaseTitle(L"Borderlands: Game of the Year Edition"), L"Borderlands");
+
+    // Sequels and different games retain distinct titles
+    ASSERT_EQ(ExtractBaseTitle(L"Doom Eternal"), L"Doom Eternal");
+    ASSERT_EQ(ExtractBaseTitle(L"Half-Life 2"), L"Half-Life 2");
+    ASSERT_EQ(ExtractBaseTitle(L"Alan Wake 2"), L"Alan Wake 2");
+    ASSERT_NE(ExtractBaseTitle(L"Final Fantasy VII"), ExtractBaseTitle(L"Final Fantasy VIII"));
+}
+
+TEST_CASE(ScannerUniversalInstalledGameDetection) {
+    // Tests that provider-agnostic common game folder and uninstall registry scanners
+    // run cleanly without memory violations or failures
+    const auto commonGames = GameExplorer::StorefrontScanner::ScanCommonGameFolders();
+    const auto registryGames = GameExplorer::StorefrontScanner::ScanUninstallRegistry();
+
+    // Verify all returned items have valid appIds and executables
+    for (const auto& g : commonGames) {
+        ASSERT_FALSE(g.appId.empty());
+        ASSERT_FALSE(g.title.empty());
+        ASSERT_FALSE(g.executablePath.empty());
+        ASSERT_EQ(g.platform, GameExplorer::PlatformType::CustomExecutable);
+    }
+
+    for (const auto& g : registryGames) {
+        ASSERT_FALSE(g.appId.empty());
+        ASSERT_FALSE(g.title.empty());
+        ASSERT_FALSE(g.executablePath.empty());
+        ASSERT_EQ(g.platform, GameExplorer::PlatformType::CustomExecutable);
+    }
+}
+
+TEST_CASE(ScannerBenchmarkPerformanceSpeed) {
+    // Measures throughput of title key normalization across 1,000 game records
+    const auto start = std::chrono::high_resolution_clock::now();
+    for (int i = 0; i < 1000; ++i) {
+        const auto key = GameExplorer::OwnedGamesSortTitle(L"The Witcher 3: Wild Hunt - Game of the Year Edition");
+        (void)key;
+    }
+    const auto end = std::chrono::high_resolution_clock::now();
+    const auto elapsedMs = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
+
+    // 1,000 title key normalizations must execute in under 100ms
+    ASSERT_TRUE(elapsedMs < 100);
+}
+
+TEST_CASE(ScannerSmartScanSessionGateAndPerformance) {
+    auto& db = GameExplorer::Database::Instance();
+    const auto dbPath = fs::temp_directory_path() / L"game_explorer_smart_bench.db";
+    std::error_code ec;
+    fs::remove(dbPath, ec);
+    db.Open(dbPath);
+
+    // Populate a test game
+    GameExplorer::GameItem testGame{};
+    testGame.appId = L"test_benchmark_game";
+    testGame.title = L"Benchmark Test Title";
+    testGame.platform = GameExplorer::PlatformType::CustomExecutable;
+    db.UpsertGame(testGame);
+
+    // Verify session gate
+    GameExplorer::StorefrontScanner::ResetSessionScan();
+    ASSERT_FALSE(GameExplorer::StorefrontScanner::HasSessionScanned());
+
+    // First automated scan sets session flag
+    GameExplorer::StorefrontScanner::SmartScan(db, false);
+    ASSERT_TRUE(GameExplorer::StorefrontScanner::HasSessionScanned());
+
+    // Second automated scan must exit immediately (0ms) due to session gate
+    const auto start = std::chrono::high_resolution_clock::now();
+    const size_t count = GameExplorer::StorefrontScanner::SmartScan(db, false);
+    const auto end = std::chrono::high_resolution_clock::now();
+    const auto elapsedMs = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
+
+    ASSERT_EQ(count, static_cast<size_t>(0));
+    ASSERT_TRUE(elapsedMs < 10);
+
+    db.Close();
+    fs::remove(dbPath, ec);
+}
+
+TEST_CASE(ScannerPrunesNonGameMetadataOnLoad) {
+    const auto games = GameExplorer::StorefrontScanner::LoadAllGamesFromMetadata();
+    // Verify that all returned games are valid games and no non-game software remains
+    for (const auto& g : games) {
+        if (g.appId.rfind(L"local_", 0) == 0) {
+            ASSERT_TRUE(GameExplorer::StorefrontScanner::IsProbableGameInstallation(g.workingDirectory, g.executablePath));
+        }
+    }
 }

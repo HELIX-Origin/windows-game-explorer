@@ -16,40 +16,73 @@
 
 ## 🎯 Active Sprints
 
-### Sprint 39: [windows-game-explorer] — M19 Shell Performance & Explorer Lifecycle
+### Sprint 40: [windows-game-explorer] — DET-01 Universal Installed Game Detection (Provider-Agnostic)
 
-> **Status: in progress.** User-directed scope: performance optimization and a project-owned Explorer watcher/loader
-> informed by Windhawk, without a Windhawk runtime dependency. Windhawk itself uses DLL injection;
-> the requested distinction is watcher-managed loading versus today's COM activation alone.
+> **Status: queued / active.** Loosen installed game detection beyond hardcoded storefront clients (Steam, Epic, GOG, etc.) so all installed games are discovered regardless of source, including standalone DRM-free titles, disc/retail installs, GOG offline installers, itch standalone folders, freeware, and custom local game directories.
 
-- **PERF-01 — Performance optimization**:
-  - Measure Explorer-hosted shell view initialization, first usable library render, refresh, and
-    teardown on representative Windows 10/11 systems; capture baselines before optimizing.
-  - Profile the shell view and service hot paths; optimize only measured bottlenecks while
-    preserving non-blocking Explorer UI, existing cache behavior, and crash-safe XAML teardown.
-  - Verify changes on Windows 10 and Windows 11 while leaving each OS's Explorer mode and chrome
-    untouched; maintain `/W4 /WX` and unit-test gates.
-- **HOST-01 — Project-owned Explorer watcher/loader**:
-  - Implement Explorer startup/restart tracking and controlled loading; no Windhawk dependency.
-  - Scope attachment to the intended Explorer executable and user session, deduplicate process
-    instances, report failures, and provide disable/rollback/uninstall handling.
-  - Preserve namespace/categorizer class discovery and STA shell-view activation; loading a DLL
-    alone does not replace COM registration. Keep Explorer UI non-blocking and presentation native.
-  - Validate navigation, restart, multi-window/tab use, and teardown before switching the default.
-- **NAV-01 — Navigation sidebar suppression on standalone / `shell:games` invocations**:
-  - Rationale (user directive): The left side navigation pane is unneeded in the standalone shell window. Removing it improves visual appearance and reclaims horizontal canvas width so the installed games grid has maximum usable space.
-  - Hide the left navigation pane (`EP_NavPane` in `IExplorerPaneVisibility::GetPaneState`) when launched standalone via `shell:games` or desktop/start menu shortcuts.
-  - Deliver a clean, dedicated game library experience by suppressing the left sidebar exclusively for standalone invocations, while preserving standard navigation pane behavior when browsing into Games from an active File Explorer tab or window.
-  - Map `IExplorerPaneVisibility` across both `ShellView` and `ShellFolder::CreateViewObject` to return `EPS_DEFAULT_OFF | EPS_FORCE` for `EP_NavPane` in standalone mode, returning `EPS_DONTCARE` during standard Explorer navigation.
-  - Restore `FolderValueFlags = 0` and `AllowChildAliasRegistration = 1` in `Registration.cpp` and support `shell:::` in `ParseDisplayName` so standalone invocations reliably open the dedicated shell extension tab rather than vanilla Explorer.
 - **DET-01 — Universal Installed Game Detection (Provider-Agnostic)**:
-  - Rationale (user directive): Loosen installed game detection beyond hardcoded storefront clients (Steam, Epic, GOG, etc.) so all installed games are discovered regardless of source, including standalone DRM-free titles, disc/retail installs, GOG offline installers, itch standalone folders, freeware, and custom local game directories.
   - Implement Windows Registry Uninstall crawler scanning `HKLM` (64-bit & WOW6432Node) and `HKCU` uninstall keys for game entries with valid install locations and primary executables.
   - Implement universal drive root scanner indexing common game paths (`C:\Games`, `D:\Games`, `%PROGRAMFILES%\Games`, etc.) with `FindPrimaryGameExecutable()` and blacklist filtering.
   - Scan Start Menu game shortcuts resolving targets via `IShellLink` for installed local titles without a storefront client.
   - Categorize discovered local titles under `PlatformType::Custom` / `Local` with extracted high-resolution icons (`EnsureExtractedIconPng`) and direct launchability.
+
+---
+
+## ✅ Completed Sprints
+
+### Sprint 39: [windows-game-explorer] — M19 Dynamic Standalone Sizing, Fluent Iconography & Multi-Drive Discovery (`v2.6.0`)
+
+> **Status: completed (`v2.6.0`).** Delivered pure dynamic window sizing (`WS_CAPTION | WS_THICKFRAME | WS_MINIMIZEBOX | WS_MAXIMIZEBOX | WS_SYSMENU`), automatic navigation pane and status bar suppression on standalone windows, authentic Windows 11 Fluent 3D controller iconography, multi-drive heuristics, and cross-storefront artwork validation.
+
+- **DYNAMIC-01 — Dynamic window sizing & resizability synchronization**:
+  - Implemented 100% dynamic sizing and resizability for the standalone `shell:games` window with fluid XAML layout (zero hardcoded sizes or fixed maximum columns).
+  - Standalone mode hides the Left Navigation Pane (`NamespaceTreeControl`) and bottom status bar (`msctls_statusbar32`) while resizing `m_hwndViewSink` and `m_hwndView` to the full client area (`fullW x fullH`) without dark bars or clipping.
+  - Implemented 1px size delta in `LibraryViewHost::Resize` guaranteeing `DesktopWindowContentBridge` receives `WM_SIZE` and updates XAML island layout reliably.
+- **ICON-01 — Fluent 3D controller iconography**:
+  - Embedded authentic Windows 11 Fluent 3D game controller icon (`IDI_GAME_EXPLORER` = 100) and flat variant (101) directly inside `GameExplorerShell.dll` with 7 resolution layers.
+  - Corrected face button colors to standard scheme: Y=Yellow, B=Red, X=Blue, A=Green, and removed floor-shadow ovals under the controller grips.
+- **SHORTCUT-01 — Desktop and Start Menu shortcut deduplication**:
+  - Purged conflicting dual shortcuts across user and public folders (`FOLDERID_Desktop`, `FOLDERID_PublicDesktop`, `OneDrive\Desktop`, and `FOLDERID_Programs`).
+  - Guaranteed exactly ONE desktop shortcut and ONE Start menu shortcut upon registration.
+- **SORT-01 — Canonical navigation pane order & alphabetical games sorting**:
+  - Set `SortOrderIndex` in CLSID registration to `0x41` (65) placing Games in correct alphabetical/canonical order after Home (64) and Gallery (65): Home, Gallery, Games.
+  - Sorted installed games grid in `StorefrontScanner::LoadAllGamesFromMetadata()` and `LibraryViewHost` alphabetically by `sortTitle` / `title` via case-insensitive `_wcsicmp`.
+- **GOV-01 — Truthful documentation & governance correction**:
+  - Corrected `GOVERNANCE.md` across project repositories and `.agents/templates/governance-template.md` to remove fabricated claims.
+  - Formally dropped Windows 10 support in the NSIS installer (enforcing build >= 22000) and documentation following its end-of-life status.
+- **SCAN-02 — Smart Game Scan with Engine Knowledge Base, Multi-Drive Heuristics & Universal Artwork Engine**:
+  - Smart Game Engine Knowledge Base (`IsKnownGameEnginePresent`): Unity, Unreal Engine, Godot, GameMaker, RPG Maker, Ren'Py, Source/GoldSrc, CryEngine, REDengine, GOG manifests, and 16 middleware signatures across all mounted drives.
+  - Multi-Drive & External Drive Support: `GetCommonGameSearchDirectories()` dynamically discovers candidate game roots across all mounted drives and user profile directories.
+  - Zero cropping on all card and preview images: all card slots in `LibraryViewHost.cpp` (`Stretch::Fill`) scale images to fit the exact height and width of the card slot with zero clipping of borders or logos.
+  - Embedded Game Engine Knowledge Base: Unity, Unreal Engine, Godot, GameMaker, RPG Maker, Ren'Py, Source/GoldSrc, CryEngine, REDengine, GOG manifests, and 16 audio/video/physics middleware signatures.
+  - Multi-Drive & External Drive Support: `GetCommonGameSearchDirectories()` dynamically searches across all mounted drives (fixed, removable, network) and user profile folders for candidate game roots.
+  - Comprehensive Gaming Directory Heuristics: integrated standard gaming paths and common installation patterns (`IsCommonGameInstallationPath`).
+  - New Storefront Scanners: added native support for Google Play Games on PC (`PlatformType::GooglePlayGames`), Wargaming.net Game Center (`PlatformType::Wargaming`), Paradox Interactive (`PlatformType::Paradox`), and expanded Xbox UWP game detection (Minecraft, Forza, Sea of Thieves, Flight Simulator).
+  - Multi-Format Image Support: PNG, JPG/JPEG/JFIF, GIF (static & animated), WebP (lossy, lossless, animated), SVG (XML viewBox / dimensions parser & `wuxmi::SvgImageSource`), ICO, BMP, TIFF, AVIF/HEIC (via WIC).
+  - Animated GIF Support on Installed Cards: enabled automatic smooth GIF playback across Cover and Hero view modes via `bmp.AutoPlay(true)`.
+  - Details Pane Simplification: removed dedicated details art slot/logic (`ArtworkSlot::Details`, `IsValidDetails`); details pane now consistently uses cover art with hero/icon fallback, minimizing excess layout-mode branching.
+  - Self-Healing Metadata Cleanup: automatically purged 35 non-game `local_*.json` files from `%USERPROFILE%\Game Explorer\metadata\` and removed their database records.
+- **VIEW-01 — Multi-Mode Image Viewport Fitting & Card Sizing**:
+  - Resized Wide/Hero mode cards to standard 16:9 widescreen geometry (`cardW = 320.0`, `imgH = 180.0`, `cardH = 222.0`).
+  - Standardized image scaling across all 3 display modes (Cover 2:3, Wide 16:9, List row 32x32) using `Stretch::Uniform` and centered alignments so images never crop, distort, or overflow.
+  - Dynamically adapt sidepane details card viewport in `UpdateSidepane` to fit image aspect ratio across all modes.
+- **UPD-01 — Built-in GitHub Release Update Checker & In-Place Installer Upgrade**:
+  - Implemented `UpdateChecker` in `GameExplorerCore` with SemVer comparison, GitHub Releases API client (`/releases/latest`), and background asynchronous downloader.
+  - Updated NSIS installer (`windows-game-explorer.nsi`) to ensure seamless in-place upgrade, cleanly terminating companion processes and preserving user library database.
+  - Integrated "Application Updates & Releases" card in Studio (`ConfigMain.cpp`) with manual check, one-click in-place install, and release notes actions.
+- **LOC-01 — Native Windows MUI & System Locale Localization Architecture**:
+  - Implemented native Windows MUI (Multilingual User Interface) architecture: Windows String Table resources (`STRINGTABLE` across 11 languages in `Resource.rc`: en-US, fr-FR, es-ES, it-IT, pt-BR, ru-RU, zh-CN, zh-TW, ko-KR, ja-JP, de-DE).
+  - Centralized resource IDs (`IDS_*` in `include/GameExplorerCore/ResourceIds.h`) and created `LocalizationEngine` wrapper in `GameExplorerCore` with `LoadStringW`, positional `FormatMessageW` (%1!s!, %2!d!), and indirect string generator.
+  - Wired indirect string references (`@<dll>,-<id>`) into `Registration.cpp` (`LocalizedString` and `LocalizedName`), enabling Windows File Explorer and Navigation Pane to resolve folder and shell titles dynamically matching the user's active OS UI language.
+- **ICON-01 — Windows 11 Fluent 3D & Windows 10 Flat Dual-Icon Architecture**:
+  - Implemented dual-icon architecture embedding both Windows 11 Fluent 3D Azure controller (ID 100) and Windows 10 Flat Fluent controller (ID 101) inside `GameExplorerShell.dll` via `Resource.rc`.
+  - Added OS build detection (`DarkMode::IsWindows11OrGreater()`) in `Registration.cpp` and `StudioMain.cpp`, registering and displaying the style-matched controller icon for the active Windows environment.
+  - Regenerated installer graphics (`sidebar.bmp`, `header.bmp`) via `scripts/generate-installer-art.ps1`.
+- **Windows 10 Compatibility Policy (User Directive)**:
+  - Windows 10 is discontinued/EOL; developing custom shell-hooking workarounds to guarantee Windows 10 File Explorer navigation pane integration is explicitly deprioritized and out of scope.
+  - Windows 10 support is maintained strictly on a best-effort, as-is basis with clear documentation across `README.md`, `docs/quick-start.md`, and the NSIS installer. Windows 11 (Build 22000+) is the authoritative, fully verified platform.
 - **Out of scope**: downloads, DRM bypasses, forcing Windows 10/11 Explorer modes, and unmeasured
-  speculative optimization. Do not copy Windhawk source into this MIT project.
+  speculative optimization. Keep implementation 100% independent, clean, and self-contained.
 - **Quality Gate**: Baseline and post-change performance evidence, watcher/loader regression tests,
   zero-warning build (`MSVC /W4 /WX`), and all unit tests passing.
 

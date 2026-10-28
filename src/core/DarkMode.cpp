@@ -72,6 +72,21 @@ bool DarkMode::IsSystemDarkMode() {
     return false;
 }
 
+bool DarkMode::IsWindows11OrGreater() {
+    HKEY hKey = nullptr;
+    if (RegOpenKeyExW(HKEY_LOCAL_MACHINE, L"SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion", 0, KEY_QUERY_VALUE, &hKey) == ERROR_SUCCESS) {
+        wchar_t buf[64]{};
+        DWORD cb = sizeof(buf);
+        if (RegQueryValueExW(hKey, L"CurrentBuildNumber", nullptr, nullptr, reinterpret_cast<LPBYTE>(buf), &cb) == ERROR_SUCCESS) {
+            RegCloseKey(hKey);
+            const int build = _wtoi(buf);
+            return build >= 22000;
+        }
+        RegCloseKey(hKey);
+    }
+    return true; // Default to modern Windows 11
+}
+
 void DarkMode::ApplyWindowTheme(HWND hwnd, bool darkMode) {
     if (hwnd == nullptr) return;
 

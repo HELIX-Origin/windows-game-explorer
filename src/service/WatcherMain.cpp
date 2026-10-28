@@ -202,6 +202,36 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wParam, LPARAM lPa
     return DefWindowProcW(window, message, wParam, lParam);
 }
 
+void EnsureRegistrationSelfHealed(const std::wstring& dllPath) {
+    HKEY hKey = nullptr;
+    const std::wstring clsidSubKey = L"Software\\Classes\\CLSID\\{1666B3DF-60A5-4EF3-8B80-962C82401CD1}\\InProcServer32";
+    const LSTATUS clsidStatus = RegOpenKeyExW(HKEY_CURRENT_USER, clsidSubKey.c_str(), 0, KEY_READ, &hKey);
+    if (hKey != nullptr) {
+        RegCloseKey(hKey);
+        hKey = nullptr;
+    }
+
+    const std::wstring fdSubKey = L"Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\FolderDescriptions\\{CAC52C1A-B53D-4EDC-92D7-6B2E8AC19434}";
+    const LSTATUS fdStatus = RegOpenKeyExW(HKEY_CURRENT_USER, fdSubKey.c_str(), 0, KEY_READ, &hKey);
+    if (hKey != nullptr) {
+        RegCloseKey(hKey);
+        hKey = nullptr;
+    }
+
+    if (clsidStatus != ERROR_SUCCESS || fdStatus != ERROR_SUCCESS) {
+        HMODULE hDll = LoadLibraryExW(dllPath.c_str(), nullptr, LOAD_WITH_ALTERED_SEARCH_PATH);
+        if (hDll != nullptr) {
+            using PfnDllRegisterServer = HRESULT(STDAPICALLTYPE*)();
+            auto pfnReg = reinterpret_cast<PfnDllRegisterServer>(GetProcAddress(hDll, "DllRegisterServer"));
+            if (pfnReg != nullptr) {
+                pfnReg();
+                Log(Messages::kSelfHealed);
+            }
+            FreeLibrary(hDll);
+        }
+    }
+}
+
 int Watch(const GameExplorer::ExplorerProcessIdentity& self) {
     if (Disabled()) return 0;
     const auto name = ObjectName(self);
@@ -232,14 +262,20 @@ int Watch(const GameExplorer::ExplorerProcessIdentity& self) {
     const auto dll = (std::filesystem::path(OwnPath()).parent_path() / Messages::kDllName).wstring();
     std::map<ProcessKey, Attempt> attempts;
     Log(Messages::kReady);
+    EnsureRegistrationSelfHealed(dll);
     bool running = true;
     ULONGLONG nextScan = 0;
+    ULONGLONG nextSelfHeal = GetTickCount64() + 60000;
     int exitCode = 0;
     while (running) {
         if (GetTickCount64() >= nextScan) {
             if (Disabled()) break;
             ScanExplorers(self, dll, attempts, false, stop.get());
             nextScan = GetTickCount64() + 5000;
+        }
+        if (GetTickCount64() >= nextSelfHeal) {
+            EnsureRegistrationSelfHealed(dll);
+            nextSelfHeal = GetTickCount64() + 60000;
         }
         const HANDLE stopHandle = stop.get();
         const DWORD result = MsgWaitForMultipleObjects(1, &stopHandle, FALSE, 500, QS_ALLINPUT);

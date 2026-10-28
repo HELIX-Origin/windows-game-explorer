@@ -4,7 +4,7 @@
 Unicode true
 
 !define APP_NAME "Windows Game Explorer"
-!define APP_VERSION "2.5.0"
+!define APP_VERSION "2.6.0"
 !define APP_PUBLISHER "HELIX Origin"
 !define APP_URL "https://github.com/HELIX-Origin/windows-game-explorer"
 !define APP_EXE_STUDIO "GameExplorerStudio.exe"
@@ -76,16 +76,16 @@ FunctionEnd
 
 Function .onInit
     ${IfNot} ${AtLeastWin10}
-        MessageBox MB_ICONSTOP|MB_OK "${APP_NAME} requires Windows 10 version 1903 (build 18362) or later, or Windows 11.$\nEarlier versions do not provide the UWP XAML hosting API required for File Explorer integration."
+        MessageBox MB_ICONSTOP|MB_OK "${APP_NAME} requires Windows 11 (build 22000 or later).$\nWindows 10 is no longer supported following its official end-of-life."
         Abort
     ${EndIf}
 
     ReadRegStr $0 HKLM "SOFTWARE\Microsoft\Windows NT\CurrentVersion" "CurrentBuildNumber"
     StrCmp $0 "" windowsBuildUnsupported
-    IntCmp $0 18362 windowsBuildSupported windowsBuildUnsupported windowsBuildSupported
+    IntCmp $0 22000 windowsBuildSupported windowsBuildUnsupported windowsBuildSupported
 
 windowsBuildUnsupported:
-    MessageBox MB_ICONSTOP|MB_OK "${APP_NAME} requires Windows 10 version 1903 (build 18362) or later, or Windows 11."
+    MessageBox MB_ICONSTOP|MB_OK "${APP_NAME} requires Windows 11 (build 22000 or later).$\nWindows 10 is no longer supported following its official end-of-life."
     Abort
 
 windowsBuildSupported:
@@ -105,8 +105,7 @@ Section "MainSection" SecMain
     IfFileExists "$INSTDIR\${APP_EXE_WATCHER}" 0 watcherStoppedForUpgrade
     ExecWait '"$INSTDIR\${APP_EXE_WATCHER}" --stop' $0
     StrCmp $0 0 watcherStoppedForUpgrade
-    MessageBox MB_ICONSTOP|MB_OK "The Explorer watcher could not stop. Close it before upgrading."
-    Abort
+    nsExec::Exec 'taskkill /F /IM GameExplorerWatcher.exe'
 watcherStoppedForUpgrade:
     nsExec::Exec 'taskkill /F /IM GameExplorerStudio.exe'
     ExecWait 'net stop GameExplorerService'
@@ -150,7 +149,7 @@ watcherStoppedForUpgrade:
     Delete "$INSTDIR\GameExplorerManager.exe"
 
     ; Register Shell Namespace Extension DLL
-    DetailPrint "Registering Windows Shell Extension..."
+    DetailPrint "Registering Windows 11 Shell Extension..."
     ExecWait 'regsvr32.exe /s "$INSTDIR\${APP_DLL_SHELL}"'
 
     ; Register and Start Background Service & Startup Task

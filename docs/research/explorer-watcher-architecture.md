@@ -25,7 +25,7 @@ While standard, this conventional COM registration pattern suffers from critical
 
 ## 2. The Watcher / Lifecycle Loader Paradigm
 
-To resolve these issues, Windows Game Explorer adopts a **project-owned Explorer lifecycle watcher and loader** (`GameExplorerWatcher.exe`), inspired by the architectural principles of Windhawk without taking any dependency on Windhawk runtime binaries or GPL/proprietary code.
+To resolve these issues, Windows Game Explorer adopts a **project-owned Explorer lifecycle watcher and loader** (`GameExplorerWatcher.exe`), delivering a reliable, native in-process integration with zero external runtime dependencies.
 
 ### Architectural Overview
 
@@ -57,18 +57,18 @@ flowchart TD
 
 ---
 
-## 3. Windhawk Loading Architecture & Design Comparison
+## 3. Architecture & Integration Design Comparison
 
-Windhawk operates by monitoring running processes across the OS and injecting a bootstrapping engine that attaches mods into target applications (such as `explorer.exe`).
+The lifecycle watcher operates by monitoring Explorer process instances strictly within the active user session and loading the shell extension DLL directly into `explorer.exe`.
 
-| Dimension | Windhawk Model | Windows Game Explorer (`HOST-01`) |
+| Dimension | Conventional Static Registry Model | Windows Game Explorer Lifecycle Watcher (`HOST-01`) |
 | --- | --- | --- |
-| **Scope** | System-wide (all processes, requires driver/service) | **User-session scoped strictly** to target user's `explorer.exe` |
-| **Privileges** | Administrator / LocalSystem | **Standard Interactive User** (zero UAC prompts needed) |
-| **Dependencies** | Windhawk engine & runtime | **Zero external dependencies** (pure native C++20 Win32) |
-| **Injection Strategy** | Remote threads + early process creation APC hooking | **Remote thread `LoadLibraryW`** triggered by window creation hooks & periodic scans |
-| **Target Filter** | Broad process criteria / configuration patterns | Strict validation: `imagePath == C:\Windows\explorer.exe`, same SID, same session, matching machine architecture |
-| **Rollback / Cleanup** | Unload hooks via engine IPC | **Self-contained IPC**: `--stop`, `--disable` (clears Run key, signals stop event) |
+| **Scope** | Machine-wide static registry keys | **User-session scoped strictly** to target user's `explorer.exe` |
+| **Privileges** | Administrator / HKLM required | **Standard Interactive User** (zero UAC prompts needed) |
+| **Dependencies** | Static `regsvr32` keys | **Zero external dependencies** (pure native C++20 Win32) |
+| **Durability** | Prone to removal by major Windows Updates | **Resilient across Windows updates** via automatic session activation |
+| **Target Filter** | Static system registry | Strict validation: `imagePath == C:\Windows\explorer.exe`, same SID, same session, matching machine architecture |
+| **Rollback / Cleanup** | Manual registry deletion | **Self-contained IPC**: `--stop`, `--disable` (clears Run key, signals stop event) |
 
 ---
 

@@ -23,16 +23,20 @@
 #include "GameExplorerCore/ThemeControls.h"
 #include "GameExplorerCore/ThemeScroll.h"
 
+#include "CatalogueStrings.h"
+
 #ifndef DWMWA_USE_IMMERSIVE_DARK_MODE
 #define DWMWA_USE_IMMERSIVE_DARK_MODE 20
 #endif
 
 using namespace GameExplorer;
+namespace Strings = GameExplorer::CatalogueStrings;
 
 namespace {
 
-constexpr const wchar_t* CATALOGUE_WINDOW_CLASS = L"GameExplorerCataloguePage";
-constexpr const wchar_t* CATALOGUE_LIST_CLASS = L"GameExplorerCatalogueList";
+constexpr const wchar_t* CATALOGUE_WINDOW_CLASS = Strings::kCatalogueWindowClass;
+constexpr const wchar_t* CATALOGUE_LIST_CLASS = Strings::kCatalogueListClass;
+constexpr const wchar_t* CATALOGUE_DETAILS_CLASS = Strings::kCatalogueDetailsClass;
 
 constexpr int IDC_CAT_SEARCH = 3001;
 constexpr int IDC_CAT_STORE = 3002;
@@ -74,6 +78,16 @@ HFONT g_hFontBold = nullptr;
 HFONT g_hFontTitle = nullptr;
 
 HWND g_hwndList = nullptr;
+HWND g_hwndDetails = nullptr;
+RECT g_detailsCardRect{};
+
+struct DetailButtonAction {
+    RECT rect;
+    size_t sourceIndex;
+    bool isStorePage;
+};
+std::vector<DetailButtonAction> g_detailButtons;
+
 HWND g_hwndSearch = nullptr;
 HWND g_hwndStore = nullptr;
 HWND g_hwndInstalled = nullptr;
@@ -229,6 +243,7 @@ void ApplyQuery(HWND hwnd) {
     RefreshCommandStates();
 
     if (g_hwndList != nullptr) InvalidateRect(g_hwndList, nullptr, TRUE);
+    if (g_hwndDetails != nullptr) InvalidateRect(g_hwndDetails, nullptr, TRUE);
     if (hwnd != nullptr) {
         InvalidateRect(hwnd, nullptr, FALSE);
         UpdateWindow(hwnd);
@@ -663,11 +678,40 @@ void ReloadOwnedGames(HWND hwnd) {
     BeginCatalogueSync(hwnd);
 }
 
+void InstallSource(HWND hwnd, const StorefrontSource& src) {
+    if (src.installed) {
+        SetStatus(src.storeName + L" edition is already installed. Play it from the Games view in File Explorer.");
+        return;
+    }
+    if (src.installUri.empty()) {
+        SetStatus(L"This storefront has no direct install protocol. Open its store page instead.");
+        return;
+    }
+    const HINSTANCE result = ShellExecuteW(hwnd, L"open", src.installUri.c_str(), nullptr,
+                                           nullptr, SW_SHOWNORMAL);
+    if (reinterpret_cast<INT_PTR>(result) <= 32) {
+        SetStatus(L"Could not open " + src.storeName + L". Make sure the client is installed.");
+        return;
+    }
+    SetStatus(L"Passed install request to " + src.storeName + L".");
+}
+
+void OpenSourceStorePage(HWND hwnd, const StorefrontSource& src) {
+    if (src.storePageUrl.empty()) {
+        SetStatus(L"This storefront does not publish a store page for that title.");
+        return;
+    }
+    const HINSTANCE result = ShellExecuteW(hwnd, L"open", src.storePageUrl.c_str(), nullptr,
+                                           nullptr, SW_SHOWNORMAL);
+    if (reinterpret_cast<INT_PTR>(result) <= 32) {
+        SetStatus(L"Could not open the store page in the default browser.");
+    }
+}
+
 void OpenStorePage(HWND hwnd) {
     if (g_selected < 0 || g_selected >= static_cast<int>(g_page.items.size())) return;
     const OwnedGame& game = g_page.items[static_cast<size_t>(g_selected)];
 
-    std::wstring url = game.storePageUrl;
     if (game.sources.size() > 1) {
         HMENU hMenu = CreatePopupMenu();
         for (size_t i = 0; i < game.sources.size(); ++i) {
@@ -683,20 +727,17 @@ void OpenStorePage(HWND hwnd) {
         DestroyMenu(hMenu);
 
         if (cmd >= 2000 && cmd < 2000 + game.sources.size()) {
-            url = game.sources[cmd - 2000].storePageUrl;
-        } else {
-            return;
+            OpenSourceStorePage(hwnd, game.sources[cmd - 2000]);
         }
-    }
-
-    if (url.empty()) {
-        SetStatus(L"This storefront does not publish a store page for that title.");
         return;
     }
-    const HINSTANCE result = ShellExecuteW(hwnd, L"open", url.c_str(), nullptr,
-                                           nullptr, SW_SHOWNORMAL);
-    if (reinterpret_cast<INT_PTR>(result) <= 32) {
-        SetStatus(L"Could not open the store page in the default browser.");
+
+    if (!game.sources.empty()) {
+        OpenSourceStorePage(hwnd, game.sources[0]);
+    } else if (!game.storePageUrl.empty()) {
+        ShellExecuteW(hwnd, L"open", game.storePageUrl.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+    } else {
+        SetStatus(L"This storefront does not publish a store page for that title.");
     }
 }
 
@@ -704,7 +745,6 @@ void BeginInstall(HWND hwnd) {
     if (g_selected < 0 || g_selected >= static_cast<int>(g_page.items.size())) return;
     const OwnedGame& game = g_page.items[static_cast<size_t>(g_selected)];
 
-    const StorefrontSource* chosenSource = nullptr;
     if (game.sources.size() > 1) {
         HMENU hMenu = CreatePopupMenu();
         for (size_t i = 0; i < game.sources.size(); ++i) {
@@ -722,35 +762,16 @@ void BeginInstall(HWND hwnd) {
         DestroyMenu(hMenu);
 
         if (cmd >= 1000 && cmd < 1000 + game.sources.size()) {
-            chosenSource = &game.sources[cmd - 1000];
-        } else {
-            return;
+            InstallSource(hwnd, game.sources[cmd - 1000]);
         }
-    } else if (!game.sources.empty()) {
-        chosenSource = &game.sources[0];
-    }
-
-    if (chosenSource != nullptr && chosenSource->installed) {
-        SetStatus(chosenSource->storeName + L" edition is already installed. Play it from the Games view in File Explorer.");
         return;
     }
 
-    const std::wstring installUri = chosenSource != nullptr ? chosenSource->installUri : game.installUri;
-    const std::wstring storeName = chosenSource != nullptr ? chosenSource->storeName : game.storeName;
-
-    if (installUri.empty()) {
+    if (!game.sources.empty()) {
+        InstallSource(hwnd, game.sources[0]);
+    } else {
         SetStatus(L"This storefront has no direct install protocol. Open its store page instead.");
-        return;
     }
-
-    const HINSTANCE result = ShellExecuteW(hwnd, L"open", installUri.c_str(), nullptr,
-                                           nullptr, SW_SHOWNORMAL);
-    if (reinterpret_cast<INT_PTR>(result) <= 32) {
-        SetStatus(L"Could not open " + storeName + L". Make sure the client is installed.");
-        return;
-    }
-
-    SetStatus(L"Passed install request to " + storeName + L".");
 }
 
 void ApplyThemeToControls() {
@@ -767,6 +788,7 @@ void ApplyThemeToControls() {
         }
     }
     if (g_hwndList != nullptr) InvalidateRect(g_hwndList, nullptr, TRUE);
+    if (g_hwndDetails != nullptr) InvalidateRect(g_hwndDetails, nullptr, TRUE);
 }
 
 void DrawCatalogueButton(const DRAWITEMSTRUCT& item) {
@@ -923,6 +945,173 @@ void PaintCatalogue(HWND hwnd) {
     EndPaint(hwnd, &ps);
 }
 
+void PaintDetails(HWND hwnd) {
+    PAINTSTRUCT ps{};
+    HDC hdc = BeginPaint(hwnd, &ps);
+    if (hdc == nullptr) return;
+
+    RECT client{};
+    GetClientRect(hwnd, &client);
+    const int width = client.right - client.left;
+    const int height = client.bottom - client.top;
+    if (width <= 0 || height <= 0) {
+        EndPaint(hwnd, &ps);
+        return;
+    }
+
+    HDC memDC = CreateCompatibleDC(hdc);
+    HBITMAP memBmp = CreateCompatibleBitmap(hdc, width, height);
+    HGDIOBJ oldBmp = SelectObject(memDC, memBmp);
+
+    FillRect(memDC, &client, g_hCardBrush);
+    SetBkMode(memDC, TRANSPARENT);
+
+    g_detailButtons.clear();
+
+    const bool hasSelection = (g_selected >= 0 && g_selected < static_cast<int>(g_page.items.size()));
+    if (!hasSelection) {
+        SelectObject(memDC, g_hFont);
+        RECT promptRect{ client.left + 20, client.top + 50, client.right - 20, client.bottom - 50 };
+        SetTextColor(memDC, g_palette.textSecondary);
+        DrawTextW(memDC, Strings::kDetailsEmptyPrompt, -1, &promptRect,
+                  DT_CENTER | DT_WORDBREAK | DT_NOPREFIX);
+    } else {
+        const auto& game = g_page.items[static_cast<size_t>(g_selected)];
+
+        int y = client.top + 14;
+        SelectObject(memDC, g_hFontTitle);
+        const RECT titleRect{ client.left + 14, y, client.right - 14, y + 26 };
+        DrawTextLine(memDC, game.title, titleRect, g_palette.textPrimary);
+        y += 30;
+
+        SelectObject(memDC, g_hFont);
+        if (game.releaseYear > 0) {
+            const std::wstring rel = std::wstring(Strings::kDetailsReleaseDate) + L" " + std::to_wstring(game.releaseYear);
+            DrawTextLine(memDC, rel, { client.left + 14, y, client.right - 14, y + 20 }, g_palette.textSecondary);
+            y += 20;
+        }
+
+        if (game.playtimeMinutes > 0) {
+            const std::wstring pt = std::wstring(Strings::kDetailsPlaytime) + L" " +
+                std::to_wstring(game.playtimeMinutes / 60) + L"h " + std::to_wstring(game.playtimeMinutes % 60) + L"m";
+            DrawTextLine(memDC, pt, { client.left + 14, y, client.right - 14, y + 20 }, g_palette.textSecondary);
+            y += 20;
+        }
+
+        y += 8;
+        SelectObject(memDC, g_hFontBold);
+        const std::wstring secTitle = std::wstring(Strings::kDetailsOwnedEditions) +
+            L" (" + std::to_wstring(game.sources.size()) + L")";
+        DrawTextLine(memDC, secTitle, { client.left + 14, y, client.right - 14, y + 22 }, g_palette.textPrimary);
+        y += 24;
+
+        if (game.sources.size() > 1) {
+            SelectObject(memDC, g_hFont);
+            RECT noticeRect{ client.left + 14, y, client.right - 14, y + 36 };
+            SetTextColor(memDC, g_palette.textSecondary);
+            DrawTextW(memDC, Strings::kDetailsMultiEditionNotice, -1, &noticeRect, DT_LEFT | DT_WORDBREAK | DT_NOPREFIX);
+            y += 38;
+        }
+
+        for (size_t i = 0; i < game.sources.size(); ++i) {
+            const auto& src = game.sources[i];
+            const int cardTop = y;
+            const int cardBottom = cardTop + 62;
+            if (cardBottom > client.bottom - 8) break;
+
+            const RECT cardRect{ client.left + 14, cardTop, client.right - 14, cardBottom };
+            FillRect(memDC, &cardRect, g_hFieldBrush);
+
+            SelectObject(memDC, g_hFontBold);
+            std::wstring storeLabel = src.storeName;
+            if (!src.editionLabel.empty()) {
+                storeLabel += L" \u2013 " + src.editionLabel;
+            }
+            DrawTextLine(memDC, storeLabel, { cardRect.left + 10, cardTop + 5, cardRect.right - 80, cardTop + 22 },
+                         g_palette.textPrimary);
+
+            SelectObject(memDC, g_hFont);
+            const std::wstring statusStr = src.installed ? Strings::kDetailsStateInstalled : Strings::kDetailsStateAvailable;
+            const COLORREF statusColor = src.installed ? g_palette.accent : g_palette.textSecondary;
+            DrawTextLine(memDC, statusStr, { cardRect.right - 120, cardTop + 5, cardRect.right - 10, cardTop + 22 },
+                         statusColor, DT_RIGHT);
+
+            const int btnY = cardTop + 28;
+            const RECT installRect{ cardRect.left + 10, btnY, cardRect.left + 130, btnY + 26 };
+            const RECT storeRect{ cardRect.left + 138, btnY, cardRect.left + 228, btnY + 26 };
+
+            g_detailButtons.push_back({ installRect, i, false });
+            g_detailButtons.push_back({ storeRect, i, true });
+
+            HBRUSH btnBrush = CreateSolidBrush(src.installed ? g_palette.cardBg : g_palette.accent);
+            FillRect(memDC, &installRect, btnBrush);
+            DeleteObject(btnBrush);
+
+            HBRUSH storeBrush = CreateSolidBrush(g_palette.cardBg);
+            FillRect(memDC, &storeRect, storeBrush);
+            DeleteObject(storeBrush);
+
+            const std::wstring installLabel = src.installed ? L"Play" : (std::wstring(Strings::kDetailsInstallFrom) + src.storeName);
+            DrawTextLine(memDC, installLabel, installRect, src.installed ? g_palette.textPrimary : g_palette.accentText, DT_CENTER);
+            DrawTextLine(memDC, Strings::kDetailsOpenStore, storeRect, g_palette.textSecondary, DT_CENTER);
+
+            y = cardBottom + 8;
+        }
+    }
+
+    BitBlt(hdc, 0, 0, width, height, memDC, 0, 0, SRCCOPY);
+    SelectObject(memDC, oldBmp);
+    DeleteObject(memBmp);
+    DeleteDC(memDC);
+    EndPaint(hwnd, &ps);
+}
+
+LRESULT CALLBACK CatalogueDetailsProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
+    switch (uMsg) {
+    case WM_PAINT:
+        PaintDetails(hwnd);
+        return 0;
+
+    case WM_LBUTTONUP: {
+        POINT pt{ GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam) };
+        if (g_selected >= 0 && g_selected < static_cast<int>(g_page.items.size())) {
+            const auto& game = g_page.items[static_cast<size_t>(g_selected)];
+            for (const auto& btn : g_detailButtons) {
+                if (PtInRect(&btn.rect, pt)) {
+                    if (btn.sourceIndex < game.sources.size()) {
+                        const auto& src = game.sources[btn.sourceIndex];
+                        if (btn.isStorePage) {
+                            OpenSourceStorePage(GetParent(hwnd), src);
+                        } else {
+                            InstallSource(GetParent(hwnd), src);
+                        }
+                    }
+                    return 0;
+                }
+            }
+        }
+        return 0;
+    }
+
+    case WM_SETCURSOR: {
+        POINT pt{};
+        GetCursorPos(&pt);
+        ScreenToClient(hwnd, &pt);
+        for (const auto& btn : g_detailButtons) {
+            if (PtInRect(&btn.rect, pt)) {
+                SetCursor(LoadCursorW(nullptr, IDC_HAND));
+                return TRUE;
+            }
+        }
+        break;
+    }
+
+    case WM_ERASEBKGND:
+        return 1;
+    }
+    return DefWindowProcW(hwnd, uMsg, wParam, lParam);
+}
+
 void LayoutCatalogue(HWND hwnd) {
     RECT client{};
     GetClientRect(hwnd, &client);
@@ -990,14 +1179,33 @@ void LayoutCatalogue(HWND hwnd) {
     right -= 138;
     place(g_hwndOpenStore, right - 130, g_footerRect.top, 130, kButtonHeight);
 
-    // The list fills the card, inset by its one-pixel border.
-    RECT listRect{ g_listCardRect.left + 1, g_listCardRect.top + 1,
-                   g_listCardRect.right - 1, g_listCardRect.bottom - 1 };
-    place(g_hwndList, listRect.left, listRect.top, listRect.right - listRect.left,
-          listRect.bottom - listRect.top);
+    // The list and details pane fill the card area
+    constexpr int kDetailsWidth = 320;
+    const bool showDetails = (width >= 1080);
+
+    if (showDetails) {
+        RECT listRect{ g_listCardRect.left + 1, g_listCardRect.top + 1,
+                       g_listCardRect.right - kDetailsWidth - 10, g_listCardRect.bottom - 1 };
+        place(g_hwndList, listRect.left, listRect.top, listRect.right - listRect.left,
+              listRect.bottom - listRect.top);
+
+        RECT detailsRect{ g_listCardRect.right - kDetailsWidth, g_listCardRect.top + 1,
+                          g_listCardRect.right - 1, g_listCardRect.bottom - 1 };
+        g_detailsCardRect = detailsRect;
+        place(g_hwndDetails, detailsRect.left, detailsRect.top,
+              detailsRect.right - detailsRect.left, detailsRect.bottom - detailsRect.top);
+        if (g_hwndDetails != nullptr) ShowWindow(g_hwndDetails, SW_SHOW);
+    } else {
+        RECT listRect{ g_listCardRect.left + 1, g_listCardRect.top + 1,
+                       g_listCardRect.right - 1, g_listCardRect.bottom - 1 };
+        place(g_hwndList, listRect.left, listRect.top, listRect.right - listRect.left,
+              listRect.bottom - listRect.top);
+        if (g_hwndDetails != nullptr) ShowWindow(g_hwndDetails, SW_HIDE);
+    }
 
     ClampScroll();
     if (g_hwndList != nullptr) InvalidateRect(g_hwndList, nullptr, TRUE);
+    if (g_hwndDetails != nullptr) InvalidateRect(g_hwndDetails, nullptr, TRUE);
     InvalidateRect(hwnd, nullptr, FALSE);
 }
 
@@ -1094,6 +1302,7 @@ void SelectRow(int index) {
         g_selected = index;
     }
     if (g_hwndList != nullptr) InvalidateRect(g_hwndList, nullptr, TRUE);
+    if (g_hwndDetails != nullptr) InvalidateRect(g_hwndDetails, nullptr, TRUE);
     RefreshCommandStates();
 }
 
@@ -1295,6 +1504,9 @@ void CreateCatalogueControls(HWND hwnd) {
     g_hwndList = CreateWindowExW(0, CATALOGUE_LIST_CLASS, L"",
                                  WS_CHILD | WS_VISIBLE | WS_TABSTOP, 0, 0, 10, 10, hwnd,
                                  nullptr, GetModuleHandleW(nullptr), nullptr);
+    g_hwndDetails = CreateWindowExW(0, CATALOGUE_DETAILS_CLASS, L"",
+                                    WS_CHILD | WS_VISIBLE, 0, 0, 10, 10, hwnd,
+                                    nullptr, GetModuleHandleW(nullptr), nullptr);
 }
 
 void EnsurePageClasses(HINSTANCE instance) {
@@ -1309,6 +1521,15 @@ void EnsurePageClasses(HINSTANCE instance) {
     listClass.hCursor = LoadCursorW(nullptr, IDC_ARROW);
     listClass.lpszClassName = CATALOGUE_LIST_CLASS;
     RegisterClassExW(&listClass);
+
+    WNDCLASSEXW detailsClass{};
+    detailsClass.cbSize = sizeof(detailsClass);
+    detailsClass.style = CS_HREDRAW | CS_VREDRAW;
+    detailsClass.lpfnWndProc = CatalogueDetailsProc;
+    detailsClass.hInstance = instance;
+    detailsClass.hCursor = LoadCursorW(nullptr, IDC_ARROW);
+    detailsClass.lpszClassName = CATALOGUE_DETAILS_CLASS;
+    RegisterClassExW(&detailsClass);
 
     registered = true;
 }
@@ -1506,6 +1727,7 @@ LRESULT CALLBACK CataloguePageProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM l
 
     case WM_DESTROY:
         g_hwndList = nullptr;
+        g_hwndDetails = nullptr;
         g_hwndPage = nullptr;
         DestroyCatalogueResources();
         return 0;

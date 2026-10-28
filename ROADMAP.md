@@ -37,7 +37,7 @@
 | **M16** | Universal Multi-Source Achievement Tracking & Multi-Viewport Artwork Engine | Core, Shell & Config | ✅ Delivered | `v2.2.0` | Hybrid native storefront + external tracker integration (RetroAchievements, Steam Web API, GOG Galaxy), VNDB Kana API provider, itch storefront scraping, multi-viewport aspect ratio fitting, cache purge & rebuild engine, in-place scroll preservation, write-only OneDrive backup, config UI, and Inspector trophy rendering |
 | **M17** | Unified Tabbed GUI & Game Catalogue for All Owned Games | Unified companion GUI & Service | ✅ Released | `v2.5.0` | Unified companion app `GameExplorerStudio.exe` (Library Manager, Game Catalogue, Configuration), paged owned-games catalogue with search/filter/sort and delegated installs (Steam, GOG, itch, Xbox, Ubisoft Connect, Epic via optional legendary), Windows-installable gate, edition-aware multi-store deduplication, `GameExplorerService.exe` background service, single `game-explorer.bat` dispatcher, and Windows 10/11 platform bounds |
 | **M18** | Windows 10 vs 11 Shell Compatibility Research | Shell extension & Studio | ✅ Complete | TBD | Windows 10 version 1903 (build 18362) is the documented UWP XAML hosting API floor; Explorer retains each OS's native presentation; see `docs/research/windows-version-compatibility.md` |
-| **M19** | Shell Performance, Lifecycle & Universal Detection | Shell extension, service & scanner | 🚧 In progress | TBD | Measured optimization, project-owned Explorer watcher/loader, standalone navigation sidebar suppression, and universal provider-agnostic installed game detection; no Windhawk dependency |
+| **M19** | Shell Performance, Dynamic Resizing & Fluent Iconography | Shell extension, service & scanner | ✅ Released | `v2.6.0` | Standalone responsive dynamic window sizing, automatic navigation pane and status bar suppression, authentic Windows 11 Fluent 3D controller iconography, multi-drive discovery, and storefront-validated artwork |
 
 ---
 
@@ -58,10 +58,10 @@
 
 ### [windows-game-explorer] — Milestone M19: Shell Performance & Explorer Lifecycle
 
-> User-directed scope: optimize performance (`PERF-01`), build a project-owned Explorer watcher/loader informed by Windhawk
-> (`HOST-01`) without a Windhawk dependency, and suppress the left navigation sidebar when launched standalone via `shell:games`
-> or shortcuts (`NAV-01`) to maximize installed games grid canvas space. Windhawk also injects DLLs; watcher-managed lifecycle
-> loading is the architectural change being requested. Preserve COM namespace activation, native
+> User-directed scope: optimize performance (`PERF-01`), build an independent project-owned Explorer watcher/loader
+> (`HOST-01`) with zero external dependencies, and suppress the left navigation sidebar when launched standalone via `shell:games`
+> or shortcuts (`NAV-01`) to maximize installed games grid canvas space. Watcher-managed lifecycle
+> loading is the architectural focus. Preserve COM namespace activation, native
 > Explorer presentation, multi-user isolation, and reversible installation.
 > The active workstreams remain tracked in [`TODO.md`](./TODO.md)
 > and Sprint 39 in [`PLAN.md`](./PLAN.md); blockers must not be reported as completed features.

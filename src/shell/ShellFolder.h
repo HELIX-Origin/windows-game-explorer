@@ -19,7 +19,7 @@ struct GamePidlData {
 };
 #pragma pack(pop)
 
-class ShellFolder final : public IShellFolder2, public IPersistFolder2, public IExtractIconW {
+class ShellFolder final : public IShellFolder2, public IPersistFolder2, public IExtractIconW, public IExplorerPaneVisibility {
 public:
     ShellFolder();
     ~ShellFolder();
@@ -63,6 +63,9 @@ public:
     IFACEMETHODIMP GetDetailsOf(PCUITEMID_CHILD pidl, UINT iColumn, SHELLDETAILS* psd) override;
     IFACEMETHODIMP MapColumnToSCID(UINT iColumn, SHCOLUMNID* pscid) override;
 
+    // IExplorerPaneVisibility
+    IFACEMETHODIMP GetPaneState(REFEXPLORERPANE ep, EXPLORERPANESTATE* peps) override;
+
     // Static PIDL helpers
     [[nodiscard]] static PITEMID_CHILD CreateGamePidl(const GameItem& item);
     [[nodiscard]] static PITEMID_CHILD CreateProviderPidl(PlatformType platform, const std::wstring& title);
@@ -72,6 +75,7 @@ public:
 private:
     std::atomic<ULONG> m_refCount{ 1 };
     PIDLIST_ABSOLUTE m_pidlRoot{ nullptr };
+    HWND m_hwndOwner{ nullptr };
 };
 
 } // namespace GameExplorer

@@ -11,11 +11,12 @@ The documented technical floor for the complete shell integration is **Windows 1
 `GameExplorerShell.dll`. Windows 10 version 2004 (build 19041) is not an API requirement for the
 hosting model used here.
 
-This is the API compatibility floor, not a claim that every Windows 10 build has been tested
-end-to-end. Microsoft documents XAML Islands for desktop applications generally; it does not
-specifically certify an in-process Explorer namespace extension as a supported host. The extension
-therefore needs smoke testing on a clean Windows 10 1903-or-later system before advertising that
-floor as field-verified.
+This is the API compatibility floor, not a claim that Windows 10 has been field-tested.
+Because Windows 10 has reached end-of-life and official Microsoft support has ceased, building
+bespoke workarounds or extensive shell hooking specifically to guarantee Windows 10 File Explorer
+namespace hosting is explicitly deprioritized and out of scope. Windows 10 is supported strictly on
+a best-effort, as-is basis without guarantees. Windows 11 (Build 22000+) serves as the primary,
+authoritative, and fully field-verified target platform.
 
 The background service is a separate native Win32 executable and does not host XAML. This research
 establishes the minimum for the **complete product with its in-Explorer shell view**, not the

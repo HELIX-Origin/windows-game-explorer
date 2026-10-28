@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.20)
 
 project(WindowsGameExplorer
-    VERSION 2.5.0
+    VERSION 2.6.0
     DESCRIPTION "Native Windows Game Explorer and Shell Extension"
     LANGUAGES C CXX RC
 )
@@ -51,6 +51,8 @@ add_library(GameExplorerCore STATIC
     src/core/ThemeScroll.cpp
     src/core/ThemeFieldScroll.cpp
     src/core/ThemeControls.cpp
+    src/core/UpdateChecker.cpp
+    src/core/LocalizationEngine.cpp
 )
 target_include_directories(GameExplorerCore PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include
@@ -68,6 +70,7 @@ target_link_libraries(GameExplorerCore PUBLIC
     Urlmon
     Winhttp
     Version
+    windowscodecs
 )
 
 # Shell Extension DLL
@@ -160,7 +163,10 @@ add_executable(GameExplorerWatcher WIN32
     src/shell/Resource.rc
 )
 target_link_libraries(GameExplorerWatcher PRIVATE GameExplorerLoader Shell32 User32)
-target_include_directories(GameExplorerWatcher PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src/shell)
+target_include_directories(GameExplorerWatcher PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/shell
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
 
 # ==============================================================================
 # Visual styles

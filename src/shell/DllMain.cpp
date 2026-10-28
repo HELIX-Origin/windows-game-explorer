@@ -3,6 +3,7 @@
 #include "ClassFactory.h"
 #include "Registration.h"
 #include "GameExplorerCore/Guid.h"
+#include "GameExplorerCore/LocalizationEngine.h"
 
 std::atomic<ULONG> g_dllRefCount{ 0 };
 HINSTANCE g_hInstance = nullptr;
@@ -10,6 +11,7 @@ HINSTANCE g_hInstance = nullptr;
 BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID /*lpvReserved*/) {
     if (fdwReason == DLL_PROCESS_ATTACH) {
         g_hInstance = hinstDLL;
+        GameExplorer::LocalizationEngine::SetInstance(hinstDLL);
         DisableThreadLibraryCalls(hinstDLL);
     }
     return TRUE;
