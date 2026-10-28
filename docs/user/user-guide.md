@@ -43,6 +43,10 @@ Game Explorer Studio (`GameExplorerStudio.exe`) is the single companion GUI: one
 
 The **Library Manager** page of Game Explorer Studio is dedicated to fine-grained library curation, metadata editing, and artwork discovery.
 
+<img src="../../assets/preview-studio-library.png" alt="Game Explorer Studio — Library Manager Page" width="100%" />
+
+<br />
+
 ```
 +---------------------------------------------------------------------------------------------------------+
 | Game Explorer Studio — Library Manager                                                     [-] [o] [x]|
@@ -156,6 +160,10 @@ If you ever encounter corrupt image files or want to force a clean redownload of
 ## 2. Game Catalogue Page (`GameExplorerStudio.exe`)
 
 The **Game Catalogue** page browses every game you own on a supported storefront, whether or not it is currently installed. The list carries the facts; the details pane on the right carries the rich metadata, the owned editions, and one **Store page** action per edition, while the header, toolbar, and footer carry the global actions.
+
+<img src="../../assets/preview-studio-catalogue.png" alt="Game Explorer Studio — Game Catalogue Page" width="100%" />
+
+<br />
 
 ```
 +-----------------------------------------------------------------------------------+

@@ -247,6 +247,8 @@ never an exception path. `Notifications_ParsersTolerateTruncatedPayloads` enforc
 
 ## 6. UI implementation
 
+<img src="../../assets/preview-studio-catalogue.png" alt="Game Explorer Studio Game Catalogue Implementation" width="100%" />
+
 ### Details pane
 
 The details pane is built inside `src/studio/CataloguePage.cpp` as a scrolling column:

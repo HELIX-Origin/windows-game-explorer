@@ -60,6 +60,10 @@ When you open Windows Game Explorer for the first time, your library is automati
 
 ## 🎮 Navigating the Interface
 
+<img src="../../assets/preview-details.png" alt="Windows Game Explorer File Explorer View with Inspector Details Sidepane" width="100%" />
+
+<br />
+
 ```
 +-----------------------------------------------------------------------------------+
 |  File Explorer — Games                                                 [-] [o] [x]|

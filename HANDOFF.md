@@ -57,6 +57,20 @@
      - Handled `WM_ERASEBKGND` to suppress class background flicker and cleared `wc.hbrBackground`.
      - Organized cards into a responsive 2-column layout when width >= 1000px (Cards 0, 1, 2, 6 on the left; Cards 3, 4, 5 on the right) with independent bounds and padding, while retaining the single-column fallback on narrow displays with the scrolling engine rock-solid in both.
 
+10. **Documentation Preview Assets & Integration**:
+    - Placed all user-provided preview screenshots into `assets/`:
+      - `preview-details.png`: File Explorer Games view with Inspector Details sidepane active (box art, metadata, Play button, and achievements).
+      - `preview-notifications.png`: File Explorer Games view with in-view notification bell flyout active (50 alerts, giveaway cards, store news, mark all read, and Studio alert management link).
+      - `preview-studio-library.png`: Game Explorer Studio Library Manager page (installed/custom games list, game properties and launch setup, live 2:3 vertical box art, and SteamGridDB artwork discovery gallery).
+      - `preview-studio-catalogue.png`: Game Explorer Studio Game Catalogue page (owned games list across storefronts, multi-source filters, pagination, and owned editions details pane).
+    - Integrated preview images into documentation:
+      - `docs/user/quick-start.md`: Embedded `preview-details.png` under Navigating the Interface.
+      - `docs/user/user-guide.md`: Embedded `preview-studio-library.png` under Library Manager Page and `preview-studio-catalogue.png` under Game Catalogue Page.
+      - `docs/user/notifications.md`: Embedded `preview-notifications.png` under The notification bell.
+      - `docs/overview.md`: Embedded `preview-details.png` and `preview-studio-catalogue.png` under Two-Section Experience and Owned-Games Catalogue.
+      - `docs/developer/catalogue-internals.md`: Embedded `preview-studio-catalogue.png` under UI implementation.
+      - `assets/README.md`: Documented all preview image assets.
+
 ---
 
 ## 2. Detailed Technical Audit of Broken Code

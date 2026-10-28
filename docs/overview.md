@@ -95,6 +95,8 @@ In File Explorer, the namespace is organized into two distinct, collapsible sect
 - **▾ Installed Providers**: A clean grid of installed client platforms (Steam, Epic Games, GOG, Ubisoft, EA App, Battle.net, etc.) with quick actions to launch storefronts or view status.
 - **▾ Games Library**: The full unified library of games across all platforms, sortable and filterable.
 
+<img src="../assets/preview-details.png" alt="Windows Game Explorer Library and Inspector Details View" width="100%" />
+
 ---
 
 ## 🕹️ Supported Platforms & Storefronts
@@ -116,6 +118,8 @@ In File Explorer, the namespace is organized into two distinct, collapsible sect
 ### Owned-Games Catalogue
 
 Alongside the installed library, Game Explorer Studio hosts a **Game Catalogue** page that lists every game the user owns on a supported storefront, installed or not, in one filterable and paged list. Rows are assembled from the Steam Web API or local Steam client, Epic manifests and an optional read-only legendary cache, and read-only client databases for GOG Galaxy, itch.io, Xbox, and Ubisoft Connect, plus the installed-store scanners. A centralized Windows-installable gate removes titles that cannot run on Windows, and multi-store or multi-edition ownership collapses into a single row with the edition kept in the source label.
+
+<img src="../assets/preview-studio-catalogue.png" alt="Game Explorer Studio Owned-Games Catalogue" width="100%" />
 
 Selecting a row fills a details pane with the title's identity, play facts, synopsis and one card per owned edition. Each edition card reports its install state, its installed build when the storefront exposes one, an update verdict, and a single **Store page** action. The page remains a catalogue: it never launches a game and never manages install folders. The **Install** action hands the request to the storefront's own client, while playing stays in the File Explorer Games view.
 

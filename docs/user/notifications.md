@@ -77,9 +77,11 @@ next pass rewrites it.
 
 ## 🔔 The notification bell
 
-The bell sits in the Game Catalogue header, left of **Refresh Catalogue**. A badge shows the unread
-count, capped at `9+`. Clicking it opens a panel above the list; the bell glyph turns accent-coloured
-while the panel is open.
+The bell sits in the File Explorer Games command bar and in the Game Catalogue header (left of **Refresh Catalogue**). A badge shows the unread count, capped at `9+`. Clicking it opens an in-view alert flyout panel; the bell glyph turns accent-coloured while the panel is open.
+
+<img src="../../assets/preview-notifications.png" alt="File Explorer In-View Notification Bell Flyout" width="100%" />
+
+<br />
 
 ### What the panel contains
 
