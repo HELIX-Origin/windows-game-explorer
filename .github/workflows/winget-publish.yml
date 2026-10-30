@@ -16,6 +16,8 @@ jobs:
   publish-winget:
     name: Submit to Windows Package Manager
     runs-on: windows-latest
+    env:
+      PAT_TOKEN: ${{ secrets.PAT_TOKEN }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -25,68 +27,57 @@ jobs:
         shell: pwsh
         run: |
           if ("${{ github.event_name }}" -eq "release") {
-            $ver = "${{ github.event.release.tag_name }}" -replace '^v', ''
+            $ver = "${{ github.event.release.tag_name }}".TrimStart('v')
           } else {
-            $ver = "${{ github.event.inputs.version }}"
+            $ver = "${{ inputs.version }}".Trim()
           }
-          Write-Output "version=$ver" >> $env:GITHUB_OUTPUT
+          "version=$ver" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
           Write-Host "Publishing version $ver to Winget"
 
-      - name: Submit to Winget
+      - name: Install wingetcreate
+        shell: pwsh
+        run: |
+          $wc = Get-Command wingetcreate -ErrorAction SilentlyContinue
+          if (-not $wc) {
+            Invoke-WebRequest -Uri "https://github.com/microsoft/winget-create/releases/latest/download/wingetcreate.exe" -OutFile "$env:RUNNER_TEMP\wingetcreate.exe"
+            "$env:RUNNER_TEMP" | Out-File -FilePath $env:GITHUB_PATH -Append
+          }
+
+      - name: Submit or update Winget manifest
         shell: pwsh
         env:
-          PAT_TOKEN: ${{ secrets.PAT_TOKEN }}
+          GH_TOKEN: ${{ secrets.PAT_TOKEN }}
         run: |
-          if ([string]::IsNullOrEmpty($env:PAT_TOKEN)) {
-            Write-Host "PAT_TOKEN not set, skipping winget submission."
+          if ([string]::IsNullOrWhiteSpace($env:PAT_TOKEN)) {
+            Write-Host "PAT_TOKEN not set; skipping."
             exit 0
           }
-
           $version = "${{ steps.version.outputs.version }}"
-          $wc = (Get-Command wingetcreate -ErrorAction SilentlyContinue)
-          if (-not $wc) {
-            Invoke-WebRequest -Uri "https://github.com/microsoft/winget-create/releases/latest/download/wingetcreate.exe" -OutFile "wingetcreate.exe"
-            $wc = ".\wingetcreate.exe"
-          }
-
-          $existingPr = gh pr list --repo microsoft/winget-pkgs --search "HELIX-Origin.WindowsGameExplorer v$version" --state open --json number --jq '.[0].number' 2>$null
-          $prNumber = $null
-          if ($existingPr) {
-            Write-Host "Existing PR found: #$existingPr. Using it."
-            $prNumber = $existingPr
-          } else {
-            $prUrl = & $wc submit --token $env:PAT_TOKEN --prtitle "New version: HELIX-Origin.WindowsGameExplorer v$version" winget/manifests/h/HELIX-Origin/WindowsGameExplorer/$version
+          $wcCmd = (Get-Command wingetcreate -ErrorAction SilentlyContinue)
+          if (-not $wcCmd) { $wcCmd = "$env:RUNNER_TEMP\wingetcreate.exe" }
+          $search = "HELIX-Origin.WindowsGameExplorer v$version"
+          $existingPr = gh pr list --repo microsoft/winget-pkgs --search $search --state open --json number --jq '.[0].number' 2>$null
+          $prNumber = $existingPr
+          if (-not $prNumber) {
+            $prUrl = & $wcCmd submit --token $env:PAT_TOKEN --prtitle "New version: HELIX-Origin.WindowsGameExplorer v$version" "winget/manifests/h/HELIX-Origin/WindowsGameExplorer/$version"
             if ($prUrl) {
-              $prNumber = ($prUrl -split '/')[-1]
+              $parts = $prUrl -split '/'
+              $prNumber = $parts[-1]
             }
           }
-
           if (-not $prNumber) {
-            Write-Host "No PR number available."
+            Write-Host "No PR found/created."
             exit 0
           }
-
-          $botComment = $null
+          Write-Host "PR: #$prNumber"
           try {
-            $comments = gh api "repos/microsoft/winget-pkgs/issues/$prNumber/comments" 2>$null | ConvertFrom-Json
-            $botComment = $comments | Where-Object { $_.user.login -eq "microsoft-github-policy-service[bot]" -and $_.body -match "Contributor License Agreement" } | Select-Object -First 1
-          } catch {}
-
-          $ourComments = $null
-          try {
-            $comments = gh api "repos/microsoft/winget-pkgs/issues/$prNumber/comments" 2>$null | ConvertFrom-Json
-            $ourComments = $comments | Where-Object { $_.user.login -eq "PhantomNimbi" -and $_.body -eq "I agree" } | Select-Object -First 1
-          } catch {}
-
-          if ($botComment -and -not $ourComments) {
-            $botCommentId = $botComment.id
-            gh api "repos/microsoft/winget-pkgs/issues/$prNumber/comments" -f body="I agree" -f "in_reply_to=$botCommentId" 2>&1 | Out-Null
-            Write-Host "CLA accepted (replied to bot comment)."
-          } elseif ($ourComments) {
-            Write-Host "CLA already accepted, skipping."
-          } else {
-            Write-Host "No CLA bot comment found, skipping."
+            $comments = gh api "repos/microsoft/winget-pkgs/issues/$prNumber/comments" | ConvertFrom-Json
+            $bot = $comments | Where-Object { $_.user.login -eq 'microsoft-github-policy-service[bot]' -and $_.body -match 'Contributor License Agreement' } | Select-Object -First 1
+            $mine = $comments | Where-Object { $_.user.login -eq 'PhantomNimbi' -and $_.body -eq 'I agree' } | Select-Object -First 1
+            if ($bot -and -not $mine) {
+              gh api "repos/microsoft/winget-pkgs/issues/$prNumber/comments" -f body='I agree' -f "in_reply_to=$($bot.id)" | Out-Null
+              Write-Host "CLA replied."
+            }
+          } catch {
+            Write-Host $_.Exception.Message
           }
-          Write-Host "Winget PR ready: #$prNumber"
-        env:
-          GITHUB_TOKEN: ${{ secrets.PAT_TOKEN }}
