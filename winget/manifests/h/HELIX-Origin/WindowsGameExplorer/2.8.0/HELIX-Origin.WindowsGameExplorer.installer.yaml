@@ -1,4 +1,4 @@
-# yaml-language-server: $schema=https://aka.ms/winget-manifest.installer.1.6.0.schema.json
+# yaml-language-server: $schema=https://aka.ms/winget-manifest.installer.1.12.0.schema.json
 
 PackageIdentifier: HELIX-Origin.WindowsGameExplorer
 PackageVersion: 2.8.0
@@ -25,4 +25,4 @@ Installers:
     InstallerSha256: 3702B07B3A80D93186D6B2AA251512FE0F701D9DB0A72E2B809BA7A632E9EB82
     ProductCode: WindowsGameExplorer
 ManifestType: installer
-ManifestVersion: 1.6.0
+ManifestVersion: 1.12.0
