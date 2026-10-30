@@ -148,6 +148,11 @@ jobs:
             Invoke-WebRequest -Uri "https://github.com/microsoft/winget-create/releases/latest/download/wingetcreate.exe" -OutFile "wingetcreate.exe"
             $wc = ".\wingetcreate.exe"
           }
-          & $wc submit --token $env:PAT_TOKEN --prtitle "New version: HELIX-Origin.WindowsGameExplorer v${{ steps.version.outputs.version }}" winget/manifests/h/HELIX-Origin/WindowsGameExplorer/${{ steps.version.outputs.version }}
-          Write-Host "Winget PR submitted. Add '/verify' comment to the PR to trigger verification."
+          $prUrl = & $wc submit --token $env:PAT_TOKEN --prtitle "New version: HELIX-Origin.WindowsGameExplorer v${{ steps.version.outputs.version }}" winget/manifests/h/HELIX-Origin/WindowsGameExplorer/${{ steps.version.outputs.version }}
+          $prNumber = ($prUrl -split '/')[-1]
+          # Accept CLA (exact phrase required by Microsoft bot)
+          gh pr comment $prNumber --repo microsoft/winget-pkgs --body "I agree"
+          # Trigger verification
+          gh pr comment $prNumber --repo microsoft/winget-pkgs --body "/verify"
+          Write-Host "Winget PR submitted. CLA accepted and verification triggered."
         continue-on-error: true
