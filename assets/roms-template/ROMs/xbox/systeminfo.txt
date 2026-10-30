@@ -10,6 +10,9 @@ Supported file extensions:
 Launch command:
 %EMULATOR_RETROARCH% %EXTRA_CONFIGFILE%=%EXTERNALDATA%/Android/data/%ANDROIDPACKAGE%/files/retroarch.cfg %EXTRA_LIBRETRO%=%INTERNALDATA%/%ANDROIDPACKAGE%/cores/xemu_libretro_android.so %EXTRA_ROM%=%ROM%
 
+Alternative launch command:
+%EMULATOR_XEMU% %DATA%=%ROMSAF%
+
 Platform (for scraping):
 xbox
 
