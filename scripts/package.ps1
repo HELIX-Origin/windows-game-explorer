@@ -43,7 +43,9 @@ function Find-MakeNSIS {
         "$env:LOCALAPPDATA\tauri\NSIS\makensis.exe",
         "$env:LOCALAPPDATA\tauri\NSIS\Bin\makensis.exe",
         "${env:ProgramFiles(x86)}\NSIS\makensis.exe",
-        "$env:ProgramFiles\NSIS\makensis.exe"
+        "$env:ProgramFiles\NSIS\makensis.exe",
+        "C:\ProgramData\chocolatey\bin\makensis.exe",
+        "C:\Program Files\NSIS\makensis.exe"
     )
 
     foreach ($path in $candidates) {
