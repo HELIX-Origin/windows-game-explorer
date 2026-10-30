@@ -32,6 +32,15 @@ regsvr32 /u /s build\Release\GameExplorerShell.dll
 
 ---
 
+## 2.5. Build/Test Discipline (Credit Conservation)
+
+- **Do NOT run builds or tests for changes that do not affect compiled code.** Documentation edits, README updates, asset renames, TODO/ROADMAP notes, and workflow YAML changes do not require a rebuild.
+- Only run `build` / `test` / `lint` when C++ source, headers, CMakeLists, or PowerShell scripts are modified.
+- When in doubt, ask the user before running a full build/test cycle.
+- Plugin type-check (`tsc`) only when `.opencode/plugins/` or `.opencode/types/` files change.
+
+---
+
 ## 3. Failure Modes & Remediation
 
 | Check | Failure Cause | Remediation |
