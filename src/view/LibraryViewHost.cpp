@@ -2031,6 +2031,136 @@ void LibraryViewHost::BuildXamlViewport() {
             emptyCard.Child(emptyStack);
 
             mainStack.Children().Append(emptyCard);
+        } else if (m_layoutMode == LayoutMode::Tiles) {
+            // Windows 11 Tiles view: wide horizontal tiles, icon on the left,
+            // title and details on the right, arranged as a vertical list.
+            const double tileW = 300.0;
+            const double tileH = 72.0;
+
+            wuxc::VariableSizedWrapGrid listStack;
+            listStack.Orientation(wuxc::Orientation::Horizontal);
+            listStack.ItemWidth(tileW + 12.0);
+            listStack.ItemHeight(tileH + 12.0);
+
+            for (size_t i = 0; i < m_games.size(); ++i) {
+                const auto& g = m_games[i];
+                const bool isSel = (m_selectedGameIndex == static_cast<int>(i));
+
+                wuxc::Border rowCard;
+                rowCard.Width(tileW);
+                rowCard.Height(tileH);
+                rowCard.CornerRadius(wux::CornerRadiusHelper::FromUniformRadius(8));
+                rowCard.Background(isSel ? bgCardSel : bgCard);
+                rowCard.BorderBrush(isSel ? accentBrush : borderBrush);
+                rowCard.BorderThickness(wux::ThicknessHelper::FromUniformLength(isSel ? 2 : 1));
+                rowCard.Padding(wux::ThicknessHelper::FromLengths(12, 8, 12, 8));
+
+                wuxc::Grid rowGrid;
+                wuxc::ColumnDefinition cIcon; cIcon.Width(wux::GridLengthHelper::FromPixels(64));
+                wuxc::ColumnDefinition cText; cText.Width(wux::GridLengthHelper::FromValueAndType(1.0, wux::GridUnitType::Star));
+                rowGrid.ColumnDefinitions().Append(cIcon);
+                rowGrid.ColumnDefinitions().Append(cText);
+
+                // Icon on the left
+                std::wstring tileArt;
+                if (ImageValidator::IsValidIcon(g.iconPath)) {
+                    tileArt = g.iconPath;
+                } else if (!g.iconPath.empty()) {
+                    tileArt = g.iconPath;
+                } else if (!g.coverArtPath.empty()) {
+                    tileArt = g.coverArtPath;
+                }
+                if (tileArt.empty() && !g.executablePath.empty()) {
+                    tileArt = EnsureExtractedIconPng(g.appId, g.executablePath);
+                }
+                if (auto bmp = LoadLocalBitmap(tileArt)) {
+                    wuxc::Border artHost;
+                    artHost.Width(64);
+                    artHost.Height(64);
+                    artHost.CornerRadius(wux::CornerRadiusHelper::FromUniformRadius(6));
+                    artHost.Background(m_isDarkMode ? MakeBrush(255, 20, 20, 24) : MakeBrush(255, 240, 240, 244));
+                    artHost.Margin(wux::ThicknessHelper::FromLengths(0, 0, 12, 0));
+                    wuxc::Image artImg;
+                    artImg.Source(bmp);
+                    artImg.Stretch(wuxm::Stretch::Uniform);
+                    artImg.HorizontalAlignment(wux::HorizontalAlignment::Center);
+                    artImg.VerticalAlignment(wux::VerticalAlignment::Center);
+                    artHost.Child(artImg);
+                    wuxc::Grid::SetColumn(artHost, 0);
+                    rowGrid.Children().Append(artHost);
+                }
+
+                // Title + details on the right
+                wuxc::StackPanel textStack;
+                textStack.Orientation(wuxc::Orientation::Vertical);
+                textStack.VerticalAlignment(wux::VerticalAlignment::Center);
+                textStack.Spacing(2);
+
+                wuxc::TextBlock tTb;
+                tTb.Text(g.title);
+                tTb.FontSize(15);
+                tTb.FontWeight(winrt::Windows::UI::Text::FontWeights::SemiBold());
+                tTb.Foreground(textPrimary);
+                tTb.TextTrimming(wux::TextTrimming::CharacterEllipsis);
+                tTb.MaxLines(1);
+                textStack.Children().Append(tTb);
+
+                std::wstring sub;
+                if (!g.developer.empty()) sub += g.developer;
+                if (!g.publisher.empty() && g.publisher != g.developer) {
+                    if (!sub.empty()) sub += L"  \u00B7  ";
+                    sub += g.publisher;
+                }
+                if (!sub.empty()) {
+                    wuxc::TextBlock subTb;
+                    subTb.Text(sub);
+                    subTb.FontSize(12);
+                    subTb.Foreground(textSec);
+                    subTb.TextTrimming(wux::TextTrimming::CharacterEllipsis);
+                    subTb.MaxLines(1);
+                    textStack.Children().Append(subTb);
+                }
+
+                std::wstring meta;
+                if (!g.rating.empty() && g.rating != L"Unrated") meta += g.rating;
+                if (g.playtimeMinutes > 0) {
+                    if (!meta.empty()) meta += L"  \u00B7  ";
+                    int hours = g.playtimeMinutes / 60;
+                    int mins = g.playtimeMinutes % 60;
+                    if (hours > 0) meta += std::to_wstring(hours) + L"h";
+                    if (mins > 0) meta += std::to_wstring(mins) + L"m";
+                    meta += L" played";
+                }
+                if (!meta.empty()) {
+                    wuxc::TextBlock metaTb;
+                    metaTb.Text(meta);
+                    metaTb.FontSize(11);
+                    metaTb.Foreground(textSec);
+                    metaTb.TextTrimming(wux::TextTrimming::CharacterEllipsis);
+                    metaTb.MaxLines(1);
+                    textStack.Children().Append(metaTb);
+                }
+
+                wuxc::Grid::SetColumn(textStack, 1);
+                rowGrid.Children().Append(textStack);
+
+                rowCard.Child(rowGrid);
+
+                const int gIdx = static_cast<int>(i);
+                HWND hwndContainer = m_hwndContainer;
+                rowCard.Tapped([this, gIdx](wf::IInspectable const&, wuxi::TappedRoutedEventArgs const&) {
+                    SelectGame(gIdx);
+                });
+                rowCard.DoubleTapped([this, hwndContainer, gIdx](wf::IInspectable const&, wuxi::DoubleTappedRoutedEventArgs const&) {
+                    if (gIdx >= 0 && gIdx < static_cast<int>(m_games.size())) {
+                        PlatformLauncher::Launch(hwndContainer, m_games[static_cast<size_t>(gIdx)]);
+                    }
+                });
+
+                if (m_xaml) m_xaml->gameCards.push_back(rowCard);
+                listStack.Children().Append(rowCard);
+            }
+            mainStack.Children().Append(listStack);
         } else if (m_layoutMode == LayoutMode::DetailsView) {
             wuxc::StackPanel listStack;
             listStack.Spacing(4);
