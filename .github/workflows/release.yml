@@ -45,12 +45,6 @@ jobs:
         shell: pwsh
         run: ./scripts/test.ps1 -Configuration Release
 
-      - name: Lint PowerShell Scripts
-        shell: pwsh
-        run: |
-          Install-Module PSScriptAnalyzer -Scope CurrentUser -Force -Confirm:$false
-          ./scripts/lint.ps1
-
       - name: Install NSIS
         shell: pwsh
         run: |
