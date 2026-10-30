@@ -172,13 +172,25 @@ jobs:
             Invoke-WebRequest -Uri "https://github.com/microsoft/winget-create/releases/latest/download/wingetcreate.exe" -OutFile "wingetcreate.exe"
             $wc = ".\wingetcreate.exe"
           }
-          $prUrl = & $wc submit --token $env:PAT_TOKEN --prtitle "New version: HELIX-Origin.WindowsGameExplorer v${{ steps.version.outputs.version }}" winget/manifests/h/HELIX-Origin/WindowsGameExplorer/${{ steps.version.outputs.version }}
-          $prNumber = ($prUrl -split '/')[-1]
-          # Find the bot's CLA comment and reply to it
-          $botCommentId = gh api "repos/microsoft/winget-pkgs/issues/$prNumber/comments" --jq '.[] | select(.user.login == "microsoft-github-policy-service[bot]") | .id' 2>$null | Select-Object -First 1
-          if ($botCommentId) {
-            gh api "repos/microsoft/winget-pkgs/issues/$prNumber/comments" -f body="I agree" -f "in_reply_to=$botCommentId" 2>&1 | Out-Null
+          # Check if a PR already exists for this version
+          $existingPr = gh pr list --repo microsoft/winget-pkgs --search "HELIX-Origin.WindowsGameExplorer v${{ steps.version.outputs.version }}" --state open --json number --jq '.[0].number' 2>$null
+          if ($existingPr) {
+            Write-Host "Existing PR found: #$existingPr. Using it."
+            $prNumber = $existingPr
           } else {
-            gh pr comment $prNumber --repo microsoft/winget-pkgs --body "I agree"
+            $prUrl = & $wc submit --token $env:PAT_TOKEN --prtitle "New version: HELIX-Origin.WindowsGameExplorer v${{ steps.version.outputs.version }}" winget/manifests/h/HELIX-Origin/WindowsGameExplorer/${{ steps.version.outputs.version }}
+            $prNumber = ($prUrl -split '/')[-1]
           }
-          Write-Host "Winget PR submitted. CLA accepted."
+          # Accept CLA only if bot asked and we haven't already
+          $botComment = gh api "repos/microsoft/winget-pkgs/issues/$prNumber/comments" 2>$null | ConvertFrom-Json | Where-Object { $_.user.login -eq "microsoft-github-policy-service[bot]" -and $_.body -match "Contributor License Agreement" }
+          $ourComments = gh api "repos/microsoft/winget-pkgs/issues/$prNumber/comments" 2>$null | ConvertFrom-Json | Where-Object { $_.user.login -eq "PhantomNimbi" -and $_.body -eq "I agree" }
+          if ($botComment -and -not $ourComments) {
+            $botCommentId = $botComment[0].id
+            gh api "repos/microsoft/winget-pkgs/issues/$prNumber/comments" -f body="I agree" -f "in_reply_to=$botCommentId" 2>&1 | Out-Null
+            Write-Host "CLA accepted (replied to bot comment)."
+          } elseif ($ourComments) {
+            Write-Host "CLA already accepted, skipping."
+          } else {
+            Write-Host "No CLA bot comment found, skipping."
+          }
+          Write-Host "Winget PR ready: #$prNumber"
