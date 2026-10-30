@@ -29,13 +29,8 @@ Thumbs.db
 *.local.json
 
 # Signing and Certificates (protect private keys and certificates)
-/certificates/
 *.pfx
 *.p12
-
-# Signing certificates (private keys never committed)
-certs/
-*.pfx
 
 # Logging
 logs/*
@@ -45,3 +40,4 @@ logs/*
 !logs/README.md
 !.env.example
 !*.gitkeep
+    

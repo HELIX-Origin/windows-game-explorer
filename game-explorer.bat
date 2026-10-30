@@ -38,13 +38,10 @@ if /i "%COMMAND%"=="build"        goto :cmd_build
 if /i "%COMMAND%"=="test"         goto :cmd_test
 if /i "%COMMAND%"=="lint"         goto :cmd_lint
 if /i "%COMMAND%"=="package"      goto :cmd_package
-if /i "%COMMAND%"=="release"      goto :cmd_release
 if /i "%COMMAND%"=="register"     goto :cmd_register
 if /i "%COMMAND%"=="unregister"   goto :cmd_unregister
-if /i "%COMMAND%"=="watcher"      goto :cmd_watcher
-if /i "%COMMAND%"=="sign"         goto :cmd_sign
 if /i "%COMMAND%"=="art"          goto :cmd_art
-if /i "%COMMAND%"=="setup-signing" goto :cmd_setup_signing
+if /i "%COMMAND%"=="cert"  goto :cmd_generate_cert
 
 echo.
 echo %C_RED%[ERROR] Unknown command: %COMMAND%%C_RST%
@@ -64,14 +61,11 @@ echo     build  [Debug^|Release] [-Clean]     Compile every target (/W4 /WX).
 echo     test   [Debug^|Release]              Run the C++ unit test suite.
 echo     lint                                 Static-analyse scripts\*.ps1 (zero-warning gate).
 echo     package [Debug^|Release]             Build the portable ZIP and NSIS setup.
-echo     release                             Build, test, lint, then package (Release).
 echo     register [DllPath]                   Register the shell extension (elevated).
 echo     unregister [DllPath]                 Unregister the shell extension (elevated).
 echo     watcher [Action]                     Manage Explorer lifecycle watcher (enable/disable/stop/inspect).
-echo     sign   [Debug^|Release]              Authenticode-sign the build outputs.
 echo     art                                  Regenerate installer sidecar/header art.
-echo     setup-signing [CertPath] [Password] [Repo]
-echo                                          Push signing secrets with GitHub CLI.
+echo     generate-certificates                Generate a self-signed code signing certificate.
 echo     help                                 Show this help.
 echo.
 echo   Examples:
@@ -117,26 +111,6 @@ set "CODE=%ERRORLEVEL%"
 call :finish %CODE% "Packaging"
 exit /b %CODE%
 
-:cmd_release
-call :require_script "build.ps1"
-if errorlevel 1 exit /b 1
-call :require_script "test.ps1"
-if errorlevel 1 exit /b 1
-call :require_script "lint.ps1"
-if errorlevel 1 exit /b 1
-call :require_script "package.ps1"
-if errorlevel 1 exit /b 1
-powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\build.ps1" -Configuration Release
-if errorlevel 1 goto :release_failed
-powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\test.ps1" -Configuration Release
-if errorlevel 1 goto :release_failed
-powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\lint.ps1"
-if errorlevel 1 goto :release_failed
-powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\package.ps1" -Configuration Release
-if errorlevel 1 goto :release_failed
-call :finish 0 "Release"
-exit /b 0
-
 :release_failed
 set "CODE=%ERRORLEVEL%"
 call :finish %CODE% "Release"
@@ -170,14 +144,6 @@ set "CODE=%ERRORLEVEL%"
 call :finish %CODE% "Watcher"
 exit /b %CODE%
 
-:cmd_sign
-call :require_script "sign.ps1"
-if errorlevel 1 exit /b 1
-powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\sign.ps1" %1 %2 %3 %4 %5 %6 %7 %8 %9
-set "CODE=%ERRORLEVEL%"
-call :finish %CODE% "Signing"
-exit /b %CODE%
-
 :cmd_art
 call :require_script "generate-installer-art.ps1"
 if errorlevel 1 exit /b 1
@@ -186,12 +152,12 @@ set "CODE=%ERRORLEVEL%"
 call :finish %CODE% "Installer artwork"
 exit /b %CODE%
 
-:cmd_setup_signing
-call :require_script "setup-signing-secrets.ps1"
+:cmd_generate_cert
+call :require_script "generate-cert.ps1"
 if errorlevel 1 exit /b 1
-powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\setup-signing-secrets.ps1" %1 %2 %3 %4 %5 %6 %7 %8 %9
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\generate-cert.ps1" %1 %2 %3 %4 %5 %6 %7 %8 %9
 set "CODE=%ERRORLEVEL%"
-call :finish %CODE% "Signing secrets"
+call :finish %CODE% "Generate certificate"
 exit /b %CODE%
 
 :require_admin

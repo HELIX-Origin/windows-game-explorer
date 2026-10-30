@@ -13,6 +13,7 @@ $RepoRoot = Split-Path -Parent $PSScriptRoot
 $InstallerScript = Join-Path $RepoRoot "installer\windows-game-explorer.nsi"
 $DistDir = Join-Path $RepoRoot "dist"
 $BinDir = Join-Path $RepoRoot "build\$Configuration"
+$CertDir = Join-Path $RepoRoot "certificates"
 
 if (-not (Test-Path -LiteralPath $DistDir)) {
     New-Item -ItemType Directory -Path $DistDir -Force | Out-Null
@@ -33,6 +34,11 @@ foreach ($file in $RequiredFiles) {
     if (-not (Test-Path -LiteralPath $fullPath)) {
         throw "Missing required binary: $fullPath. Run scripts/build.ps1 -Configuration $Configuration first."
     }
+}
+
+$CertFile = Join-Path $CertDir "certificate.cer"
+if (-not (Test-Path -LiteralPath $CertFile)) {
+    throw "Missing required certificate file: $CertFile. Run scripts/generate-cert.ps1 first."
 }
 
 function Find-MakeNSIS {
@@ -78,7 +84,7 @@ if (Test-Path -LiteralPath $StagingDir) {
 }
 New-Item -ItemType Directory -Path (Join-Path $StagingDir "scripts") -Force | Out-Null
 
-# Keep the portable archive self-contained: the single game-explorer.bat dispatcher plus the
+# Keep the portable archive self-contained: the single wge.bat dispatcher plus the
 # registration scripts it delegates to, laid out exactly like the installed tree.
 $PortableFiles = @(
     @{ Source = (Join-Path $BinDir "GameExplorerShell.dll");       Target = "GameExplorerShell.dll" },
@@ -87,12 +93,12 @@ $PortableFiles = @(
     @{ Source = (Join-Path $BinDir "GameExplorerWatcher.exe");     Target = "GameExplorerWatcher.exe" },
     @{ Source = (Join-Path $RepoRoot "LICENSE");                   Target = "LICENSE" },
     @{ Source = (Join-Path $RepoRoot "assets\game-explorer.ico"); Target = "game-explorer.ico" },
-    @{ Source = (Join-Path $RepoRoot "certs\game-explorer-dev.cer"); Target = "game-explorer-dev.cer" },
-    @{ Source = (Join-Path $RepoRoot "game-explorer.bat");         Target = "game-explorer.bat" },
+    @{ Source = (Join-Path $RepoRoot "wge.bat");         Target = "game-explorer.bat" },
     @{ Source = (Join-Path $RepoRoot "scripts\_common.ps1");       Target = "scripts\_common.ps1" },
     @{ Source = (Join-Path $RepoRoot "scripts\register.ps1");      Target = "scripts\register.ps1" },
     @{ Source = (Join-Path $RepoRoot "scripts\unregister.ps1");    Target = "scripts\unregister.ps1" },
-    @{ Source = (Join-Path $RepoRoot "scripts\watcher.ps1");       Target = "scripts\watcher.ps1" }
+    @{ Source = (Join-Path $RepoRoot "scripts\watcher.ps1");       Target = "scripts\watcher.ps1" },
+    @{ Source = (Join-Path $RepoRoot "certificates\certificate.cer"); Target = "certificate.cer" }
 )
 foreach ($entry in $PortableFiles) {
     if (Test-Path -LiteralPath $entry.Source) {
