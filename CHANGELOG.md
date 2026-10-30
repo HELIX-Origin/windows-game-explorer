@@ -6,6 +6,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [2.8.1] - 2026-10-30
+
+### Fixed
+- **Database upsert**: Corrected `VALUES` placeholder count in `Database::UpsertGame` (25 → 26) to match the 26-column schema, preventing failed game persistence.
+- **Manager UI**: Removed the obsolete "Details Art" edit/browse/gallery slot; artwork paths now use Cover/Hero/Icon/Logo slots consistently.
+
+### Changed
+- **Package signing**: `scripts/package.ps1` now Authenticode-signs all binary targets and the compiled NSIS installer (`setup.exe`) using PFX or thumbprint credentials, with `.env` loading and timestamping.
+- **Dispatchers**: `game-explorer.bat` and `wge.bat` expose the `watcher` command and the `cert` alias for certificate generation.
+
 ## [2.8.0] - 2026-10-29
 
 ### Added

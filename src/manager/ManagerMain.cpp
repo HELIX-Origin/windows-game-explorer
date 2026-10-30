@@ -127,8 +127,6 @@ constexpr int IDC_EDIT_COVER_PATH     = 3020;
 constexpr int IDC_BTN_BROWSE_COVER    = 3021;
 constexpr int IDC_EDIT_HERO_PATH      = 3022;
 constexpr int IDC_BTN_BROWSE_HERO     = 3023;
-constexpr int IDC_EDIT_DETAILS_PATH   = 3024;
-constexpr int IDC_BTN_BROWSE_DETAILS  = 3025;
 constexpr int IDC_EDIT_ICON_PATH      = 3026;
 constexpr int IDC_BTN_BROWSE_ICON     = 3027;
 constexpr int IDC_EDIT_LOGO_PATH      = 3028;
@@ -160,7 +158,6 @@ constexpr int IDC_BTN_REMOVE_LAUNCH_METHOD = 3062;
 
 constexpr int IDM_APPLY_COVER   = 5001;
 constexpr int IDM_APPLY_HERO    = 5002;
-constexpr int IDM_APPLY_DETAILS = 5003;
 constexpr int IDM_APPLY_ICON    = 5004;
 
 constexpr UINT WM_ARTWORK_SEARCH_DONE  = WM_APP + 60;
@@ -180,7 +177,6 @@ HWND g_hwndEditLaunchArgs  = nullptr;
 HWND g_hwndEditWorkDir     = nullptr;
 HWND g_hwndEditCoverPath   = nullptr;
 HWND g_hwndEditHeroPath    = nullptr;
-HWND g_hwndEditDetailsPath = nullptr;
 HWND g_hwndEditIconPath    = nullptr;
 HWND g_hwndEditLogoPath    = nullptr;
 HWND g_hwndEditSynopsis    = nullptr;
@@ -215,8 +211,6 @@ HWND g_hwndLblCover            = nullptr;
 HWND g_hwndBtnBrowseCover      = nullptr;
 HWND g_hwndLblHero             = nullptr;
 HWND g_hwndBtnBrowseHero       = nullptr;
-HWND g_hwndLblDetails          = nullptr;
-HWND g_hwndBtnBrowseDetails    = nullptr;
 HWND g_hwndLblIcon             = nullptr;
 HWND g_hwndBtnBrowseIcon       = nullptr;
 HWND g_hwndLblLogo             = nullptr;
@@ -438,7 +432,6 @@ void PopulateEditorFromSelected(HWND hwnd) {
         SetWindowTextW(g_hwndEditWorkDir, L"");
         SetWindowTextW(g_hwndEditCoverPath, L"");
         SetWindowTextW(g_hwndEditHeroPath, L"");
-        SetWindowTextW(g_hwndEditDetailsPath, L"");
         SetWindowTextW(g_hwndEditIconPath, L"");
         if (g_hwndEditLogoPath) SetWindowTextW(g_hwndEditLogoPath, L"");
         SetWindowTextW(g_hwndEditSynopsis, L"");
@@ -457,7 +450,6 @@ void PopulateEditorFromSelected(HWND hwnd) {
         SetWindowTextW(g_hwndEditWorkDir, g.workingDirectory.c_str());
         SetWindowTextW(g_hwndEditCoverPath, g.coverArtPath.c_str());
         SetWindowTextW(g_hwndEditHeroPath, g.heroArtPath.c_str());
-        SetWindowTextW(g_hwndEditDetailsPath, g.detailsArtPath.c_str());
         SetWindowTextW(g_hwndEditIconPath, g.iconPath.c_str());
         if (g_hwndEditLogoPath) SetWindowTextW(g_hwndEditLogoPath, g.logoPath.c_str());
         SetWindowTextW(g_hwndEditSynopsis, g.synopsis.c_str());
@@ -538,7 +530,6 @@ void SaveCurrentGameEdits(HWND hwnd) {
     g.workingDirectory = ReadEditString(g_hwndEditWorkDir);
     g.coverArtPath     = ReadEditString(g_hwndEditCoverPath);
     g.heroArtPath      = ReadEditString(g_hwndEditHeroPath);
-    g.detailsArtPath   = ReadEditString(g_hwndEditDetailsPath);
     g.iconPath         = ReadEditString(g_hwndEditIconPath);
     if (g_hwndEditLogoPath) g.logoPath = ReadEditString(g_hwndEditLogoPath);
     g.synopsis         = ReadEditString(g_hwndEditSynopsis);
@@ -551,13 +542,11 @@ void SaveCurrentGameEdits(HWND hwnd) {
     };
     handleRemoteUrl(g.coverArtPath, L"cover");
     handleRemoteUrl(g.heroArtPath, L"hero");
-    handleRemoteUrl(g.detailsArtPath, L"details");
     handleRemoteUrl(g.iconPath, L"icon");
     if (!g.logoPath.empty()) handleRemoteUrl(g.logoPath, L"logo");
 
     SetWindowTextW(g_hwndEditCoverPath, g.coverArtPath.c_str());
     SetWindowTextW(g_hwndEditHeroPath, g.heroArtPath.c_str());
-    SetWindowTextW(g_hwndEditDetailsPath, g.detailsArtPath.c_str());
     SetWindowTextW(g_hwndEditIconPath, g.iconPath.c_str());
     if (g_hwndEditLogoPath) SetWindowTextW(g_hwndEditLogoPath, g.logoPath.c_str());
 
@@ -916,10 +905,6 @@ void ApplySelectedArtwork(HWND hwnd, int targetSlotId) {
         slotName = L"hero";
         targetEdit = g_hwndEditHeroPath;
         break;
-    case IDM_APPLY_DETAILS:
-        slotName = L"details";
-        targetEdit = g_hwndEditDetailsPath;
-        break;
     case IDM_APPLY_ICON:
         // If Tiles logo field exists, treat icon apply as details icon; user can also apply to logo separately
         slotName = L"icon";
@@ -941,8 +926,6 @@ void ApplySelectedArtwork(HWND hwnd, int targetSlotId) {
             game.coverArtPath = cachedPath;
         } else if (targetSlotId == IDM_APPLY_HERO) {
             game.heroArtPath = cachedPath;
-        } else if (targetSlotId == IDM_APPLY_DETAILS) {
-            game.detailsArtPath = cachedPath;
         } else if (targetSlotId == IDM_APPLY_ICON) {
             game.iconPath = cachedPath;
         }
@@ -1352,13 +1335,11 @@ LRESULT CALLBACK GalleryCanvasWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARA
             const auto& cand = g_galleryCandidates[static_cast<size_t>(g_selectedCandidateIdx)];
             int targetSlot = IDM_APPLY_COVER;
             if (cand.type == L"Hero" || g_activeArtworkType == L"Hero") targetSlot = IDM_APPLY_HERO;
-            else if (cand.type == L"Details" || g_activeArtworkType == L"Details") targetSlot = IDM_APPLY_DETAILS;
             else if (cand.type == L"Icon" || g_activeArtworkType == L"Icon") targetSlot = IDM_APPLY_ICON;
             else {
                 const std::wstring typeStr = GetComboSelectedText(g_hwndComboType);
                 if (typeStr.find(L"Hero") != std::wstring::npos) targetSlot = IDM_APPLY_HERO;
                 else if (typeStr.find(L"Icon") != std::wstring::npos || typeStr.find(L"Logo") != std::wstring::npos) targetSlot = IDM_APPLY_ICON;
-                else if (typeStr.find(L"Details") != std::wstring::npos) targetSlot = IDM_APPLY_DETAILS;
             }
 
             ApplySelectedArtwork(GetParent(hwnd), targetSlot);
@@ -1655,29 +1636,23 @@ LRESULT CALLBACK ManagerWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPar
             fullEditX + fullEditW + 6, topY + 361, 62, 28, hwnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_BTN_BROWSE_HERO)), nullptr, nullptr);
         SendMessageW(g_hwndBtnBrowseHero, WM_SETFONT, reinterpret_cast<WPARAM>(g_hFont), TRUE);
 
-        createField(L"Details Art:",  g_hwndEditDetailsPath, g_hwndLblDetails, IDC_EDIT_DETAILS_PATH, fullLabelX, fullEditX, fullEditW, topY + 396);
-        g_hwndBtnBrowseDetails = CreateWindowExW(0, L"BUTTON", L"Browse...",
-            WS_CHILD | WS_VISIBLE | BS_OWNERDRAW,
-            fullEditX + fullEditW + 6, topY + 397, 62, 28, hwnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_BTN_BROWSE_DETAILS)), nullptr, nullptr);
-        SendMessageW(g_hwndBtnBrowseDetails, WM_SETFONT, reinterpret_cast<WPARAM>(g_hFont), TRUE);
-
-        createField(L"Icon Path:",    g_hwndEditIconPath,   g_hwndLblIcon,     IDC_EDIT_ICON_PATH,   fullLabelX, fullEditX, fullEditW, topY + 432);
+        createField(L"Icon Path:",    g_hwndEditIconPath,   g_hwndLblIcon,     IDC_EDIT_ICON_PATH,   fullLabelX, fullEditX, fullEditW, topY + 396);
         g_hwndBtnBrowseIcon = CreateWindowExW(0, L"BUTTON", L"Browse...",
             WS_CHILD | WS_VISIBLE | BS_OWNERDRAW,
-            fullEditX + fullEditW + 6, topY + 433, 62, 28, hwnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_BTN_BROWSE_ICON)), nullptr, nullptr);
+            fullEditX + fullEditW + 6, topY + 397, 62, 28, hwnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_BTN_BROWSE_ICON)), nullptr, nullptr);
         SendMessageW(g_hwndBtnBrowseIcon, WM_SETFONT, reinterpret_cast<WPARAM>(g_hFont), TRUE);
 
-        createField(L"Tiles Icon/Logo:", g_hwndEditLogoPath, g_hwndLblLogo, IDC_EDIT_LOGO_PATH, fullLabelX, fullEditX, fullEditW, topY + 468);
+        createField(L"Tiles Icon/Logo:", g_hwndEditLogoPath, g_hwndLblLogo, IDC_EDIT_LOGO_PATH, fullLabelX, fullEditX, fullEditW, topY + 432);
         g_hwndBtnBrowseLogo = CreateWindowExW(0, L"BUTTON", L"Browse...",
             WS_CHILD | WS_VISIBLE | BS_OWNERDRAW,
-            fullEditX + fullEditW + 6, topY + 469, 62, 28, hwnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_BTN_BROWSE_LOGO)), nullptr, nullptr);
+            fullEditX + fullEditW + 6, topY + 433, 62, 28, hwnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_BTN_BROWSE_LOGO)), nullptr, nullptr);
         SendMessageW(g_hwndBtnBrowseLogo, WM_SETFONT, reinterpret_cast<WPARAM>(g_hFont), TRUE);
 
         // The synopsis editor is a real wrapped multi-line field: it wraps at the field width and
         // Enter inserts a line break. Full markdown-style formatting is documented in
         // docs/user/metadata-customization.md and rendered in the Explorer details pane.
         createField(L"Synopsis:", g_hwndEditSynopsis, g_hwndLblSynopsis, IDC_EDIT_SYNOPSIS,
-                    fullLabelX, fullEditX, 306, topY + 504,
+                    fullLabelX, fullEditX, 306, topY + 468,
                     ES_MULTILINE | ES_AUTOVSCROLL | ES_WANTRETURN | ES_NOHIDESEL);
 
         if (g_hwndEditSynopsis != nullptr) {
@@ -2286,7 +2261,6 @@ LRESULT CALLBACK ManagerWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPar
         case IDC_BTN_BROWSE_EXE:      drawBtn(L"Browse...", false, false); return TRUE;
         case IDC_BTN_BROWSE_COVER:    drawBtn(L"Browse...", false, false); return TRUE;
         case IDC_BTN_BROWSE_HERO:     drawBtn(L"Browse...", false, false); return TRUE;
-        case IDC_BTN_BROWSE_DETAILS:  drawBtn(L"Browse...", false, false); return TRUE;
         case IDC_BTN_BROWSE_ICON:     drawBtn(L"Browse...", false, false); return TRUE;
         case IDC_BTN_BROWSE_LOGO:     drawBtn(L"Browse...", false, false); return TRUE;
         case IDC_BTN_ADD_LAUNCH_METHOD:    drawBtn(L"Add...", false, false); return TRUE;
@@ -2327,7 +2301,6 @@ LRESULT CALLBACK ManagerWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPar
             std::wstring t = L"All";
             if (s.find(L"Box Art") != std::wstring::npos) t = L"Cover";
             else if (s.find(L"Hero") != std::wstring::npos) t = L"Hero";
-            else if (s.find(L"Details") != std::wstring::npos || s.find(L"Screenshot") != std::wstring::npos) t = L"Details";
             else if (s.find(L"Icon") != std::wstring::npos || s.find(L"Logo") != std::wstring::npos) t = L"Icon";
             SetActiveArtworkType(t);
             TriggerArtworkSearch(hwnd, false, L"", t);
@@ -2503,14 +2476,6 @@ LRESULT CALLBACK ManagerWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPar
             std::wstring path;
             if (BrowseForFile(hwnd, L"Select Widescreen Hero Banner (~3.1:1 / 16:9 Banner)", L"Image Files (*.png;*.jpg;*.jpeg;*.gif;*.webp;*.svg;*.bmp;*.jfif;*.avif;*.tiff;*.tif;*.ico)\0*.png;*.jpg;*.jpeg;*.gif;*.webp;*.svg;*.bmp;*.jfif;*.avif;*.tiff;*.tif;*.ico\0All Files (*.*)\0*.*\0", path)) {
                 SetWindowTextW(g_hwndEditHeroPath, path.c_str());
-            }
-            return 0;
-        }
-
-        if (id == IDC_BTN_BROWSE_DETAILS) {
-            std::wstring path;
-            if (BrowseForFile(hwnd, L"Select Details Pane Preview Image or Animated GIF", L"Image Files (*.png;*.jpg;*.jpeg;*.gif;*.webp;*.svg;*.bmp;*.jfif;*.avif;*.tiff;*.tif;*.ico)\0*.png;*.jpg;*.jpeg;*.gif;*.webp;*.svg;*.bmp;*.jfif;*.avif;*.tiff;*.tif;*.ico\0All Files (*.*)\0*.*\0", path)) {
-                SetWindowTextW(g_hwndEditDetailsPath, path.c_str());
             }
             return 0;
         }

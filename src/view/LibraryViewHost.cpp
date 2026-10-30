@@ -585,7 +585,7 @@ void LibraryViewHost::LoadDataAsync(HWND hwndNotify) {
         addProviderIfInstalled(PlatformType::Project64,   L"Project64",       L"Project64 Team",         PlatformLauncher::GetProject64ExecutablePath());
         addProviderIfInstalled(PlatformType::PCSX2,       L"PCSX2",           L"PCSX2 Team",             PlatformLauncher::GetPCSX2ExecutablePath());
         addProviderIfInstalled(PlatformType::DuckStation, L"DuckStation",     L"DuckStation Team",       PlatformLauncher::GetDuckStationExecutablePath());
-        addProviderIfInstalled(PlatformType::PPSSPP,      L"PPSSPP",          L"Henrik RydgÃ¥rd",         PlatformLauncher::GetPPSSPPExecutablePath());
+        addProviderIfInstalled(PlatformType::PPSSPP,      L"PPSSPP",          L"Henrik Rydgård",         PlatformLauncher::GetPPSSPPExecutablePath());
         addProviderIfInstalled(PlatformType::mGBA,        L"mGBA",            L"endrift / mGBA Team",    PlatformLauncher::GetmGBAExecutablePath());
         addProviderIfInstalled(PlatformType::Snes9x,      L"Snes9x",          L"Snes9x Team",            PlatformLauncher::GetSnes9xExecutablePath());
         addProviderIfInstalled(PlatformType::melonDS,     L"melonDS",         L"melonDS Team",           PlatformLauncher::GetMelonDSExecutablePath());

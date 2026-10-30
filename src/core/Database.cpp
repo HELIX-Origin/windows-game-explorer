@@ -197,7 +197,7 @@ bool Database::UpsertGame(const GameItem& item) {
             icon_path, logo_path, details_art_path, developer, publisher, release_date, rating, synopsis,
             official_website, store_page_url, is_installed, is_favorite,
             disk_size_bytes, playtime_minutes, last_played_timestamp
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(app_id) DO UPDATE SET
             title = excluded.title,
             sort_title = excluded.sort_title,

@@ -1,14 +1,13 @@
 @echo off
 setlocal EnableExtensions
 
-rem Windows Game Explorer - single command-line entry point.
+rem Windows Game Explorer - developer command-line entry point.
 rem
-rem This is the only batch file in the repository. It parses a command name and its options,
-rem checks privileges/script availability, and runs the matching PowerShell script in *this*
-rem console. The scripts in scripts\ own the advanced presentation and work (ASCII banner,
-rem colourised status output, progress, encoding, maths, installer packaging); nothing calls
-rem Start-Process for elevation, so no extra window is opened. Registration commands therefore
-rem require an already-elevated terminal.
+rem This dispatcher parses a command name and its options, checks privileges/script availability,
+rem and runs the matching PowerShell script in *this* console. The scripts in scripts\ own the
+rem advanced presentation and work (ASCII banner, colourised status output, progress, encoding,
+rem maths, installer packaging); nothing calls Start-Process for elevation, so no extra window is
+rem opened. Registration commands therefore require an already-elevated terminal.
 
 title Windows Game Explorer
 cd /d "%~dp0"
@@ -40,6 +39,7 @@ if /i "%COMMAND%"=="lint"         goto :cmd_lint
 if /i "%COMMAND%"=="package"      goto :cmd_package
 if /i "%COMMAND%"=="register"     goto :cmd_register
 if /i "%COMMAND%"=="unregister"   goto :cmd_unregister
+if /i "%COMMAND%"=="watcher"      goto :cmd_watcher
 if /i "%COMMAND%"=="art"          goto :cmd_art
 if /i "%COMMAND%"=="cert"  goto :cmd_generate_cert
 
@@ -65,12 +65,12 @@ echo     register [DllPath]                   Register the shell extension (elev
 echo     unregister [DllPath]                 Unregister the shell extension (elevated).
 echo     watcher [Action]                     Manage Explorer lifecycle watcher (enable/disable/stop/inspect).
 echo     art                                  Regenerate installer sidecar/header art.
-echo     generate-certificates                Generate a self-signed code signing certificate.
+echo     cert                                 Generate a self-signed code signing certificate.
 echo     help                                 Show this help.
 echo.
 echo   Examples:
 echo     %SCRIPT_NAME% build Release -Clean
-echo     %SCRIPT_NAME% release
+echo     %SCRIPT_NAME% package Release
 echo     %SCRIPT_NAME% register
 echo     %SCRIPT_NAME% watcher enable
 echo.

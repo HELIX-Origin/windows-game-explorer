@@ -1,14 +1,12 @@
 @echo off
 setlocal EnableExtensions
 
-rem Windows Game Explorer - single command-line entry point.
+rem Windows Game Explorer - portable command-line entry point.
 rem
-rem This is the only batch file in the repository. It parses a command name and its options,
-rem checks privileges/script availability, and runs the matching PowerShell script in *this*
-rem console. The scripts in scripts\ own the advanced presentation and work (ASCII banner,
-rem colourised status output, progress, encoding, maths, installer packaging); nothing calls
-rem Start-Process for elevation, so no extra window is opened. Registration commands therefore
-rem require an already-elevated terminal.
+rem package.ps1 ships this file as game-explorer.bat in the portable ZIP. It exposes only the
+rem registration, unregistration, and watcher commands used by a portable installation. It runs
+rem the matching PowerShell script in *this* console; nothing calls Start-Process for elevation,
+rem so registration commands require an already-elevated terminal.
 
 title Windows Game Explorer
 cd /d "%~dp0"
@@ -36,6 +34,7 @@ if /i "%COMMAND%"=="-h"           goto :usage_ok
 if /i "%COMMAND%"=="--help"       goto :usage_ok
 if /i "%COMMAND%"=="register"     goto :cmd_register
 if /i "%COMMAND%"=="unregister"   goto :cmd_unregister
+if /i "%COMMAND%"=="watcher"      goto :cmd_watcher
 
 echo.
 echo %C_RED%[ERROR] Unknown command: %COMMAND%%C_RST%
@@ -57,10 +56,9 @@ echo     watcher [Action]                     Manage Explorer lifecycle watcher 
 echo     help                                 Show this help.
 echo.
 echo   Examples:
-echo     %SCRIPT_NAME% build Release -Clean
-echo     %SCRIPT_NAME% release
 echo     %SCRIPT_NAME% register
 echo     %SCRIPT_NAME% watcher enable
+echo     %SCRIPT_NAME% unregister
 echo.
 echo   Registration needs an elevated terminal; this script never opens a second window.
 echo.

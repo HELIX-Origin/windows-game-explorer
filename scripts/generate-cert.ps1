@@ -58,9 +58,8 @@ Write-Host "  `$env:CODE_SIGNING_CERT_BASE64 = '$base64'" -ForegroundColor Yello
 Write-Host "  Secret CODE_SIGNING_CERT_PASSWORD = 'youshallnotpass'" -ForegroundColor Yellow
 Write-Host "  Secret CODE_SIGNING_CERT_THUMBPRINT = '$($cert.Thumbprint)'" -ForegroundColor Yellow
 Write-Host ""
-Write-Host "To sign your builds, run:" -ForegroundColor White
-Write-Host "  `$env:WINDOWS_CERT_THUMBPRINT = '$($cert.Thumbprint)'" -ForegroundColor Yellow
-Write-Host "  ./scripts/sign.ps1 -Configuration Release" -ForegroundColor Yellow
+Write-Host "To build the distribution packages, run:" -ForegroundColor White
+Write-Host "  ./game-explorer.bat package Release" -ForegroundColor Yellow
 Write-Host ""
 Write-Host "To trust this certificate on other machines, install the .cer file:" -ForegroundColor White
 Write-Host "  Import-Certificate -FilePath '$cerFile' -CertStoreLocation 'Cert:\LocalMachine\Root'" -ForegroundColor Yellow
