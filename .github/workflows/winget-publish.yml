@@ -1,8 +1,8 @@
-name: Publish to Winget
+name: Publish to WinGet
 
 on:
   release:
-    types: [published]
+    types: [released]
   workflow_dispatch:
     inputs:
       version:
@@ -13,71 +13,13 @@ permissions:
   contents: read
 
 jobs:
-  publish-winget:
-    name: Submit to Windows Package Manager
-    runs-on: windows-latest
-    env:
-      PAT_TOKEN: ${{ secrets.PAT_TOKEN }}
+  publish:
+    runs-on: ubuntu-slim
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Determine version
-        id: version
-        shell: pwsh
-        run: |
-          if ("${{ github.event_name }}" -eq "release") {
-            $ver = "${{ github.event.release.tag_name }}".TrimStart('v')
-          } else {
-            $ver = "${{ inputs.version }}".Trim()
-          }
-          "version=$ver" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
-          Write-Host "Publishing version $ver to Winget"
-
-      - name: Install wingetcreate
-        shell: pwsh
-        run: |
-          $wc = Get-Command wingetcreate -ErrorAction SilentlyContinue
-          if (-not $wc) {
-            Invoke-WebRequest -Uri "https://github.com/microsoft/winget-create/releases/latest/download/wingetcreate.exe" -OutFile "$env:RUNNER_TEMP\wingetcreate.exe"
-            "$env:RUNNER_TEMP" | Out-File -FilePath $env:GITHUB_PATH -Append
-          }
-
-      - name: Submit or update Winget manifest
-        shell: pwsh
-        env:
-          GH_TOKEN: ${{ secrets.PAT_TOKEN }}
-        run: |
-          if ([string]::IsNullOrWhiteSpace($env:PAT_TOKEN)) {
-            Write-Host "PAT_TOKEN not set; skipping."
-            exit 0
-          }
-          $version = "${{ steps.version.outputs.version }}"
-          $wcCmd = (Get-Command wingetcreate -ErrorAction SilentlyContinue)
-          if (-not $wcCmd) { $wcCmd = "$env:RUNNER_TEMP\wingetcreate.exe" }
-          $search = "HELIX-Origin.WindowsGameExplorer v$version"
-          $existingPr = gh pr list --repo microsoft/winget-pkgs --search $search --state open --json number --jq '.[0].number' 2>$null
-          $prNumber = $existingPr
-          if (-not $prNumber) {
-            $prUrl = & $wcCmd submit --token $env:PAT_TOKEN --prtitle "New version: HELIX-Origin.WindowsGameExplorer v$version" "winget/manifests/h/HELIX-Origin/WindowsGameExplorer/$version"
-            if ($prUrl) {
-              $parts = $prUrl -split '/'
-              $prNumber = $parts[-1]
-            }
-          }
-          if (-not $prNumber) {
-            Write-Host "No PR found/created."
-            exit 0
-          }
-          Write-Host "PR: #$prNumber"
-          try {
-            $comments = gh api "repos/microsoft/winget-pkgs/issues/$prNumber/comments" | ConvertFrom-Json
-            $bot = $comments | Where-Object { $_.user.login -eq 'microsoft-github-policy-service[bot]' -and $_.body -match 'Contributor License Agreement' } | Select-Object -First 1
-            $mine = $comments | Where-Object { $_.user.login -eq 'PhantomNimbi' -and $_.body -eq 'I agree' } | Select-Object -First 1
-            if ($bot -and -not $mine) {
-              gh api "repos/microsoft/winget-pkgs/issues/$prNumber/comments" -f body='I agree' -f "in_reply_to=$($bot.id)" | Out-Null
-              Write-Host "CLA replied."
-            }
-          } catch {
-            Write-Host $_.Exception.Message
-          }
+      - name: Publish to WinGet
+        uses: vedantmgoyal9/winget-releaser@main
+        with:
+          identifier: HELIX-Origin.WindowsGameExplorer
+          release-tag: ${{ github.event.release.tag_name || inputs.version }}
+          token: ${{ secrets.PAT_TOKEN }}
+          max-versions-to-keep: 5
