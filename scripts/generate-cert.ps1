@@ -14,7 +14,7 @@ Write-GameExplorerBanner -Title "Generate self-signed code signing certificate"
 
 # Check if a code signing cert already exists
 $existing = Get-ChildItem -Path $CertStore -CodeSigningCert -ErrorAction SilentlyContinue |
-    Where-Object { $_.Subject -eq $Subject }
+    Where-Object { $_.Subject -eq $Subject } | Select-Object -First 1
 
 if ($existing) {
     Write-Host "Existing certificate found: $($existing.Thumbprint)" -ForegroundColor Green

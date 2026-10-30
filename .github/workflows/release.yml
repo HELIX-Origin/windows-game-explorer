@@ -131,10 +131,12 @@ jobs:
           $existing = gh release view "v$ver" --repo HELIX-Origin/windows-game-explorer 2>$null
           if ($LASTEXITCODE -eq 0) {
             Write-Host "Existing release found, deleting..."
-            gh release delete "v$ver" --repo HELIX-Origin/windows-game-explorer --yes 2>&1
+            gh release delete "v$ver" --repo HELIX-Origin/windows-game-explorer --yes 2>$null
+            Write-Host "Deleted existing release."
           } else {
-            Write-Host "No existing release found."
+            Write-Host "No existing release found, skipping."
           }
+        continue-on-error: true
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
