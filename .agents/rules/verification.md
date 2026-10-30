@@ -38,6 +38,7 @@ regsvr32 /u /s build\Release\GameExplorerShell.dll
 - Only run `build` / `test` / `lint` when C++ source, headers, CMakeLists, or PowerShell scripts are modified.
 - When in doubt, ask the user before running a full build/test cycle.
 - Plugin type-check (`tsc`) only when `.opencode/plugins/` or `.opencode/types/` files change.
+- **Do NOT create, delete, or update git tags or releases for changes that do not affect compiled code.** Documentation, asset, and workflow-only changes do not warrant a new release. Only bump version, tag, and release when C++ source, headers, CMakeLists, or PowerShell scripts change.
 
 ---
 
