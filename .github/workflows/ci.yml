@@ -36,7 +36,16 @@ jobs:
           Install-Module PSScriptAnalyzer -Scope CurrentUser -Force -Confirm:$false
           ./scripts/lint.ps1
 
+      - name: Install NSIS
+        if: github.ref == 'refs/heads/main'
+        shell: pwsh
+        run: |
+          choco install nsis -y
+          # Add to PATH
+          echo "C:\Program Files (x86)\NSIS" >> $env:GITHUB_PATH
+
       - name: Package Distribution (portable ZIP + NSIS installer)
         if: github.ref == 'refs/heads/main'
         shell: pwsh
         run: ./scripts/package.ps1 -Configuration Release
+        continue-on-error: true

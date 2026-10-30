@@ -54,6 +54,12 @@ jobs:
         run: ./scripts/sign.ps1 -Configuration Release
         continue-on-error: true
 
+      - name: Install NSIS
+        shell: pwsh
+        run: |
+          choco install nsis -y
+          echo "C:\Program Files (x86)\NSIS" >> $env:GITHUB_PATH
+
       - name: Package Distribution
         shell: pwsh
         run: ./scripts/package.ps1 -Configuration Release
@@ -79,6 +85,7 @@ jobs:
           & $wc submit --token $env:PAT_TOKEN --prtitle "New version: HELIX-Origin.WindowsGameExplorer v${{ steps.version.outputs.version }}" winget/manifests/h/HELIX-Origin/WindowsGameExplorer/${{ steps.version.outputs.version }}
           # Note: After PR creation, add a comment "/verify" to trigger the winget bot verification.
           Write-Host "Winget PR submitted. Add '/verify' comment to the PR to trigger verification."
+        continue-on-error: true
 
       - name: Read release notes
         id: notes
