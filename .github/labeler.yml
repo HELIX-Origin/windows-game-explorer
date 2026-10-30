@@ -1,0 +1,33 @@
+# PR auto-labeler configuration (actions/labeler)
+# Labels are applied based on changed file paths.
+
+'area: shell-extension':
+  - 'src/shell/**'
+  - 'include/**'
+
+'area: studio':
+  - 'src/manager/**'
+  - 'src/studio/**'
+  - 'src/config/**'
+  - 'src/ui/**'
+
+'area: build':
+  - 'CMakeLists.txt'
+  - 'scripts/**'
+  - 'installer/**'
+  - 'third_party/**'
+
+'area: docs':
+  - 'docs/**'
+  - '**/*.md'
+
+'area: ci':
+  - '.github/**'
+
+'area: tests':
+  - 'tests/**'
+
+'dependencies':
+  - 'third_party/**'
+  - '**/package*.json'
+  - '**/CMakeLists.txt'
