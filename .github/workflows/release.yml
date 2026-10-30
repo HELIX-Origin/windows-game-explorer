@@ -47,20 +47,28 @@ jobs:
           Install-Module PSScriptAnalyzer -Scope CurrentUser -Force -Confirm:$false
           ./scripts/lint.ps1
 
+      - name: Install NSIS
+        shell: pwsh
+        run: |
+          choco install nsis -y
+          echo "C:\Program Files (x86)\NSIS" >> $env:GITHUB_PATH
+
+      - name: Package Distribution
+        shell: pwsh
+        run: ./scripts/package.ps1 -Configuration Release
+
       - name: Install Windows SDK (signtool)
         shell: pwsh
         run: |
-          # Download and install Windows SDK for signtool
           $sdkUrl = "https://go.microsoft.com/fwlink/?linkid=2196241"
           Invoke-WebRequest -Uri $sdkUrl -OutFile "$env:TEMP\winsdk.exe"
           Start-Process -FilePath "$env:TEMP\winsdk.exe" -ArgumentList "/q", "/norestart" -Wait
-          # Add signtool to PATH
           $sdkPath = "C:\Program Files (x86)\Windows Kits\10\bin"
           $signtoolDir = Get-ChildItem -Path $sdkPath -Recurse -Filter "signtool.exe" -ErrorAction SilentlyContinue | Select-Object -First 1 | Select-Object -ExpandProperty DirectoryName
           if ($signtoolDir) { echo $signtoolDir >> $env:GITHUB_PATH }
           Write-Host "signtool found at: $signtoolDir"
 
-      - name: Decode signing certificate from secrets
+      - name: Decode signing certificate
         shell: pwsh
         env:
           CERT_BASE64: ${{ secrets.CODE_SIGNING_CERT_BASE64 }}
@@ -72,13 +80,12 @@ jobs:
           }
           $bytes = [Convert]::FromBase64String($env:CERT_BASE64)
           [IO.File]::WriteAllBytes("signing-cert.pfx", $bytes)
-          # Export public cert for distribution
           $certDir = "certs"
           if (-not (Test-Path $certDir)) { New-Item -ItemType Directory -Path $certDir -Force | Out-Null }
           $password = ConvertTo-SecureString -String $env:CERT_PASSWORD -Force -AsPlainText
           $cert = Get-PfxCertificate -FilePath "signing-cert.pfx" -Password $password
           Export-Certificate -Cert $cert -FilePath "$certDir\game-explorer-dev.cer" -Force | Out-Null
-          Write-Host "Certificate decoded and public cert exported."
+          Write-Host "Certificate decoded."
 
       - name: Sign binaries
         shell: pwsh
@@ -90,48 +97,14 @@ jobs:
             Write-Host "No signing thumbprint configured, skipping."
             exit 0
           }
-          # Import PFX to cert store
           $password = ConvertTo-SecureString -String $env:CERT_PASSWORD -Force -AsPlainText
           Import-PfxCertificate -FilePath "signing-cert.pfx" -CertStoreLocation "Cert:\CurrentUser\My" -Password $password | Out-Null
-          # Sign using thumbprint
           $env:WINDOWS_CERT_THUMBPRINT = "${{ secrets.CODE_SIGNING_CERT_THUMBPRINT }}"
           ./scripts/sign.ps1 -Configuration Release
-        continue-on-error: true
-
-      - name: Install NSIS
-        shell: pwsh
-        run: |
-          choco install nsis -y
-          echo "C:\Program Files (x86)\NSIS" >> $env:GITHUB_PATH
-
-      - name: Package Distribution
-        shell: pwsh
-        run: ./scripts/package.ps1 -Configuration Release
 
       - name: Prepare WDSI Submission Package
         shell: pwsh
         run: ./scripts/submit-to-wdsi.ps1 -Configuration Release
-        continue-on-error: true
-
-      - name: Submit to Winget (optional)
-        shell: pwsh
-        env:
-          PAT_TOKEN: ${{ secrets.PAT_TOKEN }}
-        run: |
-          if ([string]::IsNullOrEmpty($env:PAT_TOKEN)) {
-            Write-Host "PAT_TOKEN not set, skipping winget submission."
-            exit 0
-          }
-          # Install wingetcreate
-          $wc = (Get-Command wingetcreate -ErrorAction SilentlyContinue)
-          if (-not $wc) {
-            Invoke-WebRequest -Uri "https://github.com/microsoft/winget-create/releases/latest/download/wingetcreate.exe" -OutFile "wingetcreate.exe"
-            $wc = ".\wingetcreate.exe"
-          }
-          # Submit manifest to microsoft/winget-pkgs
-          & $wc submit --token $env:PAT_TOKEN --prtitle "New version: HELIX-Origin.WindowsGameExplorer v${{ steps.version.outputs.version }}" winget/manifests/h/HELIX-Origin/WindowsGameExplorer/${{ steps.version.outputs.version }}
-          # Note: After PR creation, add a comment "/verify" to trigger the winget bot verification.
-          Write-Host "Winget PR submitted. Add '/verify' comment to the PR to trigger verification."
         continue-on-error: true
 
       - name: Read release notes
@@ -145,9 +118,7 @@ jobs:
           } else {
             $body = "See CHANGELOG.md for details."
           }
-          # Write to file for action-gh-release
           $body | Out-File -FilePath "release-notes.md" -Encoding utf8
-          Write-Output "notes_file=release-notes.md" >> $env:GITHUB_OUTPUT
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
@@ -162,3 +133,21 @@ jobs:
           body_path: release-notes.md
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Submit to Winget (optional)
+        shell: pwsh
+        env:
+          PAT_TOKEN: ${{ secrets.PAT_TOKEN }}
+        run: |
+          if ([string]::IsNullOrEmpty($env:PAT_TOKEN)) {
+            Write-Host "PAT_TOKEN not set, skipping winget submission."
+            exit 0
+          }
+          $wc = (Get-Command wingetcreate -ErrorAction SilentlyContinue)
+          if (-not $wc) {
+            Invoke-WebRequest -Uri "https://github.com/microsoft/winget-create/releases/latest/download/wingetcreate.exe" -OutFile "wingetcreate.exe"
+            $wc = ".\wingetcreate.exe"
+          }
+          & $wc submit --token $env:PAT_TOKEN --prtitle "New version: HELIX-Origin.WindowsGameExplorer v${{ steps.version.outputs.version }}" winget/manifests/h/HELIX-Origin/WindowsGameExplorer/${{ steps.version.outputs.version }}
+          Write-Host "Winget PR submitted. Add '/verify' comment to the PR to trigger verification."
+        continue-on-error: true
