@@ -80,16 +80,31 @@ jobs:
           # Note: After PR creation, add a comment "/verify" to trigger the winget bot verification.
           Write-Host "Winget PR submitted. Add '/verify' comment to the PR to trigger verification."
 
+      - name: Read release notes
+        id: notes
+        shell: pwsh
+        run: |
+          $ver = "${{ steps.version.outputs.version }}"
+          $path = ".github/releases/v$ver.md"
+          if (Test-Path $path) {
+            $body = Get-Content $path -Raw
+          } else {
+            $body = "See CHANGELOG.md for details."
+          }
+          # Write to file for action-gh-release
+          $body | Out-File -FilePath "release-notes.md" -Encoding utf8
+          Write-Output "notes_file=release-notes.md" >> $env:GITHUB_OUTPUT
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ steps.version.outputs.version }}
           name: Windows Game Explorer v${{ steps.version.outputs.version }}
-          draft: true
+          draft: false
+          prerelease: false
           files: |
             dist/*.zip
             dist/*.exe
-          body: |
-            See CHANGELOG.md for details.
+          body_path: release-notes.md
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -6,6 +6,32 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [2.8.0] - 2026-10-29
+
+### Added
+- **Physical Games folder**: `%USERPROFILE%\Games` created as a normal folder with `Desktop.ini` (controller icon). `.lnk` shortcuts created for each detected game during scan. Shortcuts updated on metadata save, removed on game removal.
+- **`.lnk` scanning**: `ScanGameShortcuts()` added to `ScanAllInstalledGames()` to discover games from physical folder shortcuts.
+- **Per-user registration**: HKCU-only registration, no admin required. Service uses user-level scheduled task.
+- **Code signing infrastructure**: `generate-cert.ps1` for self-signed dev certs, `submit-to-wdsi.ps1` for Microsoft Defender false-positive submission.
+- **Winget manifest**: created and validated for `HELIX-Origin.WindowsGameExplorer`.
+- **Release workflow**: automated release with signing, packaging, WDSI submission, and winget PR.
+- **Troubleshooting docs**: Windows Defender false positive section with folders, executables, registry keys, PowerShell exclusions, and submission instructions.
+
+### Changed
+- App data root moved from `%USERPROFILE%\Game Explorer` to `%LOCALAPPDATA%\Game Explorer`.
+- Icon swapped from DLL-embedded to on-disk `.ico` (`game-explorer.ico`).
+- Windows 10 icon renamed to `game-explorer-icon-alt.ico`.
+- `shell:games` shortcut replaced with `/e,::{CLSID}` for modern Windows.
+- Service failure actions set to `SC_ACTION_NONE` (no auto-restart on kill).
+- "Manage Metadata" → "Manage Games" in UI strings.
+- Details view now shows developer, publisher, rating, playtime, storefront icon.
+- Game cards show developer instead of storefront as subtext.
+
+### Fixed
+- Service auto-restart on force-kill.
+- IndieGala platform bloc (scanner blocking, notifications filtering).
+- Legacy command bar documented as known issue.
+
 ## [2.7.0] - 2026-10-28
 
 ### Added
