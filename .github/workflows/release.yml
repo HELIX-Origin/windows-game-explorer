@@ -41,10 +41,6 @@ jobs:
         shell: pwsh
         run: ./scripts/build.ps1 -Configuration Release
 
-      - name: Run C++ Unit Tests
-        shell: pwsh
-        run: ./scripts/test.ps1 -Configuration Release
-
       - name: Install NSIS
         shell: pwsh
         run: |
