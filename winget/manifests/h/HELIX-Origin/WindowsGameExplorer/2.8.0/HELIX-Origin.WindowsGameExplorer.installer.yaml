@@ -22,7 +22,7 @@ ReleaseDate: 2026-10-29
 Installers:
   - Architecture: x64
     InstallerUrl: https://github.com/HELIX-Origin/windows-game-explorer/releases/download/v2.8.0/windows-game-explorer-v2.8.0-setup.exe
-    InstallerSha256: 3702B07B3A80D93186D6B2AA251512FE0F701D9DB0A72E2B809BA7A632E9EB82
+    InstallerSha256: f20528501b17078a2a96174d74b6cd3fb55d6f5c5ada5b30da5432941efcd720
     ProductCode: WindowsGameExplorer
 ManifestType: installer
 ManifestVersion: 1.12.0

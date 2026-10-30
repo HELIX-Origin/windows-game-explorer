@@ -1,0 +1,54 @@
+﻿# Windows Game Explorer v2.8.0
+
+> Physical Games folder integration, HKCU-only registration, code signing infrastructure, and UI refinements.
+
+| Attribute | Value |
+|---|---|
+| **Release Version** | 2.8.0 |
+| **Release Date** | 2026-10-29 |
+| **Release Classification** | Packaged Application Release |
+| **License** | [MIT](https://github.com/HELIX-Origin/windows-game-explorer/blob/main/LICENSE) |
+| **Release Channel** | Stable / Production |
+
+---
+
+## Overview
+
+Windows Game Explorer v2.8.0 adds physical games folder integration with automatic .lnk shortcut management, moves to per-user (HKCU-only) registration with no admin required for the shell extension, introduces code signing infrastructure for reduced false positives, and includes various UI refinements and bug fixes.
+
+---
+
+## Distribution & Packaging
+
+| Artifact Name | Platform / Target | Architecture | Format | Checksum (SHA256) |
+|---|---|---|---|---|
+| windows-game-explorer-v2.8.0-setup.exe | Windows 11 (Build 22000+) | x64 | NSIS Dual-Mode Installer | F20528501B17078A2A96174D74B6CD3FB55D6F5C5ADA5B30DA5432941EFCD720 |
+| windows-game-explorer-v2.8.0-win64.zip | Windows 11 (Build 22000+) | x64 | Portable Distribution ZIP | 62CAA25FF61488D16A269BDD37E903BD33758B3D8AEC2785408EB0AD534553B6 |
+| windows-game-explorer-v2.8.0-ROMs-template.zip | Cross-Platform | Any | ROM Directory Template ZIP | 872CCD1773230B106A87EAB2672A2DDCBC7015513DEF51EA7E41B62E5866E4B0 |
+
+---
+
+## What's Changed
+
+### Added
+- **Physical Games folder** — %USERPROFILE%\Games created as a normal folder with Desktop.ini (controller icon). .lnk shortcuts created for each detected game during scan, updated on metadata save, removed on game removal.
+- **.lnk scanning** — ScanGameShortcuts() added to ScanAllInstalledGames() to discover games from physical folder shortcuts.
+- **Per-user registration** — HKCU-only registration, no admin required. Service uses user-level scheduled task.
+- **Code signing infrastructure** — generate-cert.ps1 for self-signed dev certs, submit-to-wdsi.ps1 for Microsoft Defender false-positive submission.
+- **Winget manifest** — created and validated for HELIX-Origin.WindowsGameExplorer ([PR #466116](https://github.com/microsoft/winget-pkgs/pull/466116), pending review/merge).
+- **Release workflow** — automated release with signing, packaging, WDSI submission, and winget PR.
+- **Troubleshooting docs** — Windows Defender false positive section with folders, executables, registry keys, PowerShell exclusions, and submission instructions.
+
+### Changed
+- **App data location** — moved from %USERPROFILE%\Game Explorer to %LOCALAPPDATA%\Game Explorer.
+- **Icon assets** — swapped from DLL-embedded to on-disk .ico (game-explorer.ico); Windows 10 icon renamed to game-explorer-icon-alt.ico.
+- **Shell shortcut** — shell:games shortcut replaced with /e,::{CLSID} for modern Windows.
+- **Service behavior** — failure actions set to SC_ACTION_NONE (no auto-restart on kill).
+- **UI strings** — "Manage Metadata" → "Manage Games".
+- **Details view** — now shows developer, publisher, rating, playtime, storefront icon.
+- **Game cards** — show developer instead of storefront as subtext.
+
+### Fixed
+- **Service stability** — fixed service auto-restart on force-kill.
+- **IndieGala** — fixed platform bloc (scanner blocking, notifications filtering).
+- **Legacy UI** — legacy command bar documented as known issue.
