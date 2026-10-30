@@ -1,33 +1,47 @@
-# PR auto-labeler configuration (actions/labeler)
+# PR auto-labeler configuration (actions/labeler v5)
 # Labels are applied based on changed file paths.
 
 'area: shell-extension':
-  - 'src/shell/**'
-  - 'include/**'
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'src/shell/**'
+          - 'include/**'
 
 'area: studio':
-  - 'src/manager/**'
-  - 'src/studio/**'
-  - 'src/config/**'
-  - 'src/ui/**'
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'src/manager/**'
+          - 'src/studio/**'
+          - 'src/config/**'
+          - 'src/ui/**'
 
 'area: build':
-  - 'CMakeLists.txt'
-  - 'scripts/**'
-  - 'installer/**'
-  - 'third_party/**'
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'CMakeLists.txt'
+          - 'scripts/**'
+          - 'installer/**'
+          - 'third_party/**'
 
 'area: docs':
-  - 'docs/**'
-  - '**/*.md'
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'docs/**'
+          - '**/*.md'
 
 'area: ci':
-  - '.github/**'
+  - changed-files:
+      - any-glob-to-any-file:
+          - '.github/**'
 
 'area: tests':
-  - 'tests/**'
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'tests/**'
 
 'dependencies':
-  - 'third_party/**'
-  - '**/package*.json'
-  - '**/CMakeLists.txt'
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'third_party/**'
+          - '**/package*.json'
+          - '**/CMakeLists.txt'

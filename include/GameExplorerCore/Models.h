@@ -39,7 +39,8 @@ struct GameItem {
     // Artwork & Assets (paths in %LOCALAPPDATA%\Game Explorer\cache\art\)
     std::wstring coverArtPath;      // Tall box art (~2:3 or ~3:4)
     std::wstring heroArtPath;       // Wide steam hero banner (~16:9 or ~21:9)
-    std::wstring iconPath;          // Square icon for list details view
+    std::wstring iconPath;          // Square icon for list/details view
+    std::wstring logoPath;          // Logo/icon for Tiles view (separate from details icon)
     std::wstring detailsArtPath;    // Dedicated art for Details/Inspector pane (e.g. static card or wide banner)
     std::wstring coverArtUrl;       // Remote CDN / storefront image link
     std::wstring heroArtUrl;        // Remote CDN / storefront image link

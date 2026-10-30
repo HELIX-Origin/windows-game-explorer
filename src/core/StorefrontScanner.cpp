@@ -3622,11 +3622,8 @@ ResolvedShortcutInfo ResolveLnkShortcut(const std::wstring& lnkPath) {
                 if (SUCCEEDED(psl->GetWorkingDirectory(workDir, MAX_PATH))) {
                     result.workingDir = workDir;
                 }
-                wchar_t iconPath[MAX_PATH] = { 0 };
-                int iconIdx = 0;
-                if (SUCCEEDED(psl->GetIconLocation(iconPath, MAX_PATH, &iconIdx))) {
-                    result.iconPath = iconPath;
-                }
+                // Do not harvest the application's own (small) embedded icon; icons must
+                // come from metadata/storefront providers only.
             }
             ppf->Release();
         }
@@ -3677,9 +3674,8 @@ std::vector<GameItem> StorefrontScanner::ScanGooglePlayGames() {
             item.executablePath = sc.targetPath.empty() ? entry.path().wstring() : sc.targetPath;
             item.launchArguments = sc.arguments;
             item.workingDirectory = sc.workingDir;
-            if (!sc.iconPath.empty()) {
-                item.iconPath = sc.iconPath;
-            }
+            // Do not harvest the application's own (small) embedded icon; icons must
+            // come from metadata/storefront providers only.
 
             games.push_back(std::move(item));
         }
@@ -5555,7 +5551,8 @@ bool StorefrontScanner::AddCustomLocalGame(const std::wstring& executablePath, c
             exe = lnk.targetPath;
             if (!lnk.workingDir.empty()) workDir = lnk.workingDir;
             if (!lnk.arguments.empty()) item.launchArguments = lnk.arguments;
-            if (!lnk.iconPath.empty()) item.iconPath = lnk.iconPath;
+            // Do not harvest the application's own (small) embedded icon; icons must
+            // come from metadata/storefront providers only.
         }
     }
 
@@ -5933,6 +5930,7 @@ bool StorefrontScanner::LoadPerGameMetadata(GameItem& item) {
             else if ((key == L"coverArtPath" || key == L"cover") && isValidPathOrUrl(val)) item.coverArtPath = val;
             else if ((key == L"heroArtPath" || key == L"hero") && isValidPathOrUrl(val)) item.heroArtPath = val;
             else if ((key == L"iconPath" || key == L"icon") && isValidPathOrUrl(val)) item.iconPath = val;
+            else if ((key == L"logoPath" || key == L"tileIconPath" || key == L"tilesIcon" || key == L"logo") && isValidPathOrUrl(val)) item.logoPath = val;
             else if ((key == L"detailsArtPath" || key == L"details") && isValidPathOrUrl(val)) item.detailsArtPath = val;
             else if ((key == L"launchString" || key == L"launchCommand") && !val.empty()) item.launchCommand = val;
             else if (key == L"launchArguments" && !val.empty()) item.launchArguments = val;
@@ -5983,7 +5981,20 @@ bool StorefrontScanner::SavePerGameMetadata(const GameItem& item) {
             if (toSave.launchArguments.empty()) toSave.launchArguments = existing.launchArguments;
             if (toSave.coverArtPath.empty()) toSave.coverArtPath = existing.coverArtPath;
             if (toSave.heroArtPath.empty()) toSave.heroArtPath = existing.heroArtPath;
-            if (toSave.iconPath.empty()) toSave.iconPath = existing.iconPath;
+            if (toSave.iconPath.empty()) {
+                // Only carry over storefront/metadata-provided icons (image files),
+                // never stale executable/shortcut icons.
+                const auto ext = fs::path(existing.iconPath).extension().wstring();
+                const bool isImage = (_wcsicmp(ext.c_str(), L".png") == 0 ||
+                                      _wcsicmp(ext.c_str(), L".jpg") == 0 ||
+                                      _wcsicmp(ext.c_str(), L".jpeg") == 0 ||
+                                      _wcsicmp(ext.c_str(), L".gif") == 0 ||
+                                      _wcsicmp(ext.c_str(), L".webp") == 0 ||
+                                      _wcsicmp(ext.c_str(), L".bmp") == 0 ||
+                                      _wcsicmp(ext.c_str(), L".ico") == 0);
+                if (isImage && fs::exists(existing.iconPath)) toSave.iconPath = existing.iconPath;
+            }
+            if (toSave.logoPath.empty()) toSave.logoPath = existing.logoPath;
             if (toSave.detailsArtPath.empty()) toSave.detailsArtPath = existing.detailsArtPath;
             if (toSave.storePageUrl.empty()) toSave.storePageUrl = existing.storePageUrl;
             if (toSave.platform == PlatformType::Unknown) toSave.platform = existing.platform;
@@ -6009,6 +6020,7 @@ bool StorefrontScanner::SavePerGameMetadata(const GameItem& item) {
     outStr += L"  \"executablePath\": \"" + EscapeJsonString(toSave.executablePath) + L"\",\n";
     outStr += L"  \"workingDirectory\": \"" + EscapeJsonString(toSave.workingDirectory) + L"\",\n";
     outStr += L"  \"iconPath\": \"" + EscapeJsonString(toSave.iconPath) + L"\",\n";
+    outStr += L"  \"logoPath\": \"" + EscapeJsonString(toSave.logoPath) + L"\",\n";
     outStr += L"  \"coverArtPath\": \"" + EscapeJsonString(toSave.coverArtPath) + L"\",\n";
     outStr += L"  \"heroArtPath\": \"" + EscapeJsonString(toSave.heroArtPath) + L"\",\n";
     outStr += L"  \"detailsArtPath\": \"" + EscapeJsonString(toSave.detailsArtPath) + L"\",\n";
@@ -6191,6 +6203,7 @@ std::vector<GameItem> StorefrontScanner::ScanAllInstalledGames() {
             if (existing.coverArtPath.empty()) existing.coverArtPath = game.coverArtPath;
             if (existing.heroArtPath.empty()) existing.heroArtPath = game.heroArtPath;
             if (existing.iconPath.empty()) existing.iconPath = game.iconPath;
+            if (existing.logoPath.empty()) existing.logoPath = game.logoPath;
             if (existing.detailsArtPath.empty()) existing.detailsArtPath = game.detailsArtPath;
             if (existing.storePageUrl.empty()) existing.storePageUrl = game.storePageUrl;
             if (existing.platform == PlatformType::Unknown) existing.platform = game.platform;
@@ -6274,11 +6287,8 @@ std::vector<GameItem> StorefrontScanner::ScanGameShortcuts() {
             game.synopsis = desc;
         }
 
-        wchar_t iconPath[MAX_PATH] = { 0 };
-        int iconIdx = 0;
-        if (SUCCEEDED(psl->GetIconLocation(iconPath, MAX_PATH, &iconIdx))) {
-            game.iconPath = iconPath;
-        }
+        // Do not harvest the application's own (small) embedded icon; icons must
+        // come from metadata/storefront providers only.
 
         psl->Release();
 

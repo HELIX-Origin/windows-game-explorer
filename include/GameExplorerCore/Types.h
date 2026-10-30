@@ -35,6 +35,9 @@ enum class LayoutMode : uint32_t {
     if (str == L"DetailsView") {
         return LayoutMode::DetailsView;
     }
+    if (str == L"Tiles") {
+        return LayoutMode::Tiles;
+    }
     return LayoutMode::CoverArt;
 }
 

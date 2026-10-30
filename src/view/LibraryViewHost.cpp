@@ -608,10 +608,34 @@ void LibraryViewHost::LoadDataAsync(HWND hwndNotify) {
         }
 
         for (auto& g : games) {
-            if (g.iconPath.empty() && !g.executablePath.empty()) {
-                g.iconPath = EnsureExtractedIconPng(g.appId, g.executablePath);
-            } else if (!g.iconPath.empty()) {
-                g.iconPath = EnsureExtractedIconPng(g.appId, g.iconPath);
+            // Keep only storefront/metadata-provided icons (image files). Never
+            // extract or use the application's own (small) embedded icons, which
+            // are not authored for tile/detail viewports and cause clipping/blur.
+            if (!g.iconPath.empty()) {
+                const auto ext = fs::path(g.iconPath).extension().wstring();
+                bool isImage = false;
+                if (_wcsicmp(ext.c_str(), L".png") == 0 ||
+                    _wcsicmp(ext.c_str(), L".jpg") == 0 ||
+                    _wcsicmp(ext.c_str(), L".jpeg") == 0 ||
+                    _wcsicmp(ext.c_str(), L".gif") == 0 ||
+                    _wcsicmp(ext.c_str(), L".webp") == 0 ||
+                    _wcsicmp(ext.c_str(), L".bmp") == 0 ||
+                    _wcsicmp(ext.c_str(), L".ico") == 0) {
+                    isImage = true;
+                }
+                if (!isImage) {
+                    // Executable / shortcut / library path: drop, never extract.
+                    g.iconPath.clear();
+                } else if (!fs::exists(g.iconPath)) {
+                    g.iconPath.clear();
+                }
+                // NOTE: We deliberately do NOT validate the icon's aspect ratio
+                // here. The metadata JSON is authoritative and user-customised
+                // icons must never be rejected or overridden by the app. Ratio
+                // enforcement happens only when searching for new art in the
+                // Library Manager, and invalid sizes are cleaned up by an
+                // explicit reset-cache rebuild (the only operation that
+                // overrides user settings).
             }
         }
 
@@ -2056,35 +2080,36 @@ void LibraryViewHost::BuildXamlViewport() {
                 rowCard.Padding(wux::ThicknessHelper::FromLengths(12, 8, 12, 8));
 
                 wuxc::Grid rowGrid;
-                wuxc::ColumnDefinition cIcon; cIcon.Width(wux::GridLengthHelper::FromPixels(64));
+                wuxc::ColumnDefinition cIcon; cIcon.Width(wux::GridLengthHelper::FromPixels(60));
                 wuxc::ColumnDefinition cText; cText.Width(wux::GridLengthHelper::FromValueAndType(1.0, wux::GridUnitType::Star));
                 rowGrid.ColumnDefinitions().Append(cIcon);
                 rowGrid.ColumnDefinitions().Append(cText);
 
-                // Icon on the left
+                // Icon on the left. Tiles view uses ICONS ONLY (metadata/storefront
+                // providers). Never fall back to cover/hero art or to exe-extracted
+                // icons, which are not authored for this viewport and cause clipping/blur.
+                // Prioritize the user's own iconPath (never override it); otherwise use
+                // a metadata-provided square icon. No exe extraction here.
                 std::wstring tileArt;
-                if (ImageValidator::IsValidIcon(g.iconPath)) {
+                if (!g.logoPath.empty() && fs::exists(g.logoPath)) {
+                    tileArt = g.logoPath;
+                } else if (!g.iconPath.empty() && fs::exists(g.iconPath)) {  // trust user metadata JSON icons; never reject
                     tileArt = g.iconPath;
-                } else if (!g.iconPath.empty()) {
-                    tileArt = g.iconPath;
-                } else if (!g.coverArtPath.empty()) {
-                    tileArt = g.coverArtPath;
-                }
-                if (tileArt.empty() && !g.executablePath.empty()) {
-                    tileArt = EnsureExtractedIconPng(g.appId, g.executablePath);
                 }
                 if (auto bmp = LoadLocalBitmap(tileArt)) {
                     wuxc::Border artHost;
-                    artHost.Width(64);
-                    artHost.Height(64);
+                    artHost.Width(48);
+                    artHost.Height(48);
                     artHost.CornerRadius(wux::CornerRadiusHelper::FromUniformRadius(6));
                     artHost.Background(m_isDarkMode ? MakeBrush(255, 20, 20, 24) : MakeBrush(255, 240, 240, 244));
                     artHost.Margin(wux::ThicknessHelper::FromLengths(0, 0, 12, 0));
                     wuxc::Image artImg;
                     artImg.Source(bmp);
-                    artImg.Stretch(wuxm::Stretch::Uniform);
-                    artImg.HorizontalAlignment(wux::HorizontalAlignment::Center);
-                    artImg.VerticalAlignment(wux::VerticalAlignment::Center);
+                    artImg.Width(48);
+                    artImg.Height(48);
+                    artImg.Stretch(wuxm::Stretch::Fill);
+                    artImg.HorizontalAlignment(wux::HorizontalAlignment::Stretch);
+                    artImg.VerticalAlignment(wux::VerticalAlignment::Stretch);
                     artHost.Child(artImg);
                     wuxc::Grid::SetColumn(artHost, 0);
                     rowGrid.Children().Append(artHost);
@@ -2193,21 +2218,22 @@ void LibraryViewHost::BuildXamlViewport() {
                 rowGrid.ColumnDefinitions().Append(c5);
                 rowGrid.ColumnDefinitions().Append(c6);
 
-                std::wstring thumbPath = !g.iconPath.empty() && ImageValidator::IsValidIcon(g.iconPath)
-                    ? g.iconPath
-                    : (!g.executablePath.empty() ? EnsureExtractedIconPng(g.appId, g.executablePath) : L"");
-                if (thumbPath.empty() || !fs::exists(thumbPath)) {
-                    if (!g.iconPath.empty() && fs::exists(g.iconPath)) thumbPath = g.iconPath;
-                    else if (!g.coverArtPath.empty() && fs::exists(g.coverArtPath)) thumbPath = g.coverArtPath;
+                // Details view uses ICONS ONLY (metadata/storefront providers) —
+                // never cover/hero art and never exe-extracted icons.
+                std::wstring thumbPath;
+                if (!g.iconPath.empty() && fs::exists(g.iconPath)) {  // trust user metadata JSON icons; never reject
+                    thumbPath = g.iconPath;
+                } else if (!g.logoPath.empty() && fs::exists(g.logoPath)) {
+                    thumbPath = g.logoPath;
                 }
                 if (auto bmp = LoadLocalBitmap(thumbPath)) {
                     wuxc::Image ico;
                     ico.Source(bmp);
                     ico.Width(32);
                     ico.Height(32);
-                    ico.Stretch(wuxm::Stretch::Uniform);
-                    ico.HorizontalAlignment(wux::HorizontalAlignment::Center);
-                    ico.VerticalAlignment(wux::VerticalAlignment::Center);
+                    ico.Stretch(wuxm::Stretch::Fill);
+                    ico.HorizontalAlignment(wux::HorizontalAlignment::Stretch);
+                    ico.VerticalAlignment(wux::VerticalAlignment::Stretch);
                     wuxc::Grid::SetColumn(ico, 0);
                     rowGrid.Children().Append(ico);
                 }
@@ -2353,53 +2379,44 @@ void LibraryViewHost::BuildXamlViewport() {
                 cardGrid.RowDefinitions().Append(rMeta);
 
                 wuxc::Border artHost;
+                artHost.Width(cardW);
+                artHost.Height(imgH);
                 artHost.Background(m_isDarkMode ? MakeBrush(255, 20, 20, 24) : MakeBrush(255, 240, 240, 244));
                 artHost.CornerRadius(wux::CornerRadiusHelper::FromRadii(6, 6, 0, 0));
 
                 std::wstring primaryArt;
                 if (isTiles) {
-                    if (ImageValidator::IsValidIcon(g.iconPath)) {
+                    // Tiles view uses LOGO/ICON ONLY (metadata/storefront providers) —
+                    // prefer logoPath for tiles; fallback to iconPath.
+                    if (!g.logoPath.empty() && fs::exists(g.logoPath)) {
+                        primaryArt = g.logoPath;
+                    } else if (!g.iconPath.empty() && fs::exists(g.iconPath)) {  // trust user metadata JSON icons; never reject
                         primaryArt = g.iconPath;
-                    } else if (!g.iconPath.empty()) {
-                        primaryArt = g.iconPath;
-                    } else if (!g.coverArtPath.empty()) {
-                        primaryArt = g.coverArtPath;
                     }
                 } else if (isHero) {
+                    // Hero view uses HERO ART ONLY — never cover/icon art.
                     if (ImageValidator::IsValidHero(g.heroArtPath)) {
                         primaryArt = g.heroArtPath;
                     } else if (!g.heroArtPath.empty()) {
                         primaryArt = g.heroArtPath;
-                    } else if (ImageValidator::IsValidHero(g.coverArtPath)) {
-                        primaryArt = g.coverArtPath;
                     }
                 } else {
+                    // Box (cover) view uses COVER ART ONLY — never hero/icon art.
                     if (ImageValidator::IsValidCover(g.coverArtPath)) {
                         primaryArt = g.coverArtPath;
                     } else if (!g.coverArtPath.empty()) {
                         primaryArt = g.coverArtPath;
-                    } else if (!g.heroArtPath.empty()) {
-                        primaryArt = g.heroArtPath;
                     }
                 }
-
+ 
                 if (auto bmp = LoadLocalBitmap(primaryArt)) {
                     wuxc::Image artImg;
                     artImg.Source(bmp);
+                    artImg.Width(cardW);
+                    artImg.Height(imgH);
                     artImg.Stretch(wuxm::Stretch::Fill);
-                    artHost.Child(artImg);
-                } else if (auto iconBmp = LoadLocalBitmap(g.iconPath)) {
-                    wuxc::Image icoImg;
-                    icoImg.Source(iconBmp);
-                    icoImg.Width(84);
-                    icoImg.Height(84);
-                    icoImg.HorizontalAlignment(wux::HorizontalAlignment::Center);
-                    icoImg.VerticalAlignment(wux::VerticalAlignment::Center);
-                    artHost.Child(icoImg);
-                } else if (auto fallbackBmp = LoadLocalBitmap(!g.coverArtPath.empty() ? g.coverArtPath : g.heroArtPath)) {
-                    wuxc::Image artImg;
-                    artImg.Source(fallbackBmp);
-                    artImg.Stretch(wuxm::Stretch::Fill);
+                    artImg.HorizontalAlignment(wux::HorizontalAlignment::Stretch);
+                    artImg.VerticalAlignment(wux::VerticalAlignment::Stretch);
                     artHost.Child(artImg);
                 }
                 wuxc::Grid::SetRow(artHost, 0);
