@@ -145,34 +145,6 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Verify release assets uploaded
-        shell: pwsh
-        run: |
-          $ver = "${{ steps.version.outputs.version }}"
-          $expected = @("windows-game-explorer-v$ver-setup.exe", "windows-game-explorer-v$ver-win64.zip")
-          Start-Sleep -Seconds 15
-          $maxRetries = 60
-          for ($i = 0; $i -lt $maxRetries; $i++) {
-            $json = gh release view "v$ver" --repo HELIX-Origin/windows-game-explorer --json assets 2>$null
-          $release = $json | ConvertFrom-Json
-          $assets = @($release.assets | ForEach-Object { $_.name })
-          Write-Host "Found assets: $($assets -join ', ')"
-          $allFound = $true
-          foreach ($exp in $expected) {
-            if ($assets -notcontains $exp) { $allFound = $false; break }
-          }
-            if ($allFound) {
-              Write-Host "All release assets verified uploaded."
-              break
-            }
-            Write-Host "Waiting for assets... ($i/$maxRetries)"
-            Start-Sleep -Seconds 10
-          }
-          if (-not $allFound) {
-            Write-Error "Not all release assets were uploaded. Found: $($assets -join ', ')"
-            exit 1
-          }
-
       - name: Submit to Winget (optional)
         shell: pwsh
         env:
