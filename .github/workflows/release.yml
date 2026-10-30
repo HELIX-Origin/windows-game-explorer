@@ -61,12 +61,15 @@ jobs:
           Write-Host "signtool found at: $signtoolDir"
 
       - name: Decode signing certificate from secrets
-        if: ${{ secrets.CODE_SIGNING_CERT_BASE64 != '' }}
         shell: pwsh
         env:
           CERT_BASE64: ${{ secrets.CODE_SIGNING_CERT_BASE64 }}
           CERT_PASSWORD: ${{ secrets.CODE_SIGNING_CERT_PASSWORD }}
         run: |
+          if ([string]::IsNullOrEmpty($env:CERT_BASE64)) {
+            Write-Host "No signing certificate configured, skipping."
+            exit 0
+          }
           $bytes = [Convert]::FromBase64String($env:CERT_BASE64)
           [IO.File]::WriteAllBytes("signing-cert.pfx", $bytes)
           # Export public cert for distribution
@@ -78,12 +81,15 @@ jobs:
           Write-Host "Certificate decoded and public cert exported."
 
       - name: Sign binaries
-        if: ${{ secrets.CODE_SIGNING_CERT_BASE64 != '' }}
         shell: pwsh
         env:
           WINDOWS_CERT_THUMBPRINT: ${{ secrets.CODE_SIGNING_CERT_THUMBPRINT }}
           CERT_PASSWORD: ${{ secrets.CODE_SIGNING_CERT_PASSWORD }}
         run: |
+          if ([string]::IsNullOrEmpty($env:WINDOWS_CERT_THUMBPRINT)) {
+            Write-Host "No signing thumbprint configured, skipping."
+            exit 0
+          }
           # Import PFX to cert store
           $password = ConvertTo-SecureString -String $env:CERT_PASSWORD -Force -AsPlainText
           Import-PfxCertificate -FilePath "signing-cert.pfx" -CertStoreLocation "Cert:\CurrentUser\My" -Password $password | Out-Null

@@ -41,7 +41,6 @@ jobs:
         shell: pwsh
         run: |
           choco install nsis -y
-          # Add to PATH
           echo "C:\Program Files (x86)\NSIS" >> $env:GITHUB_PATH
 
       - name: Package Distribution (portable ZIP + NSIS installer)
