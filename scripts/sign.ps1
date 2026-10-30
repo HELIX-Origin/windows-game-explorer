@@ -26,20 +26,29 @@ if ([string]::IsNullOrWhiteSpace($Thumbprint)) {
     exit 0
 }
 
-$SignTool = Get-Command "signtool.exe" -ErrorAction SilentlyContinue
+# Resolve signtool.exe, preferring an x64 (or x86) build over an ARM build.
+# The Windows SDK installs per-architecture signtool.exe copies; picking the
+# first one recursively can land on an arm\signtool.exe that cannot run on an
+# x64 runner (see release workflow failure). Never trust PATH order alone.
+$SignTool = $null
+$candidates = @(
+    "C:\Program Files (x86)\Windows Kits\10\bin\*\x64\signtool.exe",
+    "C:\Program Files (x86)\Windows Kits\10\bin\*\x86\signtool.exe",
+    "C:\Program Files (x86)\Windows Kits\10\App Certification Kit\signtool.exe"
+)
+foreach ($c in $candidates) {
+    $found = Get-ChildItem -Path $c -ErrorAction SilentlyContinue |
+        Sort-Object FullName -Descending |
+        Select-Object -First 1
+    if ($found) {
+        $SignTool = $found
+        break
+    }
+}
 if (-not $SignTool) {
-    # Search common locations
-    $candidates = @(
-        "C:\Program Files (x86)\Windows Kits\10\App Certification Kit\signtool.exe",
-        "C:\Program Files (x86)\Windows Kits\10\bin\*\x64\signtool.exe",
-        "C:\Program Files (x86)\Windows Kits\10\bin\*\x86\signtool.exe"
-    )
-    foreach ($c in $candidates) {
-        $found = Get-ChildItem -Path $c -ErrorAction SilentlyContinue | Select-Object -First 1
-        if ($found) {
-            $SignTool = $found
-            break
-        }
+    $cmd = Get-Command "signtool.exe" -ErrorAction SilentlyContinue
+    if ($cmd -and (Test-Path -LiteralPath $cmd.Source) -and ($cmd.Source -notmatch '\\arm64?\\' -and $cmd.Source -notmatch '\\arm\\')) {
+        $SignTool = $cmd
     }
 }
 if (-not $SignTool) {
