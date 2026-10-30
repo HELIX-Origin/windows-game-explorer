@@ -63,11 +63,11 @@ jobs:
         run: ./scripts/submit-to-wdsi.ps1 -Configuration Release
         continue-on-error: true
 
-      - name: Submit to Winget (optional, requires WINGET_TOKEN)
-        if: ${{ secrets.WINGET_TOKEN != '' }}
+      - name: Submit to Winget (optional, requires PAT_TOKEN)
+        if: ${{ secrets.PAT_TOKEN != '' }}
         shell: pwsh
         env:
-          WINGET_TOKEN: ${{ secrets.WINGET_TOKEN }}
+          PAT_TOKEN: ${{ secrets.PAT_TOKEN }}
         run: |
           # Install wingetcreate
           $wc = (Get-Command wingetcreate -ErrorAction SilentlyContinue)
@@ -76,7 +76,7 @@ jobs:
             $wc = ".\wingetcreate.exe"
           }
           # Submit manifest to microsoft/winget-pkgs
-          & $wc submit --token $env:WINGET_TOKEN --prtitle "New version: HELIX-Origin.WindowsGameExplorer v${{ steps.version.outputs.version }}" winget/manifests/h/HELIX-Origin/WindowsGameExplorer/${{ steps.version.outputs.version }}
+          & $wc submit --token $env:PAT_TOKEN --prtitle "New version: HELIX-Origin.WindowsGameExplorer v${{ steps.version.outputs.version }}" winget/manifests/h/HELIX-Origin/WindowsGameExplorer/${{ steps.version.outputs.version }}
           # Note: After PR creation, add a comment "/verify" to trigger the winget bot verification.
           Write-Host "Winget PR submitted. Add '/verify' comment to the PR to trigger verification."
 
