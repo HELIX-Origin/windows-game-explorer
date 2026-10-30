@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.20)
 
 project(WindowsGameExplorer
-    VERSION 2.7.0
+    VERSION 2.8.0
     DESCRIPTION "Native Windows Game Explorer and Shell Extension"
     LANGUAGES C CXX RC
 )
@@ -86,7 +86,7 @@ add_library(GameExplorerShell SHARED
     src/shell/CategoryProvider.cpp
     src/shell/Registration.cpp
     src/view/LibraryViewHost.cpp
-    src/shell/Resource.rc
+    src/shell/ResourceShell.rc
     src/shell/GameExplorerShell.def
 )
 target_include_directories(GameExplorerShell PRIVATE

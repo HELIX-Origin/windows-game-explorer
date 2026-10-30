@@ -11,7 +11,7 @@ overlays and friends lists keep working. It never runs a game behind the storefr
 ### Does it modify Steam, Epic, GOG or Xbox files?
 
 Never. Storefront manifests, caches and libraries are opened read-only. Everything the app owns —
-database, metadata, artwork, alerts, settings — lives under `%USERPROFILE%\Game Explorer\`.
+database, metadata, artwork, alerts, settings — lives under `%LOCALAPPDATA%\Game Explorer\`.
 
 ### Do I need API keys to use it?
 
@@ -49,7 +49,7 @@ version and report the comparison as unsupported. Details:
 
 Once when the background service starts, again on interactive logon/unlock, and whenever you press
 **Check for alerts now**. There is no polling timer. Alerts are cached in
-`%USERPROFILE%\Game Explorer\notifications.json`.
+`%LOCALAPPDATA%\Game Explorer\notifications.json`.
 
 ### Does the bell require an account anywhere?
 
@@ -103,7 +103,7 @@ the per-game JSON file.
 
 ### Where are my edits kept if I reinstall?
 
-Everything is in `%USERPROFILE%\Game Explorer\`. The installer and uninstaller never delete it, so a
+Everything is in `%LOCALAPPDATA%\Game Explorer\`. The installer and uninstaller never delete it, so a
 reinstall picks up your library, metadata, artwork and settings.
 
 ### Does it work in File Explorer tabs?
@@ -113,7 +113,7 @@ standalone window additionally suppresses the navigation pane and status bar to 
 
 ### How do I move my library to a new PC?
 
-Copy `%USERPROFILE%\Game Explorer\` (or enable OneDrive sync beforehand and copy
+Copy `%LOCALAPPDATA%\Game Explorer\` (or enable OneDrive sync beforehand and copy
 `%OneDrive%\Windows Game Explorer\`). Reinstall, then launch Studio so the database is opened and
 migrated.
 

@@ -9,7 +9,8 @@ namespace GameExplorer {
 enum class LayoutMode : uint32_t {
     CoverArt = 0,    // Tall box art style (~2:3 or ~3:4 aspect ratio)
     HeroBanner = 1,  // Wide banner style (~16:9 or ~21:9 aspect ratio)
-    DetailsView = 2  // Structured list with app icons, title, rating, etc.
+    DetailsView = 2, // Structured list with app icons, title, rating, etc.
+    Tiles = 3        // Windows 11 tiles view (icon-based, compact grid)
 };
 
 [[nodiscard]] constexpr std::wstring_view LayoutModeToString(LayoutMode mode) noexcept {
@@ -20,6 +21,8 @@ enum class LayoutMode : uint32_t {
         return L"HeroBanner";
     case LayoutMode::DetailsView:
         return L"DetailsView";
+    case LayoutMode::Tiles:
+        return L"Tiles";
     default:
         return L"CoverArt";
     }

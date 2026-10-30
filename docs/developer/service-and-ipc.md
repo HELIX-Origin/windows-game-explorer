@@ -75,7 +75,7 @@ console session, so a machine that boots without a signed-in user still produces
 
 The service runs as `LocalSystem`, but every path it touches is user-scoped:
 
-- `%USERPROFILE%\Game Explorer\` (database, caches, feed files)
+- `%LOCALAPPDATA%\Game Explorer\` (database, caches, feed files)
 - storefront client caches (`%LOCALAPPDATA%`, `%PROGRAMDATA%` manifests)
 - the SQLite database that holds settings
 
@@ -132,7 +132,7 @@ sequenceDiagram
     participant Studio as Game Explorer Studio (Configuration)
     participant Pipe as \\.\pipe\GameExplorerService
     participant Worker as notificationWorker
-    participant Files as %USERPROFILE%\Game Explorer
+    participant Files as %LOCALAPPDATA%\Game Explorer
 
     Studio->>Pipe: CHECK_UPDATES
     Pipe->>Worker: Request()

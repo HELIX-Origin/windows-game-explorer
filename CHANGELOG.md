@@ -22,7 +22,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   `goggame-*.info` with `ImportedLatestBuildIds`; Epic and Xbox report the installed version but stay
   `NotSupported` because neither storefront publishes a public comparison endpoint. Uninstalled editions
   and editions without an installed build id never touch the network. Results are cached in
-  `%USERPROFILE%\Game Explorer\updates.json`.
+  `%LOCALAPPDATA%\Game Explorer\updates.json`.
 - **Catalogue notification bell**: a bell button in the catalogue header collects alerts the background
   service produced, with an unread badge capped at `9+`. Alerts cover newer builds for installed editions,
   recent storefront news from the signed-in user's own feeds (Steam community announcements per owned game,
@@ -35,7 +35,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - **Service-side refresh**: `GameExplorerService` now runs one notification pass at start, on interactive
   logon (`SERVICE_CONTROL_SESSIONCHANGE` with `WTS_SESSION_LOGON`), and on the new `CHECK_UPDATES` pipe
   command, exposing `GET_UPDATES_STATUS`. Because the service runs as `LocalSystem`, the pass impersonates the
-  active console user so `%USERPROFILE%\Game Explorer`, storefront caches and settings resolve correctly; with
+  active console user so `%LOCALAPPDATA%\Game Explorer`, storefront caches and settings resolve correctly; with
   nobody signed in the pass is skipped instead of writing into the service account's profile.
 - **Responsive 2-column layout in Configuration page**: cards dynamically arrange into two balanced columns when window width >= 1000px (Cards 0, 1, 2, 6 on the left; Cards 3, 4, 5 on the right) with independent padding and bounds, falling back to a clean single column on narrower windows.
 - **25 new unit tests**: 14 for the update checker and 11 for the notification feed, bringing the suite to
@@ -261,7 +261,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   - Strictly rejects unrelated titles matching loose substrings (e.g. *That New Teacher* &ne; *That Old Time Religion*, *The Proteus Effect* &ne; *'the*, *Loverse* &ne; *Dot Kareshi*).
   - Protected itch.io storefront artwork and metadata from being overwritten by external scrapers.
 - **Write-Only OneDrive Backup Alignment**:
-  - Ensured all active runtime metadata and art loading operations read exclusively from local `%USERPROFILE%\Game Explorer\`. The OneDrive directory is strictly maintained as a write-only backup and recovery mirror.
+  - Ensured all active runtime metadata and art loading operations read exclusively from local `%LOCALAPPDATA%\Game Explorer\`. The OneDrive directory is strictly maintained as a write-only backup and recovery mirror.
 - **Scope Alignment & Fabricated Plan Removal**:
   - Formally dropped all "all owned games" milestone planning per user directive; library focus remains strictly on installed games.
   - Removed all unsupported cloud gaming and handheld big picture overlay concepts.
@@ -287,7 +287,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Fixed
 - **Duplicate Test Games Purged**:
-  - Cleaned out 47 historical test game artifacts (`custom_*.json`) from `%USERPROFILE%\Game Explorer\metadata\` and OneDrive mirror directory.
+  - Cleaned out 47 historical test game artifacts (`custom_*.json`) from `%LOCALAPPDATA%\Game Explorer\metadata\` and OneDrive mirror directory.
   - Updated test runner to clean up immediately upon test completion.
 - **Combobox Value Reading Bug**:
   - Resolved empty string returns from `GetWindowTextW` on `CBS_DROPDOWNLIST` controls by utilizing Win32 `CB_GETCURSEL` and `CB_GETLBTEXT`.
@@ -309,7 +309,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   - Generates targeted exact-match search queries following the pattern `"{{game.title}}" {{content.type}}` (e.g. `"Final Fantasy VII Remake" box art cover`, `"Halo Infinite" hero banner wallpaper`, `"Game Title" patreon campaign art`).
   - Web search is 100% internal and native—never pops open external browser windows.
 - **Artwork Cache Reset & Purge**:
-  - Added dedicated `[ 🧹 Reset Cache ]` buttons in `GameExplorerManager.exe` and `GameExplorerConfig.exe` allowing users to cleanly purge and re-initialize the artwork cache folder (`%USERPROFILE%\Game Explorer\cache\art\` and thumbnails).
+  - Added dedicated `[ 🧹 Reset Cache ]` buttons in `GameExplorerManager.exe` and `GameExplorerConfig.exe` allowing users to cleanly purge and re-initialize the artwork cache folder (`%LOCALAPPDATA%\Game Explorer\cache\art\` and thumbnails).
   - Automatically resets thumbnail downloading state sets and triggers fresh artwork discovery.
 - **NSFW / SafeSearch Unblock Toggle**:
   - Added a `Disable SafeSearch (Unblock NSFW)` checkbox directly under the web search bar.
@@ -333,7 +333,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   - **Viewport Selection & Dropdown Apply**:
     - Scrollable viewport rendering live thumbnail cards with resolution badges, source tags (`SteamGridDB`, `Steam Store`, `IGDB`, `Patreon`, `Web`), and bold selection highlights.
     - `[ Apply Selected Artwork ▾ ]` button with dropdown menu to select target view slot (`Apply as Box Art (~2:3 Cover)`, `Apply as Hero Banner (~3.1:1 Widescreen)`, `Apply as Details Art`, `Apply as Icon / Logo`).
-    - Automatically downloads high-res image to local cache (`%USERPROFILE%\Game Explorer\cache\art\`), updates the corresponding editor slot, and refreshes the preview.
+    - Automatically downloads high-res image to local cache (`%LOCALAPPDATA%\Game Explorer\cache\art\`), updates the corresponding editor slot, and refreshes the preview.
 - **Non-Destructive Image Validation (No Artificial Cropping)**:
   - Eliminated artificial cross-slot cropping (`GenerateFittingCover` / `GenerateFittingHero`) to prevent blurry, low-resolution renders and chopped-off compositions.
   - Prioritizes authentic, native-resolution assets from providers, and non-destructively preserves original storefront assets in `detailsArtPath` without pixel degradation.
@@ -417,7 +417,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - **Universal Multi-Source Achievement Engine (`AchievementEngine`)**:
   - Implemented modular `IAchievementProvider` architecture with dedicated `SteamAchievementProvider` (Steam Web API + SteamID64), `RetroAchievementsProvider` (RetroAchievements Web API v2.1.0), and `GOGGalaxyAchievementProvider`.
   - Added `achievements` SQLite table schema in `Database` with composite primary key `(app_id, achievement_id)`, foreign key index `idx_achievements_app_id`, and atomic batch upserting/querying.
-  - Implemented automated achievement badge thumbnail downloading and caching in `%USERPROFILE%\Game Explorer\cache\badges\`.
+  - Implemented automated achievement badge thumbnail downloading and caching in `%LOCALAPPDATA%\Game Explorer\cache\badges\`.
 - **Shell Inspector Trophy Presentation**:
   - Added trophy completion card with progress bar (`🏆 N / Total (XX%)`), badge icon preview, unlock states, and interactive live sync button directly in `ShellView.cpp`.
 - **Config & Settings Credentials Management**:
@@ -426,7 +426,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   - Added automated multi-drive ROMs scanning across all mounted drives (`<Drive>:\ROMs`, `<Drive>:\Games\ROMs`, `%USERPROFILE%\ROMs`, etc.).
   - Supported emulators with standalone and portable path discovery: **Dolphin** (GameCube & Wii), **Project64** (Nintendo 64), **PCSX2** (PlayStation 2), **DuckStation** (PlayStation 1), **PPSSPP** (PSP), **RPCS3** (PlayStation 3), **mGBA** (Game Boy / Color / Advance), **Snes9x** (Super Nintendo), **melonDS** (Nintendo DS), **Citra** (Nintendo 3DS), **Flycast** (Dreamcast & Saturn), and **RetroArch** (Universal multi-system libretro).
 - **Online Libretro Thumbnails CDN Integration**:
-  - Direct retrieval of high-resolution vertical box art (`Named_Boxarts`) and hero banners (`Named_Snaps`) from the Libretro Thumbnails CDN, cached in `%USERPROFILE%\Game Explorer\cache\art\`.
+  - Direct retrieval of high-resolution vertical box art (`Named_Boxarts`) and hero banners (`Named_Snaps`) from the Libretro Thumbnails CDN, cached in `%LOCALAPPDATA%\Game Explorer\cache\art\`.
 - **ROM Title Cleaning Engine (`CleanRomTitle`)**:
   - Intelligent title parser and normalizer stripping compound extensions (`.nkit.iso`, `.iso`, `.z64`, `.rvz`, `.chd`, etc.), parenthesized/bracketed region/version tags (`(USA)`, `[!]`, etc.), and properly inverting leading articles (`Legend of Zelda, The` -> `The Legend of Zelda`).
 - **Structured ROMs Template Release Asset**:
@@ -478,7 +478,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   - **System Locale Support (`Localization`)**: Automatically adapts UI strings and Steam Store API queries to the active Windows system locale (`GetUserDefaultUILanguage` / `GetUserDefaultLocaleName`).
   - **Authentic Windows Games Icon**: Embedded 16-layer multi-resolution Windows `imageres.dll` #14 Games icon (`16x16` to `256x256` with full alpha transparency) across all three binaries.
   - **`GameExplorerConfig.exe`**: Standalone Win32 shell integration & layout configuration utility with dark/light mode styling and live Explorer notification.
-  - **`GameExplorerManager.exe`**: Dedicated Win32 companion reviving the classic Game Explorer Manager (GEM) for adding custom local games, selecting cover art (including animated `.gif`s), and editing per-game metadata (`%USERPROFILE%\Game Explorer\metadata\<appId>.json`).
+  - **`GameExplorerManager.exe`**: Dedicated Win32 companion reviving the classic Game Explorer Manager (GEM) for adding custom local games, selecting cover art (including animated `.gif`s), and editing per-game metadata (`%LOCALAPPDATA%\Game Explorer\metadata\<appId>.json`).
   - **Native PowerShell Build, Test, Packaging & Signing Suite**: Added `scripts/build.ps1`, `scripts/test.ps1`, `scripts/package.ps1`, `scripts/generate-installer-art.ps1`, and `scripts/sign.ps1` enforcing `/W4 /WX` zero-warning compilation and automated C++ unit testing (`GameExplorerTests.exe`).
   - **Dual-Mode NSIS Windows Installer (`installer/windows-game-explorer.nsi`)**: Single-file setup installer (`windows-game-explorer-v2.0.0-setup.exe`) supporting both Per-User (default, no UAC required) and All Users installation, automated COM shell extension registration/unregistration (`regsvr32.exe`), Start Menu shortcuts, Add/Remove Programs integration, and custom ImageMagick-generated sidebar & header branding bitmaps.
 

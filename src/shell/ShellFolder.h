@@ -19,7 +19,7 @@ struct GamePidlData {
 };
 #pragma pack(pop)
 
-class ShellFolder final : public IShellFolder2, public IPersistFolder2, public IExtractIconW, public IExplorerPaneVisibility {
+class ShellFolder final : public IShellFolder2, public IPersistFolder2, public IExtractIconW, public IExplorerCommandProvider, public IExplorerPaneVisibility {
 public:
     ShellFolder();
     ~ShellFolder();
@@ -41,6 +41,10 @@ public:
     // IExtractIconW
     IFACEMETHODIMP GetIconLocation(UINT uFlags, PWSTR pszIconFile, UINT cchMax, int* piIndex, UINT* pwFlags) override;
     IFACEMETHODIMP Extract(PCWSTR pszFile, UINT nIconIndex, HICON* phiconLarge, HICON* phiconSmall, UINT nIconSize) override;
+
+    // IExplorerCommandProvider
+    IFACEMETHODIMP GetCommands(IUnknown* punkSite, REFIID riid, void** ppv) override;
+    IFACEMETHODIMP GetCommand(REFGUID rguidCommandId, REFIID riid, void** ppv) override;
 
     // IShellFolder
     IFACEMETHODIMP ParseDisplayName(HWND hwnd, IBindCtx* pbc, PWSTR pszDisplayName, ULONG* pchEaten, PIDLIST_RELATIVE* ppidl, ULONG* pdwAttributes) override;

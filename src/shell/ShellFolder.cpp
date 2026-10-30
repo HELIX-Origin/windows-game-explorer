@@ -215,6 +215,8 @@ IFACEMETHODIMP ShellFolder::QueryInterface(REFIID riid, void** ppv) {
         *ppv = static_cast<IPersistFolder2*>(this);
     } else if (riid == IID_IExtractIconW) {
         *ppv = static_cast<IExtractIconW*>(this);
+    } else if (riid == IID_IExplorerCommandProvider) {
+        *ppv = static_cast<IExplorerCommandProvider*>(this);
     } else if (riid == IID_IExplorerPaneVisibility) {
         *ppv = static_cast<IExplorerPaneVisibility*>(this);
     }
@@ -498,6 +500,12 @@ IFACEMETHODIMP ShellFolder::CreateViewObject(HWND hwndOwner, REFIID riid, void**
         return S_OK;
     }
 
+    if (riid == IID_IExplorerCommandProvider) {
+        *ppv = static_cast<IExplorerCommandProvider*>(this);
+        AddRef();
+        return S_OK;
+    }
+
     if (riid == IID_IShellView) {
         auto* pView = new (std::nothrow) ShellView(this);
         if (pView == nullptr) return E_OUTOFMEMORY;
@@ -621,7 +629,7 @@ public:
         InsertMenuW(hmenu, indexMenu, MF_BYPOSITION | MF_STRING, idCmdFirst + 0, L"\u25B6 Play Game");
         SetMenuDefaultItem(hmenu, idCmdFirst + 0, FALSE);
 
-        InsertMenuW(hmenu, indexMenu + 1, MF_BYPOSITION | MF_STRING, idCmdFirst + 1, L"Edit in Game Explorer Manager...");
+        InsertMenuW(hmenu, indexMenu + 1, MF_BYPOSITION | MF_STRING, idCmdFirst + 1, L"Edit in Game Explorer Studio...");
 
         if (!m_item.workingDirectory.empty() && fs::exists(m_item.workingDirectory)) {
             InsertMenuW(hmenu, indexMenu + 2, MF_BYPOSITION | MF_STRING, idCmdFirst + 2, L"Open Game Directory");
@@ -694,36 +702,47 @@ IFACEMETHODIMP ShellFolder::GetIconLocation(
     if (pszIconFile == nullptr || piIndex == nullptr || pwFlags == nullptr) {
         return E_POINTER;
     }
+
+    // Resolve the on-disk .ico (never the DLL) so the folder icon comes from the
+    // icon file, not from an embedded resource — this avoids misattribution to the
+    // hosting explorer.exe process. Mirrors the resolution in Registration.cpp.
     wchar_t modulePath[MAX_PATH];
     if (GetModuleFileNameW(g_hInstance, modulePath, MAX_PATH) == 0) {
         return E_FAIL;
     }
-    StringCchCopyW(pszIconFile, cchMax, modulePath);
-    *piIndex = -100; // IDI_GAME_EXPLORER in Resource.rc
-    *pwFlags = GIL_NOTFILENAME | GIL_PERINSTANCE;
+    const std::filesystem::path moduleDir = std::filesystem::path(modulePath).parent_path();
+    const std::filesystem::path userRoot = Storage::GetUserRootPath();
+    std::filesystem::path icoPath = moduleDir / L"game-explorer.ico";
+    if (!std::filesystem::exists(icoPath)) {
+        icoPath = userRoot / L"game-explorer.ico";
+    }
+
+    if (StringCchCopyW(pszIconFile, cchMax, icoPath.c_str()) != S_OK) {
+        return E_FAIL;
+    }
+    *piIndex = 0;
+    *pwFlags = 0;
     return S_OK;
 }
 
 IFACEMETHODIMP ShellFolder::Extract(
-    PCWSTR /*pszFile*/, UINT /*nIconIndex*/, HICON* phiconLarge, HICON* phiconSmall, UINT nIconSize) {
-    const int largeSize = LOWORD(nIconSize);
-    const int smallSize = HIWORD(nIconSize);
-    bool extracted = false;
+    PCWSTR /*pszFile*/, UINT /*nIconIndex*/, HICON* phiconLarge, HICON* phiconSmall, UINT /*nIconSize*/) {
+    // Let the shell extract from the file returned by GetIconLocation.
+    if (phiconLarge != nullptr) *phiconLarge = nullptr;
+    if (phiconSmall != nullptr) *phiconSmall = nullptr;
+    return S_FALSE;
+}
 
-    if (phiconLarge != nullptr && largeSize > 0) {
-        *phiconLarge = static_cast<HICON>(LoadImageW(
-            g_hInstance, MAKEINTRESOURCEW(100), IMAGE_ICON, largeSize, largeSize, LR_DEFAULTCOLOR
-        ));
-        if (*phiconLarge != nullptr) extracted = true;
-    }
-    if (phiconSmall != nullptr && smallSize > 0) {
-        *phiconSmall = static_cast<HICON>(LoadImageW(
-            g_hInstance, MAKEINTRESOURCEW(100), IMAGE_ICON, smallSize, smallSize, LR_DEFAULTCOLOR
-        ));
-        if (*phiconSmall != nullptr) extracted = true;
-    }
+IFACEMETHODIMP ShellFolder::GetCommands(IUnknown* /*punkSite*/, REFIID /*riid*/, void** ppv) {
+    if (ppv != nullptr) *ppv = nullptr;
+    // Return S_OK with nullptr to indicate "no commands provided", which may
+    // suppress the legacy command bar on virtual folders.
+    return S_OK;
+}
 
-    return extracted ? S_OK : S_FALSE;
+IFACEMETHODIMP ShellFolder::GetCommand(REFGUID /*rguidCommandId*/, REFIID /*riid*/, void** ppv) {
+    if (ppv != nullptr) *ppv = nullptr;
+    return E_NOINTERFACE;
 }
 
 IFACEMETHODIMP ShellFolder::GetAttributesOf(UINT cidl, PCUITEMID_CHILD_ARRAY apidl, SFGAOF* rgfInOut) {
@@ -746,7 +765,8 @@ IFACEMETHODIMP ShellFolder::GetUIObjectOf(
     if (ppv == nullptr) return E_POINTER;
     *ppv = nullptr;
 
-    // If querying for the folder itself (cidl == 0 or empty PIDL)
+    // If querying for the folder itself (cidl == 0 or empty PIDL), provide the folder icon
+    // through the documented IExtractIconW mechanism (pointing at the on-disk .ico, not the DLL).
     if (cidl == 0 || apidl == nullptr || apidl[0] == nullptr || apidl[0]->mkid.cb == 0) {
         if (riid == IID_IExtractIconW) {
             *ppv = static_cast<IExtractIconW*>(this);

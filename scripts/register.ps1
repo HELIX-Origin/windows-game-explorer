@@ -16,9 +16,9 @@ $ErrorActionPreference = 'Stop'
 
 Write-GameExplorerBanner -Title 'Register shell extension'
 
-if (-not (Test-GameExplorerAdministrator)) {
-    Write-GameExplorerFailure -Action 'Registration' -Detail 'Administrator rights are required; open an elevated terminal and run: game-explorer.bat register'
-    exit 1
+$isAdmin = Test-GameExplorerAdministrator
+if (-not $isAdmin) {
+    Write-Host 'Running in per-user mode (no Administrator rights). HKCU registration + user-level service.' -ForegroundColor Yellow
 }
 
 # Locate GameExplorerShell.dll when no explicit path was supplied.
@@ -42,13 +42,36 @@ if (-not $DllPath -or -not (Test-Path -LiteralPath $DllPath)) {
 }
 
 Write-Host ('Target DLL : {0}' -f $DllPath) -ForegroundColor White
-Write-Host 'Registering the Windows Shell extension with regsvr32...' -ForegroundColor White
 
-$quotedDll = '"{0}"' -f $DllPath
-$process = Start-Process -FilePath 'regsvr32.exe' -ArgumentList @('/s', $quotedDll) -PassThru -Wait
-if ($process.ExitCode -ne 0) {
-    Write-GameExplorerFailure -Action 'Registration' -Detail ('regsvr32 exited with code {0}' -f $process.ExitCode)
-    exit $process.ExitCode
+# Locate GameExplorerStudio.exe to perform in-process COM registration (no regsvr32).
+$StudioExe = $null
+$studioCandidates = @(
+    (Join-Path $PSScriptRoot '..\GameExplorerStudio.exe'),
+    (Join-Path $PSScriptRoot '..\build\Release\GameExplorerStudio.exe'),
+    (Join-Path $PSScriptRoot '..\Release\GameExplorerStudio.exe')
+)
+foreach ($candidate in $studioCandidates) {
+    if (Test-Path -LiteralPath $candidate) {
+        $StudioExe = (Resolve-Path -LiteralPath $candidate).Path
+        break
+    }
+}
+
+if ($StudioExe) {
+    Write-Host ('Registering the Windows Shell extension via Studio (in-process) : {0}' -f $StudioExe) -ForegroundColor White
+    $proc = Start-Process -FilePath $StudioExe -ArgumentList @('--register') -PassThru -Wait
+    if ($proc.ExitCode -ne 0) {
+        Write-GameExplorerFailure -Action 'Registration' -Detail ('Studio --register exited with code {0}' -f $proc.ExitCode)
+        exit $proc.ExitCode
+    }
+} else {
+    Write-Host 'GameExplorerStudio.exe not found; falling back to regsvr32...' -ForegroundColor Yellow
+    $quotedDll = '"{0}"' -f $DllPath
+    $process = Start-Process -FilePath 'regsvr32.exe' -ArgumentList @('/s', $quotedDll) -PassThru -Wait
+    if ($process.ExitCode -ne 0) {
+        Write-GameExplorerFailure -Action 'Registration' -Detail ('regsvr32 exited with code {0}' -f $process.ExitCode)
+        exit $process.ExitCode
+    }
 }
 
 # Locate and register GameExplorerService.exe

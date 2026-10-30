@@ -23,7 +23,7 @@ to change it safely**.
 Cross-cutting rules:
 
 - **Read-only towards storefronts.** Manifests and caches are parsed; nothing is written back.
-- **User-scoped state.** Everything owned lives in `%USERPROFILE%\Game Explorer\`.
+- **User-scoped state.** Everything owned lives in `%LOCALAPPDATA%\Game Explorer\`.
 - **Cache-first UI.** Views paint from SQLite/cache immediately, then refresh on a worker thread.
 - **Honest reporting.** A check that cannot answer says so (`NotSupported`/`Failed`) instead of
   claiming success.

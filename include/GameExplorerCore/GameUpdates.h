@@ -79,7 +79,7 @@ struct GameUpdateReport {
 [[nodiscard]] GameUpdateReport CheckGameUpdates(const std::vector<OwnedGame>& games);
 
 // Per-user cache next to the rest of the user environment:
-// `%USERPROFILE%\Game Explorer\updates.json`.
+// `%LOCALAPPDATA%\Game Explorer\updates.json`.
 [[nodiscard]] std::filesystem::path UpdateReportPath();
 
 // JSON round-trip for the shared cache. Parsing is deliberately lenient: an unreadable or

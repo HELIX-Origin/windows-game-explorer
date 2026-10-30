@@ -383,7 +383,7 @@ LRESULT CALLBACK StudioWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPara
         ncm.lfMessageFont.lfWeight = FW_BOLD;
         g_hFontBold = CreateFontIndirectW(&ncm.lfMessageFont);
 
-        const int iconResId = DarkMode::IsWindows11OrGreater() ? 100 : 101;
+        const int iconResId = 100;
         g_hAppIcon = static_cast<HICON>(LoadImageW(
             GetModuleHandleW(nullptr), MAKEINTRESOURCEW(iconResId), IMAGE_ICON, 16, 16, LR_DEFAULTCOLOR));
 
@@ -675,35 +675,34 @@ std::filesystem::path FindShellDllPath() {
  * the process relaunches itself elevated once and waits for that child to finish.
  */
 int RunShellRegistration(bool doRegister) {
-    if (!IsRunningElevated()) {
-        const wchar_t* arg = doRegister ? L"--register" : L"--unregister";
-        return ElevateSelf(arg) ? 0 : 1;
-    }
+    // Per-user registration (HKCU) works without elevation. HKLM writes are
+    // attempted but silently skipped when not running as Administrator, so
+    // --register / --unregister can run in per-user mode without a UAC prompt.
 
     const std::filesystem::path dllPath = FindShellDllPath();
     if (dllPath.empty()) {
         return 2;
     }
 
-    std::wstring params = doRegister ? L"/s \"" : L"/u /s \"";
-    params += dllPath.wstring() + L"\"";
-
-    SHELLEXECUTEINFOW sei{};
-    sei.cbSize = sizeof(sei);
-    sei.lpVerb = L"open";
-    sei.lpFile = L"regsvr32.exe";
-    sei.lpParameters = params.c_str();
-    sei.nShow = SW_HIDE;
-    sei.fMask = SEE_MASK_NOCLOSEPROCESS;
-    if (ShellExecuteExW(&sei)) {
-        if (sei.hProcess != nullptr) {
-            WaitForSingleObject(sei.hProcess, INFINITE);
-            CloseHandle(sei.hProcess);
-        }
+    // Register/unregister the COM shell extension in-process (no regsvr32 dependency):
+    // load the shell DLL and invoke its exported DllRegisterServer / DllUnregisterServer.
+    HMODULE hModule = LoadLibraryW(dllPath.c_str());
+    if (hModule == nullptr) {
+        return 3;
     }
 
+    const char* exportName = doRegister ? "DllRegisterServer" : "DllUnregisterServer";
+    auto proc = reinterpret_cast<HRESULT (STDAPICALLTYPE*)()>(GetProcAddress(hModule, exportName));
+    if (proc == nullptr) {
+        FreeLibrary(hModule);
+        return 4;
+    }
+
+    const HRESULT hr = proc();
+    FreeLibrary(hModule);
+
     SHChangeNotify(SHCNE_ASSOCCHANGED, SHCNF_IDLIST, nullptr, nullptr);
-    return 0;
+    return SUCCEEDED(hr) ? 0 : static_cast<int>(hr);
 }
 
 CommandLineOptions ParseCommandLine() {
@@ -783,7 +782,7 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE /*hPrevInstance*/, PWSTR /*lp
     g_palette = DarkMode::GetPalette(g_isDarkMode);
     g_hBgBrush = CreateSolidBrush(g_palette.canvasBg);
 
-    const int iconResId = DarkMode::IsWindows11OrGreater() ? 100 : 101;
+    const int iconResId = 100;
     WNDCLASSEXW wc{};
     wc.cbSize = sizeof(wc);
     wc.style = CS_HREDRAW | CS_VREDRAW;

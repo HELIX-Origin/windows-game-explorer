@@ -13,7 +13,7 @@ high-resolution box art, rich properties, responsive dynamic window sizing, and 
 - **Automated storefront-first discovery (no external scrapers):** Automatically indexes games and harvests metadata/artwork directly from installed storefront platforms on disk (Steam `libraryfolders.vdf`/`*.acf`/`librarycache` + Store API `appdetails`, Epic `.item` + Catalog `catcache.bin`, GOG Registry/SQLite, Xbox/MS Store `AppModel\Repository\Packages` & `.GamingRoot`/`MicrosoftGame.Config`, Battle.net, EA App, Ubisoft Connect, itch.io, Amazon Games, Riot Client, Rockstar Games Launcher, Legacy Games, HoYoPlay) without third-party scrapers (IGDB, SteamGridDB, VNDB). Owned-but-uninstalled catalogue rows additionally come from Steam's Web API and read-only client caches (GOG Galaxy, itch butler, Xbox app, Ubisoft Connect) plus an optional legendary cache for Epic; see `docs/developer/research/owned-games-sources.md`.
 - **Real-time installation & metadata sync:** Shell views (`IShellView`) monitor storefront manifest directories, registry keys, and `SHChangeNotifyRegister` events to automatically refresh the library within seconds when a game is installed, uninstalled, or updated in Game Explorer Studio.
 - **System locale & animated artwork support:** Respects the user's Windows system locale (`GetUserDefaultUILanguage` / `GetUserDefaultLocaleName`) for localized Steam Store metadata and UI strings, and supports multi-frame animated GIF artwork in the Library Manager page of Game Explorer Studio.
-- **Decentralized sync & user scoping:** User-scoped environment rooted in `%USERPROFILE%\Game Explorer\` with local OneDrive profile backup and sync readiness verification.
+- **Decentralized sync & user scoping:** User-scoped environment rooted in `%LOCALAPPDATA%\Game Explorer\` with local OneDrive profile backup and sync readiness verification.
 
 ## Build & test
 
@@ -35,8 +35,8 @@ high-resolution box art, rich properties, responsive dynamic window sizing, and 
 - **C++:** C++20 standard; MSVC warning level `/W4` with warnings treated as errors (`/WX`).
 - **COM & Shell:** Clean separation between shell presentation interfaces and fast in-memory storefront discovery.
 - **Discovery:** Fast, non-blocking disk parsing; never write to or modify proprietary storefront files.
-- **Metadata:** Storefront-first metadata truth; per-game overrides managed in the Library Manager page of Game Explorer Studio (`%USERPROFILE%\Game Explorer\metadata\<appId>.json`).
-- **Isolation:** Multi-user isolation under `%USERPROFILE%\Game Explorer\`.
+- **Metadata:** Storefront-first metadata truth; per-game overrides managed in the Library Manager page of Game Explorer Studio (`%LOCALAPPDATA%\Game Explorer\metadata\<appId>.json`).
+- **Isolation:** Multi-user isolation under `%LOCALAPPDATA%\Game Explorer\`.
 
 See `.agents/rules/local-conventions.md` for full conventions and `.agents/rules/verification.md` for quality gates.
 

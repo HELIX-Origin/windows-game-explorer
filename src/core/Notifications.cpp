@@ -821,6 +821,17 @@ std::vector<NotificationItem> ParseGamerPowerGiveaways(const std::wstring& json)
         const std::wstring numericId = ReadJsonIntegerText(json, L"id", range.begin, range.end);
         std::wstring url = ReadJsonString(json, L"open_giveaway_url", range.begin, range.end);
         if (url.empty()) url = ReadJsonString(json, L"gamerpower_url", range.begin, range.end);
+
+        // Filter out giveaways from blocked storefronts (IndieGala)
+        std::wstring lowerTitle = item.title;
+        std::transform(lowerTitle.begin(), lowerTitle.end(), lowerTitle.begin(), ::towlower);
+        std::wstring lowerUrl = url;
+        std::transform(lowerUrl.begin(), lowerUrl.end(), lowerUrl.begin(), ::towlower);
+        if (lowerTitle.find(L"indiegala") != std::wstring::npos ||
+            lowerUrl.find(L"indiegala.com") != std::wstring::npos) {
+            continue;
+        }
+
         item.id = L"gamerpower:" + (numericId.empty() ? url : numericId);
         item.url = url;
         item.body = TruncateText(PlainText(ReadJsonString(json, L"description", range.begin,

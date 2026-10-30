@@ -192,7 +192,7 @@ The scanner locates and parses local manifests without launching storefront clie
 ### `AchievementEngine`
 A modular architecture with runtime dispatch across platforms:
 - **`IAchievementProvider`**: Base virtual interface defining `GetAchievementsForGame(appId)` and `GetProgress(appId)`.
-- **`SteamAchievementProvider`**: Connects to the Steamworks Web API (`GetPlayerAchievements` and `GetSchemaForGame`), calculating completion percentages and caching badge art in `%USERPROFILE%\Game Explorer\cache\badges\`.
+- **`SteamAchievementProvider`**: Connects to the Steamworks Web API (`GetPlayerAchievements` and `GetSchemaForGame`), calculating completion percentages and caching badge art in `%LOCALAPPDATA%\Game Explorer\cache\badges\`.
 - **`RetroAchievementsProvider`**: Connects to RetroAchievements Web API endpoints for emulated systems.
 - **`GOGGalaxyAchievementProvider`**: Connects to Galaxy metadata endpoints.
 
@@ -216,12 +216,12 @@ storefront the game was installed through:
   verdict stays `NotSupported` because neither storefront publishes a public comparison endpoint.
 - Uninstalled editions and editions without an installed build id never touch the network.
 
-Results are cached in `%USERPROFILE%\Game Explorer\updates.json` as a `GameUpdateReport`, so the
+Results are cached in `%LOCALAPPDATA%\Game Explorer\updates.json` as a `GameUpdateReport`, so the
 Catalogue details pane renders the last known verdict instantly and never blocks on HTTP.
 
 ### `Notifications`
 Builds the catalogue bell feed from four independent sources and writes it to
-`%USERPROFILE%\Game Explorer\notifications.json`:
+`%LOCALAPPDATA%\Game Explorer\notifications.json`:
 - **Game update alerts** from `GameUpdates` (only when a newer build exists).
 - **Storefront news** restricted to the last 30 days: Steam per-app
   `ISteamNews/GetNewsForApp/v2` with `feeds=steam_community_announcements`, the GOG.com news RSS
@@ -244,7 +244,7 @@ item rather than failing the whole pass.
 `ServiceClient`. The refresh-specific tokens are `CHECK_UPDATES` → `CHECK_STARTED` and
 `GET_UPDATES_STATUS` → `RUNNING`/`IDLE`.
 
-The service runs as `LocalSystem`, while every path involved (`%USERPROFILE%\Game Explorer`,
+The service runs as `LocalSystem`, while every path involved (`%LOCALAPPDATA%\Game Explorer`,
 storefront client caches, the settings database) is user-scoped. `RunAsConsoleUser` resolves the
 active console session with `WTSGetActiveConsoleSessionId`, duplicates that user's token through
 `WTSQueryUserToken`, and runs the work under `ImpersonateLoggedOnUser`. When nobody is signed in the
@@ -256,7 +256,7 @@ one pending refresh so a burst of requests cannot pile up scans.
 
 ## 4. SQLite Database Schema
 
-The library database is located at `%USERPROFILE%\Game Explorer\library.db`.
+The library database is located at `%LOCALAPPDATA%\Game Explorer\library.db`.
 
 ```mermaid
 erDiagram

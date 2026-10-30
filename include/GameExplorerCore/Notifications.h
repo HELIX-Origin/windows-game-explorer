@@ -59,11 +59,11 @@ struct NotificationFeed {
 [[nodiscard]] const wchar_t* NotificationKindLabel(NotificationKind kind);
 
 // Per-user cache next to the rest of the user environment:
-// `%USERPROFILE%\Game Explorer\notifications.json`.
+// `%LOCALAPPDATA%\Game Explorer\notifications.json`.
 [[nodiscard]] std::filesystem::path NotificationFeedPath();
 
 // Read/unread state is kept separately so a refresh never resurrects alerts the user dismissed.
-// `%USERPROFILE%\Game Explorer\notifications-seen.json`.
+// `%LOCALAPPDATA%\Game Explorer\notifications-seen.json`.
 [[nodiscard]] std::filesystem::path NotificationSeenPath();
 
 // JSON round-trip for the shared cache. Parsing is deliberately lenient: an unreadable or

@@ -36,7 +36,7 @@ struct GameItem {
     // Optional secondary launch methods (e.g. custom launchers) exposed in the launch dropdown
     std::vector<LaunchMethod> launchMethods;
     
-    // Artwork & Assets (paths in %USERPROFILE%\Game Explorer\cache\art\)
+    // Artwork & Assets (paths in %LOCALAPPDATA%\Game Explorer\cache\art\)
     std::wstring coverArtPath;      // Tall box art (~2:3 or ~3:4)
     std::wstring heroArtPath;       // Wide steam hero banner (~16:9 or ~21:9)
     std::wstring iconPath;          // Square icon for list details view

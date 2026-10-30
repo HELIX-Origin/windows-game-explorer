@@ -158,7 +158,7 @@
   - Multi-Format Image Architecture: support PNG, JPG/JPEG/JFIF, GIF (static & animated), WebP (lossy, lossless, animated VP8X), SVG (XML viewBox / dimensions parser & `wuxmi::SvgImageSource`), ICO, BMP, TIFF, AVIF/HEIC (via WIC).
   - Animated GIF Support on Installed Cards: enabled automatic smooth GIF playback across Cover and Hero view modes via `bmp.AutoPlay(true)`.
   - Details Pane Simplification: removed dedicated details art slot/logic (`ArtworkSlot::Details`, `IsValidDetails`); details pane now consistently uses cover art with hero/icon fallback, minimizing excess layout-mode branching.
-  - Self-Healing Metadata Cleanup: automatically purged 35 non-game `local_*.json` files from `%USERPROFILE%\Game Explorer\metadata\` and removed their database records.
+  - Self-Healing Metadata Cleanup: automatically purged 35 non-game `local_*.json` files from `%LOCALAPPDATA%\Game Explorer\metadata\` and removed their database records.
 - **VIEW-01 (Artwork Slot Aspect Filtering & Zero-Cropping Stretch)**:
   - Cover art slot (`IsValidCover`) accepts tall (`~2:3`) and square (`~1:1`) images (`0.45 <= aspectRatio <= 1.15`) and rejects wide images (`> 1.15`).
   - Hero art slot (`IsValidHero`) strictly accepts wide images (`1.20 <= aspectRatio <= 4.50`) and rejects tall/square images.
@@ -272,7 +272,7 @@
   (`compare -metric AE` = 0).
 - Configuration capture: cards scroll as one surface, the bell card shows every toggle, **Check for alerts
   now** and the "No refresh yet — the service fills this at sign-in." state.
-- Seeded test feed and seen file deleted from `%USERPROFILE%\Game Explorer\` afterwards.
+- Seeded test feed and seen file deleted from `%LOCALAPPDATA%\Game Explorer\` afterwards.
 - Docs: every relative link and heading anchor in `docs/` resolves; no BOM, no CRLF or lone CR, every file
   ends with LF, and every code fence is balanced. All 112 `TEST_CASE` names in `docs/developer/testing.md`
   match `tests/*.cpp` exactly.
@@ -574,7 +574,7 @@
 
 ### Delivered in this workstream (working tree, version manifests at 2.4.0)
 - **FFXIV official-source rework**: `StorefrontScanner` now discovers the official Square Enix installation (`sqex_ffxiv`, `PlatformType::SquareEnix`). `PlatformType::XIVLauncher` is retained only for backward-compatible JSON reads and is never emitted. When the XIVLauncher executable exists it is auto-attached as an alternate launch method (`PlatformLauncher`).
-- **Secondary launch methods**: persisted per game in `%USERPROFILE%\Game Explorer\metadata\<appId>.json` with `{exe}` / `{dir}` token expansion; manual methods always persist, auto ones are pruned, a saved empty array is authoritative. The Manager adds methods through a modal popup.
+- **Secondary launch methods**: persisted per game in `%LOCALAPPDATA%\Game Explorer\metadata\<appId>.json` with `{exe}` / `{dir}` token expansion; manual methods always persist, auto ones are pruned, a saved empty array is authoritative. The Manager adds methods through a modal popup.
 - **Launch button dropdown**: shell UI uses a system XAML `Button` plus a chevron `MenuFlyout` (no `SplitButton` in the XAML Island host).
 - **Store-artwork exclusivity**: storefront art is authoritative; metadata providers no longer fill artwork gaps. Only a genuinely empty slot may fall back to another cached local image. Covered by `tests/TestStorefrontScanner.cpp`.
 - **`SynopsisFormatter`**: shared markup parser (`#`/`##`/`###`, `-`/`*`, `**bold**`, `*italic*`, `_italic_`, `__underline__`, backslash escapes, unbalanced markers to end of line). Rendered as rich `Run`s in the details pane; multiline editor + formatting hint in the Manager. `tests/TestSynopsisFormatter.cpp`.
@@ -596,14 +596,14 @@
 
 ### Direct Per-Game JSON Metadata Architecture & SQLite Decoupling
 - **Per-Game JSON Source of Truth**:
-  - `%USERPROFILE%\Game Explorer\metadata\<appId>.json` is established as the sole, authoritative source of truth for all editable game data:
+  - `%LOCALAPPDATA%\Game Explorer\metadata\<appId>.json` is established as the sole, authoritative source of truth for all editable game data:
     - Titles, descriptions, scores/ratings, developer, publisher, release dates, genres.
     - Executable paths, working directories, launch strings (`launchCommand` / `launchUri`), launch arguments.
     - Slot artwork paths (`coverArtPath`, `heroArtPath`, `detailsArtPath`, `iconPath`).
     - Platform type, favorite flag (`isFavorite`), and install state (`isInstalled`).
   - Users can freely customize their entries directly via JSON (advanced user method) or via the GUI Game Explorer Manager.
 - **Instant Direct Filesystem Loading (`LoadAllGamesFromMetadata`)**:
-  - Implemented `StorefrontScanner::LoadAllGamesFromMetadata()`, iterating directly through all JSON files in `%USERPROFILE%\Game Explorer\metadata\`.
+  - Implemented `StorefrontScanner::LoadAllGamesFromMetadata()`, iterating directly through all JSON files in `%LOCALAPPDATA%\Game Explorer\metadata\`.
   - Bypasses SQLite database query latency and lock contention, rendering library views virtually instantaneously.
 - **SQLite Role Restored**:
   - SQLite database is strictly reserved for secure configuration (`settings` key-value table) and secure/unexposed tracking data (`achievements` table and internal indexed pointers).
@@ -639,7 +639,7 @@
   - Saving from Game Manager non-destructively preserves all manual JSON customizations.
 
 ### Test Game Cleanup & Artwork Discovery Gallery Card Sizing (BUG-9)
-- **Purged 47 Duplicate Custom Test Games**: Removed historical test artifacts from both local `%USERPROFILE%\Game Explorer\metadata\` and `%USERPROFILE%\OneDrive\Windows Game Explorer\metadata\`; updated `StorefrontScanner::RemoveCustomLocalGame` to remove from both directories; updated test suite to clean up immediately.
+- **Purged 47 Duplicate Custom Test Games**: Removed historical test artifacts from both local `%LOCALAPPDATA%\Game Explorer\metadata\` and `%USERPROFILE%\OneDrive\Windows Game Explorer\metadata\`; updated `StorefrontScanner::RemoveCustomLocalGame` to remove from both directories; updated test suite to clean up immediately.
 - **Added "Details / Screenshots" to Web Filter Dropdown**: Included `"Details / Screenshots"` in `g_hwndComboWebFilter` and mapped queries to `Details` filter.
 - **Aspect-Ratio-Accurate Image Preview Card Sizing**:
   - `Hero Banners`: ~3.1:1 widescreen card (`cardW` ~380px, `imgH` ~123px, `cardH` 149px).
@@ -817,12 +817,12 @@ Delivered universal achievement tracking across native storefronts (Steam, GOG, 
   - Delivered `SteamAchievementProvider` supporting Steamworks Web API (`GetPlayerAchievements`, `GetSchemaForGame`, and public `GetGlobalAchievementPercentagesForApp`).
   - Delivered `RetroAchievementsProvider` for ES-DE / emulation systems using the RetroAchievements Web API (`API_GetGameInfoAndUserProgress.php`).
   - Delivered `GOGGalaxyAchievementProvider` querying Galaxy endpoints and catalog definitions.
-  - Built local badge image caching in `%USERPROFILE%\Game Explorer\cache\badges\` with sanitized filenames and automatic fallback.
+  - Built local badge image caching in `%LOCALAPPDATA%\Game Explorer\cache\badges\` with sanitized filenames and automatic fallback.
   - Added unit test `AchievementEngineProviderDispatchAndCaching` in `tests/TestAchievementEngine.cpp`.
 - **Universal Multi-Drive ROMs Scanning & Title Cleaning (`StorefrontScanner`)**:
   - Implemented `ScanEmulatedGames()` detecting ROMs across all mounted drives (`<Drive>:\ROMs`, `<Drive>:\Games\ROMs`, `%USERPROFILE%\ROMs`, etc.).
   - Implemented `CleanRomTitle()` stripping compound extensions (`.nkit.iso`, `.iso`, `.z64`, `.rvz`, `.chd`, etc.), parenthesized/bracketed region/version tags (`(USA)`, `[!]`, etc.), and inverting leading articles (`Legend of Zelda, The` -> `The Legend of Zelda`).
-  - Online box art and hero banner retrieval from the Libretro Thumbnails CDN (`Named_Boxarts` & `Named_Snaps`), automatically cached in `%USERPROFILE%\Game Explorer\cache\art\`. Tested and confirmed with verified box art for GameCube and Nintendo 64 titles.
+  - Online box art and hero banner retrieval from the Libretro Thumbnails CDN (`Named_Boxarts` & `Named_Snaps`), automatically cached in `%LOCALAPPDATA%\Game Explorer\cache\art\`. Tested and confirmed with verified box art for GameCube and Nintendo 64 titles.
   - Embedded metadata enrichment for classics (*The Wind Waker*, *Twilight Princess*, *Super Mario Sunshine*, *Majora's Mask*, *Ocarina of Time*, *Super Mario 64*).
 - **Universal Multi-Emulator Launching & Discovery (`PlatformLauncher`)**:
   - Added automated path discovery across portable and installed locations for:

@@ -31,10 +31,10 @@ public:
     // Performs direct in-memory scan of all installed storefronts without database intermediate bottleneck
     static std::vector<GameItem> ScanAllInstalledGames();
 
-    // Direct instant load from all %USERPROFILE%\Game Explorer\metadata\*.json files
+    // Direct instant load from all %LOCALAPPDATA%\Game Explorer\metadata\*.json files
     static std::vector<GameItem> LoadAllGamesFromMetadata();
 
-    // Per-game metadata.json file persistence in %USERPROFILE%\Game Explorer\metadata\<appId>.json
+    // Per-game metadata.json file persistence in %LOCALAPPDATA%\Game Explorer\metadata\<appId>.json
     static bool LoadPerGameMetadata(GameItem& item);
     static bool SavePerGameMetadata(const GameItem& item);
 
@@ -89,7 +89,7 @@ public:
     // Direct remote file downloader (URLDownloadToFile with WinHttp redirect fallback)
     static bool DownloadRemoteFile(const std::wstring& url, const std::wstring& destPath);
 
-    // Reset and purge artwork cache folder (%USERPROFILE%\Game Explorer\cache\art\)
+    // Reset and purge artwork cache folder (%LOCALAPPDATA%\Game Explorer\cache\art\)
     static bool ResetArtworkCache();
 
     // Multi-provider online artwork search (SteamGridDB, Steam Store, IGDB by default; Web image search as supplemental)
@@ -130,6 +130,16 @@ public:
 
     // Utility & filtering helpers
     static bool IsBlacklistedExecutable(const std::wstring& filename);
+
+    // Create .lnk shortcuts in the physical Games folder for each game.
+    static void CreateGameShortcuts(const std::vector<GameItem>& games);
+
+    // Scan .lnk shortcuts from the physical Games folder and return as GameItems.
+    static std::vector<GameItem> ScanGameShortcuts();
+
+    // Vendor desktop clients that must never be catalogued as games. The IndieGala
+    // IGClient launcher is blocked outright; games it downloaded stay scannable.
+    static bool IsBlockedStoreClientPath(const std::wstring& pathOrName);
 
     // NSFW & mature content detection helpers (ensures adult games auto-fetch authentic NSFW art)
     static bool IsNsfwGame(const GameItem& item);

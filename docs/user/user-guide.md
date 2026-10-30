@@ -103,7 +103,7 @@ Every field in Column 2 is directly editable:
   [Metadata & Customization Guide](metadata-customization.md#synopsis-formatting-github-flavored-markdown)
   for the full syntax reference.
 
-Click **`[ 💾 Save Metadata ]`** to persist your changes directly to SQLite and per-game JSON overrides (`%USERPROFILE%\Game Explorer\metadata\<appId>.json`).
+Click **`[ 💾 Save Metadata ]`** to persist your changes directly to SQLite and per-game JSON overrides (`%LOCALAPPDATA%\Game Explorer\metadata\<appId>.json`).
 
 ---
 
@@ -144,7 +144,7 @@ Under the web search bar, check **"Disable SafeSearch (Unblock NSFW)"**:
    - **Apply as Box Art (~2:3 Cover)**
    - **Apply as Hero Banner (~3.1:1 Widescreen)**
    - **Apply as Icon / Logo**
-3. The selected high-resolution image is downloaded into your local cache (`%USERPROFILE%\Game Explorer\cache\art\`), the corresponding path is updated in Column 2, and the change is immediately saved to the database.
+3. The selected high-resolution image is downloaded into your local cache (`%LOCALAPPDATA%\Game Explorer\cache\art\`), the corresponding path is updated in Column 2, and the change is immediately saved to the database.
 4. The live preview box and any open File Explorer views refresh instantaneously.
 
 ---
@@ -153,7 +153,7 @@ Under the web search bar, check **"Disable SafeSearch (Unblock NSFW)"**:
 If you ever encounter corrupt image files or want to force a clean redownload of all assets:
 1. Click **`[ 🧹 Reset Cache ]`** in Column 2.
 2. The Library Manager page utilizes in-memory stream loading (`LoadImageFromFileUnlocked`), which prevents GDI+ from locking files on disk.
-3. The cache folder (`%USERPROFILE%\Game Explorer\cache\art\`) is cleanly purged without Windows file sharing violations (`ERROR_SHARING_VIOLATION`), and thumbnail downloads re-trigger automatically.
+3. The cache folder (`%LOCALAPPDATA%\Game Explorer\cache\art\`) is cleanly purged without Windows file sharing violations (`ERROR_SHARING_VIOLATION`), and thumbnail downloads re-trigger automatically.
 
 ---
 
@@ -246,7 +246,7 @@ The catalogue checks whether an installed copy is behind the build its storefron
 | **Epic Games** | Installed `AppVersionString` from the `.item` manifest | Shown as the installed build; no public comparison endpoint exists, so the verdict is *Not supported* |
 | **Xbox / Microsoft Store** | Installed package version | Shown as the installed build; *Not supported* verdict |
 
-Checks run **once when the background service starts and once after each interactive sign-in**, and can be re-run at any time from **Configuration → Game Catalogue Notification Bell → Check for alerts now**. Results are cached in `%USERPROFILE%\Game Explorer\updates.json`, so the details pane shows the last known verdict instantly and never blocks on the network. No storefront account is contacted for Steam checks, and no storefront file is ever modified.
+Checks run **once when the background service starts and once after each interactive sign-in**, and can be re-run at any time from **Configuration → Game Catalogue Notification Bell → Check for alerts now**. Results are cached in `%LOCALAPPDATA%\Game Explorer\updates.json`, so the details pane shows the last known verdict instantly and never blocks on the network. No storefront account is contacted for Steam checks, and no storefront file is ever modified.
 
 ### Notification Bell
 
@@ -346,4 +346,4 @@ When scanning ROM files, the engine cleans raw filenames via `CleanRomTitle()`:
 ---
 
 ### Libretro Thumbnails CDN Integration
-For recognized ROMs, the engine automatically fetches authentic vertical box art and screenshots from the **Libretro Thumbnails CDN** (`Named_Boxarts` and `Named_Snaps`), caching them locally in `%USERPROFILE%\Game Explorer\cache\art\`.
+For recognized ROMs, the engine automatically fetches authentic vertical box art and screenshots from the **Libretro Thumbnails CDN** (`Named_Boxarts` and `Named_Snaps`), caching them locally in `%LOCALAPPDATA%\Game Explorer\cache\art\`.

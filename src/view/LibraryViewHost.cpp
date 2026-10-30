@@ -585,7 +585,7 @@ void LibraryViewHost::LoadDataAsync(HWND hwndNotify) {
         addProviderIfInstalled(PlatformType::Project64,   L"Project64",       L"Project64 Team",         PlatformLauncher::GetProject64ExecutablePath());
         addProviderIfInstalled(PlatformType::PCSX2,       L"PCSX2",           L"PCSX2 Team",             PlatformLauncher::GetPCSX2ExecutablePath());
         addProviderIfInstalled(PlatformType::DuckStation, L"DuckStation",     L"DuckStation Team",       PlatformLauncher::GetDuckStationExecutablePath());
-        addProviderIfInstalled(PlatformType::PPSSPP,      L"PPSSPP",          L"Henrik Rydgård",         PlatformLauncher::GetPPSSPPExecutablePath());
+        addProviderIfInstalled(PlatformType::PPSSPP,      L"PPSSPP",          L"Henrik RydgÃ¥rd",         PlatformLauncher::GetPPSSPPExecutablePath());
         addProviderIfInstalled(PlatformType::mGBA,        L"mGBA",            L"endrift / mGBA Team",    PlatformLauncher::GetmGBAExecutablePath());
         addProviderIfInstalled(PlatformType::Snes9x,      L"Snes9x",          L"Snes9x Team",            PlatformLauncher::GetSnes9xExecutablePath());
         addProviderIfInstalled(PlatformType::melonDS,     L"melonDS",         L"melonDS Team",           PlatformLauncher::GetMelonDSExecutablePath());
@@ -1436,7 +1436,7 @@ void LibraryViewHost::RebuildSidepane() {
         m_xaml->statsText = statsTb;
 
         wuxc::Button gemBtn;
-        gemBtn.Content(winrt::box_value(L"\u2795  Open Game Explorer Manager"));
+        gemBtn.Content(winrt::box_value(L"\u2795  Open Game Explorer Studio"));
         gemBtn.HorizontalAlignment(wux::HorizontalAlignment::Stretch);
         gemBtn.Background(accentBrush);
         gemBtn.Foreground(whiteBrush);
@@ -1543,8 +1543,9 @@ void LibraryViewHost::BuildXamlViewport() {
     };
 
     const auto& loc = Localization::GetStrings();
-    leftToolbar.Children().Append(makeModeBtn(loc.viewTiles, LayoutMode::CoverArt));
-    leftToolbar.Children().Append(makeModeBtn(L"Hero Banner (Widescreen)", LayoutMode::HeroBanner));
+    leftToolbar.Children().Append(makeModeBtn(L"Box Art", LayoutMode::CoverArt));
+    leftToolbar.Children().Append(makeModeBtn(L"Hero", LayoutMode::HeroBanner));
+    leftToolbar.Children().Append(makeModeBtn(L"Tiles", LayoutMode::Tiles));
     leftToolbar.Children().Append(makeModeBtn(loc.viewDetails, LayoutMode::DetailsView));
     wuxc::Grid::SetColumn(leftToolbar, 0);
     topGrid.Children().Append(leftToolbar);
@@ -1852,7 +1853,7 @@ void LibraryViewHost::BuildXamlViewport() {
     mainStack.Spacing(18);
 
     // -------------------------------------------------------------------------
-    // SECTION 1: ▾ Game Providers (N)
+    // SECTION 1: â–¾ Game Providers (N)
     // -------------------------------------------------------------------------
     wuxc::Button provHeaderBtn;
     std::wstring provHeaderTitle = (m_providersExpanded ? L"\u25BE  " : L"\u25B8  ") +
@@ -1950,7 +1951,7 @@ void LibraryViewHost::BuildXamlViewport() {
     mainStack.Children().Append(sectionDiv);
 
     // -------------------------------------------------------------------------
-    // SECTION 2: ▾ Games (N)
+    // SECTION 2: â–¾ Games (N)
     // -------------------------------------------------------------------------
     wuxc::Button gamesHeaderBtn;
     std::wstring gamesHeaderTitle = (m_gamesExpanded ? L"\u25BE  " : L"\u25B8  ") +
@@ -2039,7 +2040,7 @@ void LibraryViewHost::BuildXamlViewport() {
                 const bool isSel = (m_selectedGameIndex == static_cast<int>(i));
 
                 wuxc::Border rowCard;
-                rowCard.Height(46);
+                rowCard.Height(56);
                 rowCard.CornerRadius(wux::CornerRadiusHelper::FromUniformRadius(6));
                 rowCard.Background(isSel ? bgCardSel : bgCard);
                 rowCard.BorderBrush(isSel ? accentBrush : borderBrush);
@@ -2049,12 +2050,18 @@ void LibraryViewHost::BuildXamlViewport() {
                 wuxc::Grid rowGrid;
                 wuxc::ColumnDefinition c0; c0.Width(wux::GridLengthHelper::FromPixels(38));
                 wuxc::ColumnDefinition c1; c1.Width(wux::GridLengthHelper::FromValueAndType(1.0, wux::GridUnitType::Star));
-                wuxc::ColumnDefinition c2; c2.Width(wux::GridLengthHelper::FromPixels(130));
-                wuxc::ColumnDefinition c3; c3.Width(wux::GridLengthHelper::FromPixels(100));
+                wuxc::ColumnDefinition c2; c2.Width(wux::GridLengthHelper::FromPixels(120));
+                wuxc::ColumnDefinition c3; c3.Width(wux::GridLengthHelper::FromPixels(110));
+                wuxc::ColumnDefinition c4; c4.Width(wux::GridLengthHelper::FromPixels(70));
+                wuxc::ColumnDefinition c5; c5.Width(wux::GridLengthHelper::FromPixels(70));
+                wuxc::ColumnDefinition c6; c6.Width(wux::GridLengthHelper::FromPixels(24));
                 rowGrid.ColumnDefinitions().Append(c0);
                 rowGrid.ColumnDefinitions().Append(c1);
                 rowGrid.ColumnDefinitions().Append(c2);
                 rowGrid.ColumnDefinitions().Append(c3);
+                rowGrid.ColumnDefinitions().Append(c4);
+                rowGrid.ColumnDefinitions().Append(c5);
+                rowGrid.ColumnDefinitions().Append(c6);
 
                 std::wstring thumbPath = !g.iconPath.empty() && ImageValidator::IsValidIcon(g.iconPath)
                     ? g.iconPath
@@ -2085,20 +2092,85 @@ void LibraryViewHost::BuildXamlViewport() {
                 rowGrid.Children().Append(tTb);
 
                 wuxc::TextBlock pTb;
-                pTb.Text(std::wstring(PlatformToString(g.platform)));
-                pTb.FontSize(12);
+                pTb.Text(g.developer.empty() ? L"" : g.developer);
+                pTb.FontSize(11);
                 pTb.Foreground(textSec);
                 pTb.VerticalAlignment(wux::VerticalAlignment::Center);
+                pTb.TextTrimming(wux::TextTrimming::CharacterEllipsis);
+                pTb.MaxLines(1);
                 wuxc::Grid::SetColumn(pTb, 2);
                 rowGrid.Children().Append(pTb);
 
-                wuxc::TextBlock sTb;
-                sTb.Text(FormatDiskSize(g.diskSizeBytes));
-                sTb.FontSize(12);
-                sTb.Foreground(textSec);
-                sTb.VerticalAlignment(wux::VerticalAlignment::Center);
-                wuxc::Grid::SetColumn(sTb, 3);
-                rowGrid.Children().Append(sTb);
+                wuxc::TextBlock pubTb;
+                pubTb.Text(g.publisher.empty() ? L"" : g.publisher);
+                pubTb.FontSize(11);
+                pubTb.Foreground(textSec);
+                pubTb.VerticalAlignment(wux::VerticalAlignment::Center);
+                pubTb.TextTrimming(wux::TextTrimming::CharacterEllipsis);
+                pubTb.MaxLines(1);
+                wuxc::Grid::SetColumn(pubTb, 3);
+                rowGrid.Children().Append(pubTb);
+
+                wuxc::TextBlock rTb;
+                rTb.Text(g.rating.empty() || g.rating == L"Unrated" ? L"" : g.rating);
+                rTb.FontSize(11);
+                rTb.Foreground(textSec);
+                rTb.VerticalAlignment(wux::VerticalAlignment::Center);
+                rTb.TextTrimming(wux::TextTrimming::CharacterEllipsis);
+                rTb.MaxLines(1);
+                wuxc::Grid::SetColumn(rTb, 4);
+                rowGrid.Children().Append(rTb);
+
+                wuxc::TextBlock ptTb;
+                std::wstring playtimeStr;
+                if (g.playtimeMinutes > 0) {
+                    int hours = g.playtimeMinutes / 60;
+                    int mins = g.playtimeMinutes % 60;
+                    if (hours > 0) playtimeStr += std::to_wstring(hours) + L"h";
+                    if (mins > 0) playtimeStr += std::to_wstring(mins) + L"m";
+                }
+                ptTb.Text(playtimeStr);
+                ptTb.FontSize(11);
+                ptTb.Foreground(textSec);
+                ptTb.VerticalAlignment(wux::VerticalAlignment::Center);
+                ptTb.TextTrimming(wux::TextTrimming::CharacterEllipsis);
+                ptTb.MaxLines(1);
+                wuxc::Grid::SetColumn(ptTb, 5);
+                rowGrid.Children().Append(ptTb);
+
+                // Storefront icon
+                std::wstring platExe;
+                switch (g.platform) {
+                case PlatformType::Steam: platExe = PlatformLauncher::GetSteamExecutablePath(); break;
+                case PlatformType::Epic: platExe = PlatformLauncher::GetEpicExecutablePath(); break;
+                case PlatformType::GOG: platExe = PlatformLauncher::GetGOGGalaxyExecutablePath(); break;
+                case PlatformType::Xbox: platExe = PlatformLauncher::GetXboxExecutablePath(); break;
+                case PlatformType::BattleNet: platExe = PlatformLauncher::GetBattleNetExecutablePath(); break;
+                case PlatformType::Ubisoft: platExe = PlatformLauncher::GetUbisoftExecutablePath(); break;
+                case PlatformType::EAApp: platExe = PlatformLauncher::GetEAAppExecutablePath(); break;
+                case PlatformType::Itch: platExe = PlatformLauncher::GetItchExecutablePath(); break;
+                case PlatformType::Amazon: platExe = PlatformLauncher::GetAmazonExecutablePath(); break;
+                case PlatformType::Rockstar: platExe = PlatformLauncher::GetRockstarExecutablePath(); break;
+                case PlatformType::Riot: platExe = PlatformLauncher::GetRiotExecutablePath(); break;
+                case PlatformType::HoYoPlay: platExe = PlatformLauncher::GetHoYoPlayExecutablePath(); break;
+                default: break;
+                }
+                std::wstring platIconPath;
+                if (!platExe.empty()) {
+                    platIconPath = EnsureExtractedIconPng(std::wstring(L"sf_") + std::to_wstring(static_cast<int>(g.platform)), platExe);
+                }
+                auto platBmp = platIconPath.empty() ? nullptr : LoadLocalBitmap(platIconPath);
+                if (platBmp) {
+                    wuxc::Image sfImg;
+                    sfImg.Source(platBmp);
+                    sfImg.Width(16);
+                    sfImg.Height(16);
+                    sfImg.Stretch(wuxm::Stretch::Uniform);
+                    sfImg.HorizontalAlignment(wux::HorizontalAlignment::Center);
+                    sfImg.VerticalAlignment(wux::VerticalAlignment::Center);
+                    wuxc::Grid::SetColumn(sfImg, 6);
+                    rowGrid.Children().Append(sfImg);
+                }
 
                 rowCard.Child(rowGrid);
 
@@ -2119,9 +2191,10 @@ void LibraryViewHost::BuildXamlViewport() {
             mainStack.Children().Append(listStack);
         } else {
             const bool isHero = (m_layoutMode == LayoutMode::HeroBanner);
-            const double cardW = isHero ? 320.0 : 180.0;
-            const double imgH  = isHero ? 104.0 : 270.0;
-            const double cardH = isHero ? (imgH + 42.0) : 312.0;
+            const bool isTiles = (m_layoutMode == LayoutMode::Tiles);
+            const double cardW = isHero ? 320.0 : (isTiles ? 160.0 : 180.0);
+            const double imgH  = isHero ? 104.0 : (isTiles ? 160.0 : 270.0);
+            const double cardH = isHero ? (imgH + 42.0) : (isTiles ? (imgH + 42.0) : 312.0);
 
             wuxc::VariableSizedWrapGrid gamesWrap;
             gamesWrap.Orientation(wuxc::Orientation::Horizontal);
@@ -2154,7 +2227,15 @@ void LibraryViewHost::BuildXamlViewport() {
                 artHost.CornerRadius(wux::CornerRadiusHelper::FromRadii(6, 6, 0, 0));
 
                 std::wstring primaryArt;
-                if (isHero) {
+                if (isTiles) {
+                    if (ImageValidator::IsValidIcon(g.iconPath)) {
+                        primaryArt = g.iconPath;
+                    } else if (!g.iconPath.empty()) {
+                        primaryArt = g.iconPath;
+                    } else if (!g.coverArtPath.empty()) {
+                        primaryArt = g.coverArtPath;
+                    }
+                } else if (isHero) {
                     if (ImageValidator::IsValidHero(g.heroArtPath)) {
                         primaryArt = g.heroArtPath;
                     } else if (!g.heroArtPath.empty()) {
@@ -2207,7 +2288,7 @@ void LibraryViewHost::BuildXamlViewport() {
                 titleTb.MaxLines(1);
 
                 wuxc::TextBlock platTb;
-                platTb.Text(std::wstring(PlatformToString(g.platform)));
+                platTb.Text(g.developer.empty() ? std::wstring(PlatformToString(g.platform)) : g.developer);
                 platTb.FontSize(11);
                 platTb.Foreground(textSec);
                 platTb.TextTrimming(wux::TextTrimming::CharacterEllipsis);

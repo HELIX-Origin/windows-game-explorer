@@ -66,7 +66,7 @@ projects/windows-game-explorer/
 │   └── GameExplorerCore/           # Shared headers (Guid.h, Types.h, StorefrontScanner.h, PlatformLauncher.h, etc.)
 ├── src/
 │   ├── core/                       # Core static library (GameExplorerCore)
-│   │   ├── Storage.cpp             # User-scoped paths (%USERPROFILE%\Game Explorer\)
+│   │   ├── Storage.cpp             # User-scoped paths (%LOCALAPPDATA%\Game Explorer\)
 │   │   ├── Database.cpp            # Native SQLite wrapper
 │   │   ├── Settings.cpp            # Integration configuration persistence
 │   │   ├── DarkMode.cpp            # Windows 11 DWM dark mode & system accent helpers
@@ -97,6 +97,6 @@ projects/windows-game-explorer/
 ## 3. Data Flow & Execution Pipeline
 
 1. **Automated Storefront & Provider Discovery**: `StorefrontScanner` crawls all mounted drives for installed digital storefronts (Steam, Epic Games, GOG Galaxy, Battle.net, Ubisoft Connect, EA App, itch.io) and harvests their local manifests and box art directly from disk in ~5ms without external third-party scrapers.
-2. **Per-Game Metadata Overrides**: The Library Manager page of `GameExplorerStudio.exe` allows adding local games and customizing any game's title, developer, publisher, release date, rating, launch parameters, and box art via `%USERPROFILE%\Game Explorer\metadata\<appId>.json`.
+2. **Per-Game Metadata Overrides**: The Library Manager page of `GameExplorerStudio.exe` allows adding local games and customizing any game's title, developer, publisher, release date, rating, launch parameters, and box art via `%LOCALAPPDATA%\Game Explorer\metadata\<appId>.json`.
 3. **Two-Section In-Shell Categorization**: `ShellFolder` enumerates installed storefront clients (`itemKind = 0`) and games (`itemKind = 1`), while `GameCategoryProvider` and `GameCategorizer` group them into `▾ Game Providers (N)` and `▾ Games (N)` inside File Explorer.
 4. **Authentic Launch Delegation**: Launching a provider opens the storefront client; launching a game invokes the official platform client (`steam.exe -applaunch <appId>`, etc.) or direct executable for DRM-free titles.

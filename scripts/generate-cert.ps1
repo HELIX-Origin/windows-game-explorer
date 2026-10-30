@@ -1,0 +1,53 @@
+#Requires -Version 5.1
+[Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidUsingWriteHost', '', Justification = 'CLI cert generation runner status output')]
+[CmdletBinding()]
+param(
+    [string]$Subject = "CN=Windows Game Explorer Dev",
+    [string]$CertStore = "Cert:\CurrentUser\My",
+    [int]$ValidityYears = 5
+)
+
+$ErrorActionPreference = "Stop"
+. (Join-Path $PSScriptRoot "_common.ps1")
+Write-GameExplorerBanner -Title "Generate self-signed code signing certificate"
+
+# Check if a code signing cert already exists
+$existing = Get-ChildItem -Path $CertStore -CodeSigningCert -ErrorAction SilentlyContinue |
+    Where-Object { $_.Subject -eq $Subject }
+
+if ($existing) {
+    Write-Host "Existing certificate found: $($existing.Thumbprint)" -ForegroundColor Green
+    $cert = $existing
+} else {
+    Write-Host "Creating new self-signed code signing certificate..." -ForegroundColor Cyan
+    $cert = New-SelfSignedCertificate `
+        -Subject $Subject `
+        -Type CodeSigningCert `
+        -KeyUsage DigitalSignature `
+        -KeyAlgorithm RSA `
+        -KeyLength 2048 `
+        -CertStoreLocation $CertStore `
+        -NotAfter (Get-Date).AddYears($ValidityYears) `
+        -HashAlgorithm SHA256
+
+    Write-Host "Certificate created: $($cert.Thumbprint)" -ForegroundColor Green
+}
+
+# Export the certificate (public key only) for distribution
+$exportPath = Join-Path $PSScriptRoot "..\certs"
+if (-not (Test-Path -LiteralPath $exportPath)) {
+    New-Item -ItemType Directory -Path $exportPath -Force | Out-Null
+}
+$cerFile = Join-Path $exportPath "game-explorer-dev.cer"
+Export-Certificate -Cert $cert -FilePath $cerFile -Force | Out-Null
+Write-Host "Public certificate exported to: $cerFile" -ForegroundColor Cyan
+Write-Host ""
+Write-Host "To sign your builds, run:" -ForegroundColor White
+Write-Host "  `$env:WINDOWS_CERT_THUMBPRINT = '$($cert.Thumbprint)'" -ForegroundColor Yellow
+Write-Host "  ./scripts/sign.ps1 -Configuration Release" -ForegroundColor Yellow
+Write-Host ""
+Write-Host "To trust this certificate on other machines, install the .cer file:" -ForegroundColor White
+Write-Host "  Import-Certificate -FilePath '$cerFile' -CertStoreLocation 'Cert:\LocalMachine\Root'" -ForegroundColor Yellow
+Write-Host "  Import-Certificate -FilePath '$cerFile' -CertStoreLocation 'Cert:\LocalMachine\TrustedPublisher'" -ForegroundColor Yellow
+Write-Host ""
+Write-GameExplorerSuccess -Action "Certificate generation"

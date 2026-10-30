@@ -13,8 +13,75 @@ reg query "HKCU\Software\Classes\CLSID\{ED228FDF-9EA8-4870-83b1-96b02cfe0d52}" /
 Get-Service GameExplorerService | Select-Object Status, StartType
 
 # 3. Does your user environment exist?
-Get-ChildItem "$env:USERPROFILE\Game Explorer"
+Get-ChildItem "$env:LOCALAPPDATA\Game Explorer"
 ```
+
+---
+
+## Windows Defender false positives
+
+Windows Defender may occasionally flag Windows Game Explorer binaries, registry entries, or
+service processes as suspicious. This is a false positive — the application is open-source
+(MIT license) and does not contain malware.
+
+### Affected files and folders
+
+If Defender quarantines or blocks any of the following, add them to your exclusions:
+
+**Executables and DLLs:**
+- `GameExplorerShell.dll` — the File Explorer shell namespace extension
+- `GameExplorerStudio.exe` — the unified Studio GUI
+- `GameExplorerService.exe` — the background worker service
+- `GameExplorerWatcher.exe` — the Explorer loader/watcher
+
+**Folders to whitelist:**
+- `%LOCALAPPDATA%\Game Explorer\` — user data root (database, metadata, caches, artwork)
+- `%USERPROFILE%\Games\` — physical backing folder for game shortcuts
+- Your install/build directory (e.g., `C:\Program Files\Windows Game Explorer\` or `build\Release\`)
+
+**Registry keys:**
+- `HKCU\Software\Classes\CLSID\{1666B3DF-60A5-4EF3-8B80-962C82401CD1}` — shell namespace registration
+- `HKCU\Software\Classes\CLSID\{game categorizer CLSID}` — categorizer registration
+- `HKLM\Software\Classes\CLSID\{1666B3DF-60A5-4EF3-8B80-962C82401CD1}` — system-wide registration (admin only)
+
+### How to add exclusions
+
+**Via Windows Security UI:**
+1. Open **Windows Security** → **Virus & threat protection** → **Manage settings**.
+2. Under **Exclusions**, click **Add or remove exclusions**.
+3. Add each affected file and folder listed above.
+
+**Via PowerShell (elevated):**
+```powershell
+# Add folder exclusions
+Add-MpPreference -ExclusionPath "$env:LOCALAPPDATA\Game Explorer"
+Add-MpPreference -ExclusionPath "$env:USERPROFILE\Games"
+
+# Add process exclusions
+Add-MpPreference -ExclusionProcess "GameExplorerService.exe"
+Add-MpPreference -ExclusionProcess "GameExplorerStudio.exe"
+Add-MpPreference -ExclusionProcess "GameExplorerWatcher.exe"
+```
+
+### Reporting false positives to Microsoft
+
+If Defender continues to flag the application, submit the affected files for analysis:
+1. Visit https://www.microsoft.com/wdsi/filesubmission
+2. Select "Software developer" as the submission type.
+3. Upload the quarantined `.dll` or `.exe` file.
+4. Include a description: "Windows Game Explorer — open-source MIT-licensed shell extension."
+
+Microsoft typically resolves false positives within 1–3 business days after submission.
+
+### Code signing
+
+Official releases are Authenticode-signed with a code signing certificate. If you build from source, the binaries will be unsigned and more likely to trigger Defender heuristics. To sign your own build:
+```powershell
+$env:WINDOWS_CERT_THUMBPRINT = "your-cert-thumbprint"
+./scripts/sign.ps1 -Configuration Release
+```
+
+For unsigned builds, adding the exclusions above is the recommended workaround.
 
 ---
 
@@ -189,7 +256,7 @@ Developers: see [Developer: testing](../developer/testing.md) for the verificati
 ## 🧹 Removing everything
 
 See [Installation & Removal — Complete reset](./installation.md#-complete-reset). The short version:
-uninstall, then delete `%USERPROFILE%\Game Explorer` and, optionally,
+uninstall, then delete `%LOCALAPPDATA%\Game Explorer` and, optionally,
 `%OneDrive%\Windows Game Explorer`.
 
 ---

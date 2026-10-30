@@ -1,3 +1,7 @@
+## Known Issues
+
+- **Legacy command bar in Games tab (Windows 11).** The Games tab displays a legacy command bar (Organize, System properties, Uninstall or change a program, Map network drive, Open settings) that is mostly empty and non-functional. Attempted fixes: FolderValueFlags = 0x200, SFGAO_FILESYSTEM, IExplorerCommandProvider returning S_OK/E_NOTIMPL. None resolved it. Root cause likely tied to the virtual folder nature of the namespace extension. Needs further research.
+
 # Windows Game Explorer — 🐛 Bug Tracker
 
 > 🐛 **Living Source of Truth**: Active tracking ledger for open bugs, quirks, external limitations, and resolution history for **Windows Game Explorer** (`projects/windows-game-explorer`).
@@ -16,7 +20,7 @@
 
 ## 🚫 Known Quirks & External Limitations
 
-- 🔒 **[windows-game-explorer] Zero External File Writes (Native Isolation Invariant)**: Windows Game Explorer never writes to, modifies, or backs up external launcher files (`shortcuts.vdf`, `cloud-storage-namespace-1.json`, or `appmanifest.acf`). Game records, metadata, and user overrides persist exclusively in `%USERPROFILE%\Game Explorer\`.
+- 🔒 **[windows-game-explorer] Zero External File Writes (Native Isolation Invariant)**: Windows Game Explorer never writes to, modifies, or backs up external launcher files (`shortcuts.vdf`, `cloud-storage-namespace-1.json`, or `appmanifest.acf`). Game records, metadata, and user overrides persist exclusively in `%LOCALAPPDATA%\Game Explorer\`.
 - 🔒 **[windows-game-explorer] Native Launcher Delegation**: Game launches always delegate strictly through official platform clients (`steam.exe -applaunch <appId>`, etc.) to ensure DRM validation, user profiles, and overlays remain intact.
 - 🔒 **[windows-game-explorer] Storefront-First Discovery (No External Scrapers)**: Unlike Microsoft's legacy Game Explorer that required manual Game Definition Files (GDF XML) and defunct online servers, Windows Game Explorer automatically discovers installed titles and harvests metadata/artwork directly from installed storefronts on disk without third-party scrapers.
 - 🔒 **[windows-game-explorer] Supported Platform Environment (Windows 11 Build 22000+)**: Windows Game Explorer targets Windows 11 (Build 22000+) exclusively following Windows 10 reaching official end-of-life. The NSIS installer strictly enforces build 22000 or later. Explorer retains the installed OS's native presentation; registration must not delete the OS Games folder type or set flags to force tabbed or legacy Explorer behavior. See [`docs/developer/research/windows-version-compatibility.md`](./docs/developer/research/windows-version-compatibility.md).
@@ -86,7 +90,7 @@
 
 - ✅ **[windows-game-explorer] BUG-14 — Platform & Provider Icons Solid Black Background Transparency Degradation**:
   - **Root Cause**: `EnsureExtractedIconPng()` allocated a 32-bit DIB section with `CreateDIBSection` (which initializes pixel bytes to zero: `0x00000000`) and drew the icon onto it via standard Win32 GDI `DrawIconEx(hdcMem, ..., DI_NORMAL)`. GDI does not write to the alpha channel of 32-bit DIBs. The DIB handle was then passed to `Gdiplus::Bitmap(hDib, nullptr)`, which treated the DIB as opaque RGB (`0xFF000000`), turning all transparent pixels into solid opaque black squares upon saving to PNG.
-  - **Resolution**: Replaced the GDI DIB drawing routine with direct `Gdiplus::Bitmap::FromHICON(hIcon)`, which extracts native 32-bit ARGB per-pixel alpha channels and evaluates 1-bit monochrome masks. Added fallback alpha fixup if an icon has all zero alpha to ensure visibility. Purged stale black-background `icon_prov_*.png` files from `%USERPROFILE%\Game Explorer\cache\art\`.
+  - **Resolution**: Replaced the GDI DIB drawing routine with direct `Gdiplus::Bitmap::FromHICON(hIcon)`, which extracts native 32-bit ARGB per-pixel alpha channels and evaluates 1-bit monochrome masks. Added fallback alpha fixup if an icon has all zero alpha to ensure visibility. Purged stale black-background `icon_prov_*.png` files from `%LOCALAPPDATA%\Game Explorer\cache\art\`.
 
 - ✅ **[windows-game-explorer] BUG-13 — Obscure/Indie/Adult Games Artwork Inaccuracy, Missing Dedicated Visual Novel Provider (VNDB), Itch Storefront Precedence & Loose Aspect Ratio Enforcement**:
   - **VNDB Kana API Integration**: Integrated `EnrichFromVndb()` querying `https://api.vndb.org/kana/vn` without requiring an API key, providing gold-standard metadata (developer, publisher, release date, BBCode-cleaned synopsis, "Adults Only (18+)" rating, and visual novel genres) and authentic covers for adult and visual novel titles.
@@ -103,8 +107,8 @@
 
 - ✅ **[windows-game-explorer] BUG-11 — Complete Art Cache Reset & Library Repopulation Engine**:
   - Re-engineered `StorefrontScanner::ResetArtworkCache()` into a complete cache & metadata refresh engine.
-  - Purges `%USERPROFILE%\Game Explorer\cache\art\` and thumbnails.
-  - Completely wipes all metadata `.json` files in `%USERPROFILE%\Game Explorer\metadata\` and the OneDrive mirror directory to eliminate any corrupted or obsolete ghost metadata.
+  - Purges `%LOCALAPPDATA%\Game Explorer\cache\art\` and thumbnails.
+  - Completely wipes all metadata `.json` files in `%LOCALAPPDATA%\Game Explorer\metadata\` and the OneDrive mirror directory to eliminate any corrupted or obsolete ghost metadata.
   - Invokes `StorefrontScanner::ScanAll(Database::Instance())` to cleanly re-scan all installed storefronts, re-download authentic artwork, and regenerate brand new clean JSON metadata files.
   - Immediately triggers `RefreshGameList(hwnd)` in `GameExplorerManager.exe` and broadcasts `SHChangeNotify(SHCNE_UPDATEDIR, ...)` and `WM_APP + 42` to active views.
 
@@ -116,7 +120,7 @@
   - Aligned cover art rendering in `LibraryViewHost.cpp` to `wuxm::Stretch::Fill` matching `GameExplorerManager.exe`'s GDI+ `DrawImage(&img, x, y, w, h)`, ensuring full vertical box fit without clipping characters or titles.
 
 - ✅ **[windows-game-explorer] BUG-9 — Purge Duplicate Test Entries, Add Details Option to Web Search Dropdown & Fix Image Preview Sizing per Type**:
-  - **Purged Duplicate Test Games**: Removed 47 leftover historical `custom_*.json` test files from `%USERPROFILE%\Game Explorer\metadata\` and the OneDrive sync directory (`%USERPROFILE%\OneDrive\Windows Game Explorer\metadata\`); updated `StorefrontScanner::RemoveCustomLocalGame` to remove deleted games from both local and OneDrive mirror directories; updated `CustomLocalGameLifecycle` unit test to immediately clean up all generated test games upon completion.
+  - **Purged Duplicate Test Games**: Removed 47 leftover historical `custom_*.json` test files from `%LOCALAPPDATA%\Game Explorer\metadata\` and the OneDrive sync directory (`%USERPROFILE%\OneDrive\Windows Game Explorer\metadata\`); updated `StorefrontScanner::RemoveCustomLocalGame` to remove deleted games from both local and OneDrive mirror directories; updated `CustomLocalGameLifecycle` unit test to immediately clean up all generated test games upon completion.
   - **Added Details to Web Filter Dropdown**: Added `"Details / Screenshots"` to `g_hwndComboWebFilter` in `ManagerMain.cpp`; mapped web queries and dropdown selections matching `Details` or `Screenshot` to the `Details` search filter slot.
   - **Correct Image Preview Sizes per Type**: Replaced hardcoded vertical 148×248 card dimensions in `GetGalleryCardDimensions` with exact aspect-ratio-accurate card dimensions per selected type:
     - `Hero Banners`: ~3.1:1 widescreen card (`cardW` ~380px, `imgH` ~123px, `cardH` 149px)
@@ -128,7 +132,7 @@
   - **Steam Store & IGDB Screenshot Typing**: Fixed Steam Store official screenshots (`appdetails` `path_full`) and IGDB screenshots to be typed as `Details` rather than `Hero`; updated web search image classification so screenshots and details images accurately populate the Details filter.
 
 - ✅ **[windows-game-explorer] BUG-8 — Decouple File Paths from SQLite to Per-Game JSON Metadata, Resolve Broken Itch.io Hero/Icon Artwork & Add Responsive Manager Layout**:
-  - **Direct JSON Metadata Architecture**: Decoupled file paths and user-editable metadata from SQLite database columns into human-editable per-game `%USERPROFILE%\Game Explorer\metadata\<appId>.json` files; implemented direct instant loading via `StorefrontScanner::LoadAllGamesFromMetadata()` with zero DB query delays or lock contention; removed destructive background artwork clearing and database syncs from `LibraryViewHost.cpp`; implemented non-destructive `SavePerGameMetadata` preserving user-edited paths and custom configurations.
+  - **Direct JSON Metadata Architecture**: Decoupled file paths and user-editable metadata from SQLite database columns into human-editable per-game `%LOCALAPPDATA%\Game Explorer\metadata\<appId>.json` files; implemented direct instant loading via `StorefrontScanner::LoadAllGamesFromMetadata()` with zero DB query delays or lock contention; removed destructive background artwork clearing and database syncs from `LibraryViewHost.cpp`; implemented non-destructive `SavePerGameMetadata` preserving user-edited paths and custom configurations.
   - **Itch.io Hero & Icon Fallbacks**: Resolved blank cards in hero view mode by adding `else if (!g.detailsArtPath.empty()) primaryArt = g.detailsArtPath;` in `LibraryViewHost.cpp` and fallback to `detailsArtPath`/`coverArtPath` if both `primaryArt` and `iconPath` fail to load; added local game folder icon scanning (`icon.png`, `icon.ico`, `logo.png`) in `EnsureExtractedIconPng` when Win32 PE executable has no embedded icon resource.
   - **Responsive Game Explorer Manager**: Added `UpdateLayout(HWND, int w, int h)` handling `WM_SIZE` via `BeginDeferWindowPos` / `DeferWindowPos` / `EndDeferWindowPos` dynamically resizing Library, Metadata, and Artwork Discovery columns; added adaptive column calculation (`cols = (std::max)(1, (w - padX) / (cardW + padX))`) in `GalleryCanvasWndProc` and scroll clamping on resize.
   - **NSIS Installer Artwork**: Regenerated NSIS setup sidecar (`installer/sidebar.bmp`, 164x314) and header (`installer/header.bmp`, 150x57) with authentic 3D icon; verified with 20/20 unit tests passing under `/W4 /WX`.

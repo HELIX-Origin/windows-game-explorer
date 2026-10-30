@@ -43,7 +43,7 @@ std::atomic<size_t> g_notificationCount{ 0 };
 std::atomic<GameExplorer::PreloadWorker*> g_notificationWorker{ nullptr };
 
 // Runs `work` while impersonating the interactive console user. The service runs as LocalSystem,
-// so every user-scoped path (`%USERPROFILE%\Game Explorer`, storefront client caches, the settings
+// so every user-scoped path (`%LOCALAPPDATA%\Game Explorer`, storefront client caches, the settings
 // database) only resolves correctly under that user's token. If impersonation is not available
 // (e.g. running standalone in user context or during pre-logon boot), falls back to executing directly.
 template <typename Work>
@@ -441,56 +441,62 @@ bool InstallService() {
     wchar_t exePath[MAX_PATH]{};
     if (GetModuleFileNameW(nullptr, exePath, MAX_PATH) == 0) return false;
 
-    SC_HANDLE scm = OpenSCManagerW(nullptr, nullptr, SC_MANAGER_ALL_ACCESS);
-    if (scm == nullptr) return false;
-
-    // Install as LocalSystem service with auto-start
-    SC_HANDLE service = CreateServiceW(
-        scm,
-        kServiceName,
-        Messages::kDisplayName,
-        SERVICE_ALL_ACCESS,
-        SERVICE_WIN32_OWN_PROCESS,
-        SERVICE_AUTO_START,
-        SERVICE_ERROR_NORMAL,
-        exePath,
-        nullptr,
-        nullptr,
-        nullptr,
-        nullptr, // LocalSystem
-        L"");
-
-    if (service == nullptr && GetLastError() == ERROR_SERVICE_EXISTS) {
-        service = OpenServiceW(scm, kServiceName, SERVICE_ALL_ACCESS);
-    }
-
-    if (service != nullptr) {
-        SERVICE_DESCRIPTIONW desc{};
-        desc.lpDescription = const_cast<wchar_t*>(Messages::kDescription);
-        ChangeServiceConfig2W(service, SERVICE_CONFIG_DESCRIPTION, &desc);
-
-        // Configure restart on failure
-        SC_ACTION actions[3] = {
-            { SC_ACTION_RESTART, 5000 },
-            { SC_ACTION_RESTART, 10000 },
-            { SC_ACTION_RESTART, 30000 }
-        };
-        SERVICE_FAILURE_ACTIONSW sfa{};
-        sfa.dwResetPeriod = 86400;
-        sfa.cActions = 3;
-        sfa.lpsaActions = actions;
-        ChangeServiceConfig2W(service, SERVICE_CONFIG_FAILURE_ACTIONS, &sfa);
-
-        CloseServiceHandle(service);
-    }
-    CloseServiceHandle(scm);
-
-    // Register bootstrap scheduled task for UAC-free execution at startup
+    // Per-user mode: no admin required. Use a user-level scheduled task instead
+    // of an SCM service, so the service runs as the current user (not LocalSystem).
+    // This avoids Windows Defender false positives from LocalSystem service creation.
+    // Use current username for the scheduled task (per-user, no admin required)
+    wchar_t userName[MAX_PATH] = { 0 };
+    DWORD userNameLen = MAX_PATH;
+    GetUserNameW(userName, &userNameLen);
     std::wstring schCmd = L"schtasks /create /tn \"" + std::wstring(kTaskName) +
-                          L"\" /tr \"\\\"" + exePath + L"\\\" --run\" /sc onstart /ru \"SYSTEM\" /rl HIGHEST /f";
+                          L"\" /tr \"\\\"" + exePath + L"\\\" --run\" /sc onlogon /ru \"" +
+                          std::wstring(userName) + L"\" /rl LIMITED /f";
     _wsystem(schCmd.c_str());
 
-    return service != nullptr;
+    // Also attempt SCM service install if running as admin (for system-wide use)
+    SC_HANDLE scm = OpenSCManagerW(nullptr, nullptr, SC_MANAGER_ALL_ACCESS);
+    if (scm != nullptr) {
+        SC_HANDLE service = CreateServiceW(
+            scm,
+            kServiceName,
+            Messages::kDisplayName,
+            SERVICE_ALL_ACCESS,
+            SERVICE_WIN32_OWN_PROCESS,
+            SERVICE_AUTO_START,
+            SERVICE_ERROR_NORMAL,
+            exePath,
+            nullptr,
+            nullptr,
+            nullptr,
+            nullptr, // LocalSystem (only if admin)
+            L"");
+
+        if (service == nullptr && GetLastError() == ERROR_SERVICE_EXISTS) {
+            service = OpenServiceW(scm, kServiceName, SERVICE_ALL_ACCESS);
+        }
+
+        if (service != nullptr) {
+            SERVICE_DESCRIPTIONW desc{};
+            desc.lpDescription = const_cast<wchar_t*>(Messages::kDescription);
+            ChangeServiceConfig2W(service, SERVICE_CONFIG_DESCRIPTION, &desc);
+
+            SC_ACTION actions[3] = {
+                { SC_ACTION_NONE, 0 },
+                { SC_ACTION_NONE, 0 },
+                { SC_ACTION_NONE, 0 }
+            };
+            SERVICE_FAILURE_ACTIONSW sfa{};
+            sfa.dwResetPeriod = 0;
+            sfa.cActions = 3;
+            sfa.lpsaActions = actions;
+            ChangeServiceConfig2W(service, SERVICE_CONFIG_FAILURE_ACTIONS, &sfa);
+
+            CloseServiceHandle(service);
+        }
+        CloseServiceHandle(scm);
+    }
+
+    return true;
 }
 
 bool UninstallService() {
@@ -579,19 +585,32 @@ int WINAPI wWinMain(HINSTANCE /*hInstance*/, HINSTANCE /*hPrevInstance*/, LPWSTR
         { nullptr, nullptr }
     };
 
+    // Ensure only one service worker instance runs across SCM and background user sessions
+    HANDLE hServiceMutex = CreateMutexW(nullptr, TRUE, L"Global\\GameExplorerServiceWorkerMutex");
+    if (hServiceMutex != nullptr && GetLastError() == ERROR_ALREADY_EXISTS) {
+        CloseHandle(hServiceMutex);
+        return 0;
+    }
+
     if (!StartServiceCtrlDispatcherW(serviceTable)) {
         // If not started by SCM, fallback to standalone run if --run was specified
         if (cmd.find(L"--run") != std::wstring::npos) {
             g_hStopEvent = CreateEventW(nullptr, TRUE, FALSE, nullptr);
-            if (g_hStopEvent == nullptr) return static_cast<int>(GetLastError());
+            if (g_hStopEvent == nullptr) {
+                if (hServiceMutex) CloseHandle(hServiceMutex);
+                return static_cast<int>(GetLastError());
+            }
             g_running = true;
             RunWorkers();
             CloseHandle(g_hStopEvent);
             g_hStopEvent = nullptr;
+            if (hServiceMutex) CloseHandle(hServiceMutex);
             return 0;
         }
+        if (hServiceMutex) CloseHandle(hServiceMutex);
         return static_cast<int>(GetLastError());
     }
 
+    if (hServiceMutex) CloseHandle(hServiceMutex);
     return 0;
 }

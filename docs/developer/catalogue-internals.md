@@ -154,7 +154,7 @@ details pane calls per edition card.
 
 ## 4. Cache file formats
 
-Both files live in `%USERPROFILE%\Game Explorer\` and are written by the service, read by the Studio.
+Both files live in `%LOCALAPPDATA%\Game Explorer\` and are written by the service, read by the Studio.
 Parsing is lenient: an empty, truncated or missing file means "no data", never an error dialog.
 
 ### `updates.json`

@@ -55,14 +55,33 @@ foreach ($candidate in $serviceCandidates) {
     }
 }
 
-if ($DllPath -and (Test-Path -LiteralPath $DllPath)) {
+# Locate GameExplorerStudio.exe to perform in-process COM unregistration (no regsvr32).
+$StudioExe = $null
+$studioCandidates = @(
+    (Join-Path $PSScriptRoot '..\GameExplorerStudio.exe'),
+    (Join-Path $PSScriptRoot '..\build\Release\GameExplorerStudio.exe'),
+    (Join-Path $PSScriptRoot '..\Release\GameExplorerStudio.exe')
+)
+foreach ($candidate in $studioCandidates) {
+    if (Test-Path -LiteralPath $candidate) {
+        $StudioExe = (Resolve-Path -LiteralPath $candidate).Path
+        break
+    }
+}
+
+if ($StudioExe) {
+    Write-Host ('Unregistering the Windows Shell extension via Studio (in-process) : {0}' -f $StudioExe) -ForegroundColor White
+    $proc = Start-Process -FilePath $StudioExe -ArgumentList @('--unregister') -PassThru -Wait
+    if ($proc.ExitCode -ne 0) {
+        Write-GameExplorerFailure -Action 'Unregistration' -Detail ('Studio --unregister exited with code {0}' -f $proc.ExitCode)
+    }
+} elseif ($DllPath -and (Test-Path -LiteralPath $DllPath)) {
     Write-Host ('Target DLL : {0}' -f $DllPath) -ForegroundColor White
-    Write-Host 'Unregistering the Windows Shell extension with regsvr32...' -ForegroundColor White
+    Write-Host 'GameExplorerStudio.exe not found; falling back to regsvr32...' -ForegroundColor Yellow
     $quotedDll = '"{0}"' -f $DllPath
     $process = Start-Process -FilePath 'regsvr32.exe' -ArgumentList @('/u', '/s', $quotedDll) -PassThru -Wait
     if ($process.ExitCode -ne 0) {
         Write-GameExplorerFailure -Action 'Unregistration' -Detail ('regsvr32 exited with code {0}' -f $process.ExitCode)
-        exit $process.ExitCode
     }
 } else {
     Write-Host 'GameExplorerShell.dll not found; cleaning registration keys and shortcuts only.' -ForegroundColor Yellow

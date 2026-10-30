@@ -11,7 +11,7 @@ Windows Game Explorer uses a decentralized, transparent, and user-centric archit
 1. **Storefront as Primary Truth**: When a game is detected from an official storefront (Steam, Epic Games, GOG Galaxy, itch.io, Battle.net, Ubisoft Connect, Rockstar Games Launcher, EA App, Amazon Games, Xbox / PC Game Pass, or Square Enix), all metadata and artwork provided by the storefront's local manifests and cache are preserved as the primary source of truth.
 2. **Per-Game `metadata.json` Enrichment**: Each game in your library has an isolated, transparent, human-editable JSON file located in:
    ```text
-   %USERPROFILE%\Game Explorer\metadata\<appId>.json
+   %LOCALAPPDATA%\Game Explorer\metadata\<appId>.json
    ```
    External metadata overrides and manual user edits via the Library Manager page of Game Explorer Studio strictly **enrich or override fields** without modifying storefront files on disk.
 
@@ -123,7 +123,7 @@ For games installed outside supported storefronts (indie visual novels, standalo
 
 To customize or correct any game's display information or box art:
 
-1. Open the **Configuration** page of Game Explorer Studio and click **"Open Metadata Folder"** (or press `Win + R` and navigate to `%USERPROFILE%\Game Explorer\metadata`).
+1. Open the **Configuration** page of Game Explorer Studio and click **"Open Metadata Folder"** (or press `Win + R` and navigate to `%LOCALAPPDATA%\Game Explorer\metadata`).
 2. Open the target `<appId>.json` file in any text editor (Notepad, VS Code, etc.).
 3. Edit the fields you wish to customize (e.g. change `title`, `developer`, `score`, or update `coverArtPath` to a custom image on your disk).
 4. Save the file.

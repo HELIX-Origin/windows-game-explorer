@@ -23,7 +23,7 @@
 2. **Design Principles**:
    - **Automated Storefront-First Discovery (No External Scrapers)**: Automatically detects and indexes titles and storefront providers directly from installed storefronts on disk (Steam, Epic Games, GOG Galaxy, Battle.net, EA App, Ubisoft Connect, itch.io) without manual XML/GDF registration or external third-party scrapers (IGDB, SteamGridDB, VNDB).
    - **Authentic Two-Section Categorization**: Implements `ICategoryProvider` and `ICategorizer` on `PKEY_ItemTypeText` to group installed storefront clients under `▾ Game Providers` and installed game titles under `▾ Games`.
-   - **Native App & File Isolation**: Never writes to, modifies, or corrupts external launcher proprietary files (`shortcuts.vdf`, etc.). Local metadata overrides, indices, and settings persist cleanly in `%USERPROFILE%\Game Explorer\`.
+   - **Native App & File Isolation**: Never writes to, modifies, or corrupts external launcher proprietary files (`shortcuts.vdf`, etc.). Local metadata overrides, indices, and settings persist cleanly in `%LOCALAPPDATA%\Game Explorer\`.
    - **Zero In-App Transactions**: Installations, updates, launches, and purchases delegate strictly to official storefront clients, system protocols, or direct binary execution.
    - **Cloud Sync**: Decentralized profile backups leveraging the user's local OneDrive sync directory with availability and sync validation.
 
@@ -111,7 +111,7 @@
 > and restarted, so no UAC prompt ever appears at login or at runtime. The service preloads
 > library/metadata and keeps achievement and metadata sync warm so the shell view and Studio open
 > instantly. Because neither `LocalService` nor a scheduled task has the interactive user's profile,
-> every write is routed to the owning session's `%USERPROFILE%\Game Explorer\` through the service↔client
+> every write is routed to the owning session's `%LOCALAPPDATA%\Game Explorer\` through the service↔client
 > IPC handshake — the service never assumes `%USERPROFILE%` is its own. Options considered and rejected
 > are recorded in [`docs/developer/research/startup-background-service.md`](./docs/developer/research/startup-background-service.md).
 >
@@ -138,7 +138,7 @@ flowchart TD
 
 - 🎯 **[windows-game-explorer] Phase 1 — Shell Integration & Core Architecture**: Unique CLSID, COM DLL registration (`DllRegisterServer`/`DllUnregisterServer`), pinning as a prominent "Games" node in the File Explorer navigation pane alongside Gallery and Home utilizing a custom Fluent SVG controller icon and full Windows 11 light/dark mode support.
 - 🎯 **[windows-game-explorer] Phase 2 — Multi-Store Installed Application Indexing**: Fast local indexing across all mounted drives for Steam (`libraryfolders.vdf`, `*.acf`), Epic Games (`.item` manifests), GOG Galaxy (Registry), Battle.net, EA App, Ubisoft Connect, and itch.io (`butler.db` and drive folders).
-- 🎯 **[windows-game-explorer] Phase 3 — Game Explorer Manager Companion GUI App (`GameExplorerManager.exe`)**: Dedicated Win32 management companion reviving the classic Game Explorer Manager (GEM) utility for managing library games, adding custom local games (`.exe`, `.lnk`, `.bat`, ROMs), visual box art and icon selection, full metadata editing, and per-game `%USERPROFILE%\Game Explorer\metadata\<appId>.json` persistence.
+- 🎯 **[windows-game-explorer] Phase 3 — Game Explorer Manager Companion GUI App (`GameExplorerManager.exe`)**: Dedicated Win32 management companion reviving the classic Game Explorer Manager (GEM) utility for managing library games, adding custom local games (`.exe`, `.lnk`, `.bat`, ROMs), visual box art and icon selection, full metadata editing, and per-game `%LOCALAPPDATA%\Game Explorer\metadata\<appId>.json` persistence.
 - 🎯 **[windows-game-explorer] Phase 4 — Storefront-First Metadata & Native Shell Categorization**: Direct storefront data invariant (no external third-party scrapers), local Steam 600×900 vertical box art and hero banners harvested directly from disk (~5ms scan), and native Windows Shell categorization (`ICategoryProvider`/`ICategorizer`) presenting two distinct collapsible sections in File Explorer (`▾ Game Providers (N)` and `▾ Games (N)`).
 - 🎯 **[windows-game-explorer] Phase 5 — Front-End Custom Gallery & Details Side Pane**: Native Fluent Design game view supporting selectable layouts (Cover Art, Hero Banner, Details View), authentic native Windows light and dark styles, keyboard navigation hooks, and contextual details side panel.
 - 🎯 **[windows-game-explorer] Phase 6 — Integration Configuration Utility (`GameExplorerConfig.exe`)**: Standalone lightweight Win32 configuration utility dedicated to enabling/disabling shell integration, selecting library layout mode, toggling storefront integrations, and managing OneDrive cloud sync.

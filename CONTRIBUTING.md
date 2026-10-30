@@ -49,7 +49,7 @@ Prerequisites:
 
 ## Architecture Notes
 
-- **Native App Isolation**: Windows Game Explorer never writes to, modifies, or backs up external launcher files (`shortcuts.vdf`, `cloud-storage-namespace-1.json`, or `appmanifest.acf`). User custom metadata overrides and settings persist exclusively in `%USERPROFILE%\Game Explorer\`.
+- **Native App Isolation**: Windows Game Explorer never writes to, modifies, or backs up external launcher files (`shortcuts.vdf`, `cloud-storage-namespace-1.json`, or `appmanifest.acf`). User custom metadata overrides and settings persist exclusively in `%LOCALAPPDATA%\Game Explorer\`.
 - **Storefront-First Discovery (No External Scrapers)**: Installed storefront providers (Steam, Epic Games, GOG Galaxy, Battle.net, Ubisoft Connect, EA App, itch.io) are used directly as the sole source of truth for their games' metadata and box art.
 - **Shell Extension & Studio Architecture**:
   - `GameExplorerShell.dll`: In-process File Explorer shell extension (`IShellFolder2`, `ICategoryProvider`, `IThumbnailProvider`, `IPropertyStore`).

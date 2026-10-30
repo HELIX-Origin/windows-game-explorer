@@ -4,7 +4,7 @@
 Unicode true
 
 !define APP_NAME "Windows Game Explorer"
-!define APP_VERSION "2.7.0"
+!define APP_VERSION "2.8.0"
 !define APP_PUBLISHER "HELIX Origin"
 !define APP_URL "https://github.com/HELIX-Origin/windows-game-explorer"
 !define APP_EXE_STUDIO "GameExplorerStudio.exe"
@@ -33,8 +33,8 @@ Name "${APP_NAME}"
 OutFile "..\dist\windows-game-explorer-v${APP_VERSION}-setup.exe"
 SetCompressor /SOLID lzma
 
-!define MUI_ICON "..\assets\game-explorer-icon.ico"
-!define MUI_UNICON "..\assets\game-explorer-icon.ico"
+!define MUI_ICON "..\assets\game-explorer.ico"
+!define MUI_UNICON "..\assets\game-explorer.ico"
 !define MUI_ABORTWARNING
 
 ; Sidecar & Header bitmaps
@@ -130,7 +130,11 @@ watcherStoppedForUpgrade:
     File "..\build\Release\GameExplorerService.exe"
     File "..\build\Release\GameExplorerWatcher.exe"
     File "..\LICENSE"
-    File "..\assets\game-explorer-icon.ico"
+    File "..\assets\game-explorer.ico"
+    ; Optional: public code signing certificate for Windows Defender trust
+    !if /FileExists "..\certs\game-explorer-dev.cer"
+        File "..\certs\game-explorer-dev.cer"
+    !endif
     File "..\game-explorer.bat"
     CreateDirectory "$INSTDIR\scripts"
     File /oname=scripts\_common.ps1 "..\scripts\_common.ps1"
@@ -228,7 +232,7 @@ watcherStoppedForUninstall:
     Delete "$INSTDIR\GameExplorerConfig.exe"
     Delete "$INSTDIR\GameExplorerManager.exe"
     Delete "$INSTDIR\LICENSE"
-    Delete "$INSTDIR\game-explorer-icon.ico"
+    Delete "$INSTDIR\game-explorer.ico"
     Delete "$INSTDIR\register.bat"
     Delete "$INSTDIR\unregister.bat"
     Delete "$INSTDIR\build.bat"
@@ -278,7 +282,13 @@ watcherStoppedForUninstall:
     DeleteRegKey HKCU "Software\Classes\CLSID\{1666B3DF-60A5-4EF3-8B80-962C82401CD1}"
     DeleteRegKey HKLM "Software\Classes\CLSID\{6B95F573-0498-4B29-873B-F597E3A042A1}"
     DeleteRegKey HKCU "Software\Classes\CLSID\{6B95F573-0498-4B29-873B-F597E3A042A1}"
-    ; Clean up canonical FOLDERID_Games ONLY if it points to Windows Game Explorer
+    ; Import public code signing certificate (if present) into Trusted Publishers
+  ; so Windows trusts the signed binaries and reduces Defender false positives.
+  IfFileExists "$INSTDIR\game-explorer-dev.cer" 0 +3
+    ExecWait 'certutil.exe -addstore -f "TrustedPublisher" "$INSTDIR\game-explorer-dev.cer"'
+    Delete "$INSTDIR\game-explorer-dev.cer"
+
+  ; Clean up canonical FOLDERID_Games ONLY if it points to Windows Game Explorer
     ReadRegStr $0 HKLM "Software\Microsoft\Windows\CurrentVersion\Explorer\FolderDescriptions\{CAC52C1A-B53D-4EDC-92D7-6B2E8AC19434}" "ParsingName"
     StrCmp $0 "shell:::{1666B3DF-60A5-4EF3-8B80-962C82401CD1}" 0 +2
     DeleteRegKey HKLM "Software\Microsoft\Windows\CurrentVersion\Explorer\FolderDescriptions\{CAC52C1A-B53D-4EDC-92D7-6B2E8AC19434}"

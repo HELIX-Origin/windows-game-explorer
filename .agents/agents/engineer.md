@@ -8,7 +8,7 @@
 
 - Design, implement, and maintain the native Windows Shell Extension (`src/shell/`), the shared core engine (`src/core/`), and the unified Game Explorer Studio GUI (`GameExplorerStudio.exe`): the Studio frame and Game Catalogue page live in `src/studio/`, the Library Manager page in `src/manager/`, and the Configuration page in `src/config/`.
 - Develop multi-store automated crawlers (`src/core/`) that discover installed games and storefront providers directly from disk manifests (Steam, Epic, GOG, EA, Battle.net, Ubisoft Connect, itch.io).
-- Maintain the per-game metadata override pipeline (`%USERPROFILE%\Game Explorer\metadata\<appId>.json`) and local storefront artwork discovery.
+- Maintain the per-game metadata override pipeline (`%LOCALAPPDATA%\Game Explorer\metadata\<appId>.json`) and local storefront artwork discovery.
 - Maintain the OneDrive cloud synchronization engine and sync status badging.
 - Enforce the zero-warning quality gate (`MSVC /W4 /WX`) across all builds and tests.
 

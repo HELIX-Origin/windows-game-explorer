@@ -86,7 +86,7 @@ Windows Game Explorer strictly honors the **Native Isolation Invariant**:
 - It **never** writes to, modifies, or overwrites external launcher files (such as Steam's `shortcuts.vdf`, `appmanifest.acf`, or Epic's manifest files).
 - Game records, custom user overrides, and downloaded artwork persist exclusively within the user's private data folder:
   ```text
-  %USERPROFILE%\Game Explorer\
+  %LOCALAPPDATA%\Game Explorer\
   ```
 - Launches are always delegated through official client protocols (`steam://rungameid/<id>`, `com.epicgames.launcher://apps/<id>`, etc.) to ensure digital rights management (DRM), cloud saves, and social overlays remain intact.
 
@@ -148,7 +148,7 @@ Windows Game Explorer features a modular multi-source achievement engine (`Achie
 - **Steam**: Steamworks Web API integration with player unlock progress, achievement schemas, and public global percentage rates.
 - **RetroAchievements**: Integrated Web API supporting emulated systems with completion tracking and badge caches.
 - **GOG Galaxy**: Catalog achievement endpoint querying.
-- **Shell Inspector**: Live trophy header card (`🏆 N / Total (XX%)`), WinUI `ProgressBar`, and up to 4 top unlock badges cached locally in `%USERPROFILE%\Game Explorer\cache\badges\`.
+- **Shell Inspector**: Live trophy header card (`🏆 N / Total (XX%)`), WinUI `ProgressBar`, and up to 4 top unlock badges cached locally in `%LOCALAPPDATA%\Game Explorer\cache\badges\`.
 
 ---
 

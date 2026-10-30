@@ -28,7 +28,7 @@ move the cards and their child controls together, so nothing is clipped when the
 | 6 | **Game Catalogue Notification Bell** | update / news / per-store / free-game / promotion switches, **Check for alerts now**, last-refresh label | `notify_game_updates`, `notify_news`, `notify_news_{steam,gog,epic,xbox}`, `notify_free_games`, `notify_promotions` |
 | 7 | **Application Updates & Releases** | installed version, **Check for Updates**, **Download & Install Update**, **View Release Notes** | — |
 
-Settings live in the `settings` key/value table of `%USERPROFILE%\Game Explorer\library.db`. Nothing
+Settings live in the `settings` key/value table of `%LOCALAPPDATA%\Game Explorer\library.db`. Nothing
 is written to the registry except the shell registration itself.
 
 ---
@@ -71,7 +71,7 @@ The choice is saved as `layout_mode` and applied to every open Games view immedi
 
 - **Synchronize per-game metadata overrides to local OneDrive folder** enables the OneDrive mirror
   (`enable_onedrive_backup`, default **off**).
-- **Open Metadata Folder** opens `%USERPROFILE%\Game Explorer\metadata`.
+- **Open Metadata Folder** opens `%LOCALAPPDATA%\Game Explorer\metadata`.
 - **Open OneDrive Folder** opens `%OneDrive%\Windows Game Explorer` (created on demand).
 - **Sync to OneDrive Now** takes an immediate snapshot instead of waiting for the next pass.
 
@@ -84,7 +84,7 @@ When enabled, the mirror receives:
 | `cache\art\*` | `%OneDrive%\Windows Game Explorer\art\*` |
 
 The sync is write-only and never locks the live database: it copies a consistent snapshot. Restoring
-on another machine is a file copy back into `%USERPROFILE%\Game Explorer\`.
+on another machine is a file copy back into `%LOCALAPPDATA%\Game Explorer\`.
 
 ---
 
@@ -158,7 +158,7 @@ separate feature — see [Update Alerts](./notifications.md).
 
 - **Save Configuration** writes every field to `library.db`, applies the layout mode, and broadcasts
   a shell change notification so open views repaint.
-- **Reset Cache** deletes `%USERPROFILE%\Game Explorer\cache\art\*` and re-triggers artwork downloads
+- **Reset Cache** deletes `%LOCALAPPDATA%\Game Explorer\cache\art\*` and re-triggers artwork downloads
   on the next refresh. It does not touch `library.db`, metadata overrides, achievements or alerts.
 - Defaults, when no value has ever been saved:
 

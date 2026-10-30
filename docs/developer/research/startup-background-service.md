@@ -33,7 +33,7 @@ does **not** run as `LocalSystem`.
 **Consequence: Session 0 isolation must be designed for, not avoided.** The service has no interactive
 user profile, so:
 
-- Per-user paths (`%USERPROFILE%\Game Explorer\`, `%OneDrive%`, `HKCU`) are resolved per connected client
+- Per-user paths (`%LOCALAPPDATA%\Game Explorer\`, `%OneDrive%`, `HKCU`) are resolved per connected client
   session and every write is performed through/beside that client, never against
   `C:\Windows\ServiceProfiles\LocalService`.
 - The service treats local metadata JSON as **read-mostly**; the interactive client remains the writer for
@@ -53,7 +53,7 @@ To deliver a truly native, instant-response Windows experience, the application 
 2. **Automated Directory Monitoring:** Monitors storefront manifest folders (Steam `libraryfolders.vdf`, Epic manifests, GOG SQLite) in real time using `ReadDirectoryChangesW`, keeping the local database current.
 3. **OneDrive Cloud Sync Synchronization:** Runs automated backup routines into the user's local OneDrive folder with sync readiness validation.
 4. **Instant In-Shell Responsiveness:** When a user clicks "Game Explorer" in the File Explorer sidebar, `IShellView` must read from an already-current in-memory / local SQLite cache without waiting for disk crawlers.
-5. **Multi-User Isolation:** Each Windows user account must have its own isolated library rooted under `%USERPROFILE%\Game Explorer\`.
+5. **Multi-User Isolation:** Each Windows user account must have its own isolated library rooted under `%LOCALAPPDATA%\Game Explorer\`.
 
 ---
 
@@ -125,7 +125,7 @@ flowchart TD
    - Headless Win32 application registered in `HKCU\...\Run`.
    - Uses `ReadDirectoryChangesW` on store folders to catch game installs/uninstalls immediately.
    - Executes periodic OneDrive backup checks.
-   - Writes directly to `%USERPROFILE%\Game Explorer\library.db`.
+   - Writes directly to `%LOCALAPPDATA%\Game Explorer\library.db`.
 2. **`GameExplorerShell.dll` (InProcServer32 COM Extension):**
    - Registered under CLSID as a Virtual Shell Namespace Extension.
    - When opened in File Explorer, directly reads the pre-indexed SQLite cache.

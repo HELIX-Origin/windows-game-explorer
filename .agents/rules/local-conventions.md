@@ -58,13 +58,13 @@ Recreating the authentic Windows 7 Game Explorer inside Windows 11 requires impl
   - Native Windows Shell Extension DLL implementing `IShellFolder2`, `IPersistFolder2`, `ICategoryProvider`, `ICategorizer`, `IThumbnailProvider`, `IShellItemImageFactory`, `IPropertyStore`, `IExtractIconW`, and `IContextMenu`.
 - **`GameExplorerStudio.exe` (Game Explorer Studio):**
   - A single Win32 GUI window with a Fluent tab strip, one message loop and one Start menu shortcut. The shell extension launches it with `--tab=manager` or `--tab=config`.
-  - **Library Manager page (`src/manager/`):** Dedicated to managing the games in the library, adding local/custom games (`.exe`, `.lnk`, `.bat`, ROMs), picking vertical box art and icons, and editing game metadata (`%USERPROFILE%\Game Explorer\metadata\<appId>.json`).
+  - **Library Manager page (`src/manager/`):** Dedicated to managing the games in the library, adding local/custom games (`.exe`, `.lnk`, `.bat`, ROMs), picking vertical box art and icons, and editing game metadata (`%LOCALAPPDATA%\Game Explorer\metadata\<appId>.json`).
   - **Game Catalogue page (`src/studio/CataloguePage.cpp`):** Owned-games catalogue page with search, filter, and delegated storefront install controls.
   - **Configuration page (`src/config/`):** Integration settings with pill window controls, Fluent rounded cards, and system accent styling — namespace registration, library layout preference, storefront integration toggles, achievement auto-sync, API credentials, and OneDrive cloud sync.
 - **Core Engine & Indexer (`src/core/`):**
   - Multi-store manifest crawlers and parser modules (Steam `.acf` & `librarycache`, Epic `.item`, GOG Registry, Battle.net, EA App, Ubisoft Connect, itch.io `butler.db`).
   - Storefront-first metadata model (no external third-party scrapers).
-  - User-scoped storage rooted under `%USERPROFILE%\Game Explorer\`.
+  - User-scoped storage rooted under `%LOCALAPPDATA%\Game Explorer\`.
 
 ---
 

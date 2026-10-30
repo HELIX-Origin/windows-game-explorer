@@ -112,7 +112,7 @@ Run the newer setup over the existing installation. The installer:
    the stale copy for deletion on the next reboot.
 3. Writes the new binaries, re-registers the shell extension, reinstalls the service, and starts it.
 
-Your library is untouched: everything lives in `%USERPROFILE%\Game Explorer\`, which the installer
+Your library is untouched: everything lives in `%LOCALAPPDATA%\Game Explorer\`, which the installer
 never deletes. `library.db` migrations run automatically on first open, so an upgrade keeps
 favourites, custom games, artwork paths, achievements and settings.
 
@@ -137,7 +137,7 @@ Use **Settings → Apps → Installed apps → Windows Game Explorer → Uninsta
 
 ### What is deliberately kept
 
-`%USERPROFILE%\Game Explorer\` — the library database, metadata overrides, cached artwork, cached
+`%LOCALAPPDATA%\Game Explorer\` — the library database, metadata overrides, cached artwork, cached
 alert feeds and settings — is **not** deleted. Delete that folder manually for a complete reset.
 If OneDrive synchronisation was enabled, `%OneDrive%\Windows Game Explorer\` is also left alone so a
 future reinstall can restore your library.

@@ -68,7 +68,7 @@ active scan instead of interrupting it.
 
 ### The cached result
 
-`%USERPROFILE%\Game Explorer\updates.json` stores one report per installed edition — the storefront,
+`%LOCALAPPDATA%\Game Explorer\updates.json` stores one report per installed edition — the storefront,
 the installed and latest build ids, the verdict and the storefront's own message. The file is
 lenient to read: if it is missing, empty or truncated, the catalogue simply shows no verdict and the
 next pass rewrites it.
@@ -106,7 +106,7 @@ never appears twice in one feed.
 - **Scroll** — mouse wheel, the scroll rail, keyboard (`Up`/`Down`/`Page Up`/`Page Down`/`Home`/`End`),
   or drag the thumb.
 
-Read state lives in `%USERPROFILE%\Game Explorer\notifications-seen.json` as a flat list of alert
+Read state lives in `%LOCALAPPDATA%\Game Explorer\notifications-seen.json` as a flat list of alert
 ids. A refresh never resurrects an alert you already read, and ids that disappear from the feed are
 pruned so the file cannot grow without bound. Deleting the file marks everything unread again.
 

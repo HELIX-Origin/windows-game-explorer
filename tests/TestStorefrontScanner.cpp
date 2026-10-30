@@ -33,6 +33,32 @@ TEST_CASE(ScannerBlacklistExecutableFilter) {
     ASSERT_FALSE(GameExplorer::StorefrontScanner::IsBlacklistedExecutable(L"EldenRing.exe"));
 }
 
+TEST_CASE(ScannerBlocksIndieGalaClient) {
+    // The IndieGala IGClient launcher is blocked outright and must never be catalogued.
+    ASSERT_TRUE(GameExplorer::StorefrontScanner::IsBlacklistedExecutable(L"IGClient.exe"));
+    ASSERT_TRUE(GameExplorer::StorefrontScanner::IsBlacklistedExecutable(L"igclientupdater.exe"));
+    ASSERT_TRUE(GameExplorer::StorefrontScanner::IsBlacklistedExecutable(L"IGClientSetup.exe"));
+    ASSERT_TRUE(GameExplorer::StorefrontScanner::IsBlacklistedExecutable(L"indiegala.exe"));
+    ASSERT_TRUE(GameExplorer::StorefrontScanner::IsBlacklistedExecutable(L"indiegalaclient.exe"));
+    ASSERT_TRUE(GameExplorer::StorefrontScanner::IsBlacklistedExecutable(L"ig_client.exe"));
+    ASSERT_TRUE(GameExplorer::StorefrontScanner::IsBlacklistedExecutable(L"igclient-updater.exe"));
+
+    ASSERT_TRUE(GameExplorer::StorefrontScanner::IsBlockedStoreClientPath(L"D:\\Games\\IndieGala"));
+    ASSERT_TRUE(GameExplorer::StorefrontScanner::IsBlockedStoreClientPath(L"C:\\Program Files\\IGClient"));
+    ASSERT_TRUE(GameExplorer::StorefrontScanner::IsBlockedStoreClientPath(L"C:\\Program Files\\IGClient\\IGClient.exe"));
+    ASSERT_TRUE(GameExplorer::StorefrontScanner::IsBlockedStoreClientPath(L"C:\\Program Files\\IndieGala Client"));
+    ASSERT_TRUE(GameExplorer::StorefrontScanner::IsBlockedStoreClientPath(L"C:\\Program Files\\IndieGala Client\\client.exe"));
+    ASSERT_TRUE(GameExplorer::StorefrontScanner::IsBlockedStoreClientPath(
+        L"C:\\Users\\User\\AppData\\Local\\igclient-updater\\IGClientUpdater.exe"));
+
+    // Games downloaded through other means stay scannable.
+    ASSERT_FALSE(GameExplorer::StorefrontScanner::IsBlockedStoreClientPath(
+        L"D:\\Games\\IndieGala\\Library\\Some Game\\SomeGame.exe"));
+    ASSERT_FALSE(GameExplorer::StorefrontScanner::IsBlockedStoreClientPath(
+        L"C:\\IGClientGames\\Some Game\\SomeGame.exe"));
+    ASSERT_FALSE(GameExplorer::StorefrontScanner::IsBlockedStoreClientPath(L"D:\\Games\\Portal2\\portal2.exe"));
+}
+
 TEST_CASE(ScannerCommonGameInstallationPaths) {
     ASSERT_TRUE(GameExplorer::StorefrontScanner::IsCommonGameInstallationPath(L"D:\\Games\\Portal2\\portal2.exe"));
     ASSERT_TRUE(GameExplorer::StorefrontScanner::IsCommonGameInstallationPath(L"E:\\SteamLibrary\\steamapps\\common\\Half-Life 2"));

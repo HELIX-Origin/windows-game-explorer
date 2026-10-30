@@ -84,7 +84,8 @@ $PortableFiles = @(
     @{ Source = (Join-Path $BinDir "GameExplorerService.exe");     Target = "GameExplorerService.exe" },
     @{ Source = (Join-Path $BinDir "GameExplorerWatcher.exe");     Target = "GameExplorerWatcher.exe" },
     @{ Source = (Join-Path $RepoRoot "LICENSE");                   Target = "LICENSE" },
-    @{ Source = (Join-Path $RepoRoot "assets\game-explorer-icon.ico"); Target = "game-explorer-icon.ico" },
+    @{ Source = (Join-Path $RepoRoot "assets\game-explorer.ico"); Target = "game-explorer.ico" },
+    @{ Source = (Join-Path $RepoRoot "certs\game-explorer-dev.cer"); Target = "game-explorer-dev.cer" },
     @{ Source = (Join-Path $RepoRoot "game-explorer.bat");         Target = "game-explorer.bat" },
     @{ Source = (Join-Path $RepoRoot "scripts\_common.ps1");       Target = "scripts\_common.ps1" },
     @{ Source = (Join-Path $RepoRoot "scripts\register.ps1");      Target = "scripts\register.ps1" },
@@ -92,7 +93,9 @@ $PortableFiles = @(
     @{ Source = (Join-Path $RepoRoot "scripts\watcher.ps1");       Target = "scripts\watcher.ps1" }
 )
 foreach ($entry in $PortableFiles) {
-    Copy-Item -LiteralPath $entry.Source -Destination (Join-Path $StagingDir $entry.Target) -Force
+    if (Test-Path -LiteralPath $entry.Source) {
+        Copy-Item -LiteralPath $entry.Source -Destination (Join-Path $StagingDir $entry.Target) -Force
+    }
 }
 Compress-Archive -Path (Join-Path $StagingDir "*") -DestinationPath $ZipPath -CompressionLevel Optimal
 Remove-Item -LiteralPath $StagingDir -Recurse -Force

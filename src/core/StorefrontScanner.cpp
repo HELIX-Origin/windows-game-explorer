@@ -2243,6 +2243,47 @@ std::vector<OnlineArtworkCandidate> StorefrontScanner::SearchOnlineArtwork(
     return filtered;
 }
 
+bool StorefrontScanner::IsBlockedStoreClientPath(const std::wstring& pathOrName) {
+    if (pathOrName.empty()) return false;
+
+    std::wstring lower = pathOrName;
+    std::transform(lower.begin(), lower.end(), lower.begin(), ::towlower);
+    std::replace(lower.begin(), lower.end(), L'/', L'\\');
+
+    const size_t lastSlash = lower.find_last_of(L'\\');
+    const std::wstring leaf = (lastSlash == std::wstring::npos) ? lower : lower.substr(lastSlash + 1);
+
+    // IndieGala IGClient: the launcher is non-functional and the storefront has been
+    // implicated in fraudulent key sales, so the client itself is blocked outright.
+    // Only the client's own files and folders are matched - games downloaded through
+    // it (IGClientGames, IndieGala\Library\<game>) remain eligible for local scans.
+    static const wchar_t* const blockedLeaves[] = {
+        L"igclient", L"igclient.exe", L"igclientupdater.exe", L"igclientsetup.exe",
+        L"igclient-updater", L"igclient-updater.exe", L"ig_client.exe",
+        L"indiegala", L"indie gala", L"indiegala.exe", L"indiegalaclient.exe",
+        L"indiegala client"
+    };
+    for (const auto* blocked : blockedLeaves) {
+        if (leaf == blocked) return true;
+    }
+
+    const std::wstring wrapped = L"\\" + lower + L"\\";
+    static const wchar_t* const blockedSegments[] = {
+        L"\\igclient\\", L"\\igclient-updater\\", L"\\indiegala client\\"
+    };
+    for (const auto* segment : blockedSegments) {
+        if (wrapped.find(segment) != std::wstring::npos) return true;
+    }
+
+    // Block IndieGala client directories while keeping games in subfolders (e.g. IndieGala\Library\...) eligible
+    if ((wrapped.find(L"\\indiegala\\") != std::wstring::npos || wrapped.find(L"\\indie gala\\") != std::wstring::npos) &&
+        wrapped.find(L"\\library\\") == std::wstring::npos && wrapped.find(L"\\games\\") == std::wstring::npos) {
+        return true;
+    }
+
+    return false;
+}
+
 bool StorefrontScanner::IsBlacklistedExecutable(const std::wstring& filename) {
     std::wstring lower = filename;
     std::transform(lower.begin(), lower.end(), lower.begin(), ::towlower);
@@ -2288,6 +2329,13 @@ bool StorefrontScanner::IsBlacklistedExecutable(const std::wstring& filename) {
         L"legendary.exe",
         L"galaxyclient.exe",
         L"gog.galaxy.client.service.exe",
+        L"igclient.exe",
+        L"igclientupdater.exe",
+        L"igclientsetup.exe",
+        L"igclient-updater.exe",
+        L"ig_client.exe",
+        L"indiegala.exe",
+        L"indiegalaclient.exe",
         L"steam.exe",
         L"steamservice.exe",
         L"steamwebhelper.exe",
@@ -4121,6 +4169,7 @@ bool StorefrontScanner::IsProbableGameInstallation(const std::wstring& installDi
 
     const std::wstring fn = exePath.filename().wstring();
     if (IsBlacklistedExecutable(fn)) return false;
+    if (IsBlockedStoreClientPath(installDir) || IsBlockedStoreClientPath(primaryExe)) return false;
 
     static const wchar_t* const nonGameExes[] = {
         L"code.exe", L"git.exe", L"git-gui.exe", L"node.exe", L"python.exe", L"pythonw.exe",
@@ -4231,7 +4280,9 @@ std::vector<GameItem> StorefrontScanner::ScanCommonGameFolders() {
                         L"Emulators",
                         L"Paradox Interactive", L"Paradox Launcher",
                         L"Wargaming.net", L"GameCenter",
-                        L"Google Play Games"
+                        L"Google Play Games",
+                        L"IGClient", L"igclient-updater",
+                        L"IndieGala", L"Indie Gala", L"IndieGala Client"
                     };
                     bool skipFolder = false;
                     for (const auto* ign : ignoredFolders) {
@@ -4298,6 +4349,7 @@ std::vector<GameItem> StorefrontScanner::ScanUninstallRegistry() {
         L"discord", L"slack", L"spotify", L"steam", L"epic games launcher",
         L"gog galaxy", L"ubisoft connect", L"battle.net", L"ea app", L"security update",
         L"hotfix for", L"update for windows", L"anti-virus", L"malwarebytes",
+        L"indie gala", L"indiegala", L"igclient",
         L"antigravity", L"visual studio", L"sdk", L"development kit", L"supportassist",
         L"dell core", L"onedrive", L"sharex", L"winaero", L"open code", L"opencode",
         L"ripgrep", L"eclipse temurin", L"free download manager", L"github copilot",
@@ -5595,9 +5647,36 @@ bool StorefrontScanner::RemoveGame(const std::wstring& appId) {
 
     const fs::path metaDir = Storage::GetMetadataPath();
     const fs::path jsonPath = metaDir / (appId + L".json");
+
     std::error_code ec;
+    // Read title from JSON before deleting, to remove the corresponding .lnk shortcut
+    std::wstring gameTitle;
     if (fs::exists(jsonPath, ec)) {
+        GameItem existing{};
+        existing.appId = appId;
+        if (LoadPerGameMetadata(existing) && !existing.title.empty()) {
+            gameTitle = existing.title;
+        }
         fs::remove(jsonPath, ec);
+    }
+
+    // Remove .lnk shortcut from the physical Games folder
+    if (!gameTitle.empty()) {
+        wchar_t userProfile[MAX_PATH] = { 0 };
+        if (GetEnvironmentVariableW(L"USERPROFILE", userProfile, MAX_PATH) > 0) {
+            std::wstring safeName = gameTitle;
+            for (auto& c : safeName) {
+                if (c == L'\\' || c == L'/' || c == L':' || c == L'*' || c == L'?' ||
+                    c == L'"' || c == L'<' || c == L'>' || c == L'|') {
+                    c = L'_';
+                }
+            }
+            const fs::path lnkPath = fs::path(userProfile) / L"Games" / (safeName + L".lnk");
+            std::error_code lec;
+            if (fs::exists(lnkPath, lec)) {
+                fs::remove(lnkPath, lec);
+            }
+        }
     }
 
     // Also sweep OneDrive metadata mirror to prevent sync-back
@@ -5969,6 +6048,64 @@ bool StorefrontScanner::SavePerGameMetadata(const GameItem& item) {
             std::filesystem::copy_file(jsonPath, oneDriveMeta / jsonPath.filename(), std::filesystem::copy_options::overwrite_existing, ec);
         }
     }
+
+    // Update the .lnk shortcut in the physical Games folder if it exists.
+    wchar_t userProfile[MAX_PATH] = { 0 };
+    if (GetEnvironmentVariableW(L"USERPROFILE", userProfile, MAX_PATH) > 0) {
+        std::wstring safeName = item.title;
+        for (auto& c : safeName) {
+            if (c == L'\\' || c == L'/' || c == L':' || c == L'*' || c == L'?' ||
+                c == L'"' || c == L'<' || c == L'>' || c == L'|') {
+                c = L'_';
+            }
+        }
+        const std::filesystem::path lnkPath = std::filesystem::path(userProfile) / L"Games" / (safeName + L".lnk");
+
+        // Ensure the Games folder exists
+        const std::filesystem::path gamesFolder = std::filesystem::path(userProfile) / L"Games";
+        std::error_code fec;
+        std::filesystem::create_directories(gamesFolder, fec);
+
+        const HRESULT hrCo = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+        const bool needCoUninit = (hrCo == S_OK);
+
+        IShellLinkW* psl = nullptr;
+        HRESULT hr = CoCreateInstance(CLSID_ShellLink, nullptr, CLSCTX_INPROC_SERVER,
+                                     IID_IShellLinkW, reinterpret_cast<void**>(&psl));
+        if (SUCCEEDED(hr) && psl != nullptr) {
+            if (!item.executablePath.empty()) {
+                psl->SetPath(item.executablePath.c_str());
+            }
+            if (!item.launchArguments.empty()) {
+                psl->SetArguments(item.launchArguments.c_str());
+            }
+            if (!item.workingDirectory.empty()) {
+                psl->SetWorkingDirectory(item.workingDirectory.c_str());
+            } else if (!item.installPath.empty()) {
+                psl->SetWorkingDirectory(item.installPath.c_str());
+            }
+            psl->SetDescription(item.title.c_str());
+
+            if (!item.iconPath.empty() && std::filesystem::exists(item.iconPath)) {
+                psl->SetIconLocation(item.iconPath.c_str(), 0);
+            } else if (!item.executablePath.empty()) {
+                psl->SetIconLocation(item.executablePath.c_str(), 0);
+            }
+
+            IPersistFile* ppf = nullptr;
+            hr = psl->QueryInterface(IID_IPersistFile, reinterpret_cast<void**>(&ppf));
+            if (SUCCEEDED(hr) && ppf != nullptr) {
+                ppf->Save(lnkPath.c_str(), TRUE);
+                ppf->Release();
+            }
+            psl->Release();
+        }
+
+        if (needCoUninit) {
+            CoUninitialize();
+        }
+    }
+
     return true;
 }
 
@@ -6001,6 +6138,7 @@ std::vector<GameItem> StorefrontScanner::ScanAllInstalledGames() {
     appendAll(ScanCustomGames());
     appendAll(ScanStandaloneAndDrives());
     appendAll(ScanEmulatedGames());
+    appendAll(ScanGameShortcuts());
 
     std::vector<GameItem> deduped;
     std::set<std::wstring> seenAppIds;
@@ -6070,7 +6208,168 @@ std::vector<GameItem> StorefrontScanner::ScanAllInstalledGames() {
         }
     }
 
+    // Create .lnk shortcuts in the physical Games folder for each detected game.
+    CreateGameShortcuts(deduped);
+
     return deduped;
+}
+
+std::vector<GameItem> StorefrontScanner::ScanGameShortcuts() {
+    std::vector<GameItem> result;
+
+    wchar_t userProfile[MAX_PATH] = { 0 };
+    if (GetEnvironmentVariableW(L"USERPROFILE", userProfile, MAX_PATH) == 0) return result;
+
+    const std::filesystem::path gamesFolder = std::filesystem::path(userProfile) / L"Games";
+    if (!std::filesystem::exists(gamesFolder)) return result;
+
+    const HRESULT hrCo = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+    const bool needCoUninit = (hrCo == S_OK);
+
+    for (const auto& entry : std::filesystem::directory_iterator(gamesFolder)) {
+        if (entry.path().extension() != L".lnk") continue;
+
+        IShellLinkW* psl = nullptr;
+        HRESULT hr = CoCreateInstance(CLSID_ShellLink, nullptr, CLSCTX_INPROC_SERVER,
+                                     IID_IShellLinkW, reinterpret_cast<void**>(&psl));
+        if (FAILED(hr) || psl == nullptr) continue;
+
+        IPersistFile* ppf = nullptr;
+        hr = psl->QueryInterface(IID_IPersistFile, reinterpret_cast<void**>(&ppf));
+        if (FAILED(hr) || ppf == nullptr) {
+            psl->Release();
+            continue;
+        }
+
+        hr = ppf->Load(entry.path().c_str(), STGM_READ);
+        if (FAILED(hr)) {
+            ppf->Release();
+            psl->Release();
+            continue;
+        }
+        ppf->Release();
+
+        GameItem game;
+        game.title = entry.path().stem().wstring();
+        game.isInstalled = true;
+
+        wchar_t targetPath[MAX_PATH] = { 0 };
+        if (SUCCEEDED(psl->GetPath(targetPath, MAX_PATH, nullptr, SLGP_SHORTPATH))) {
+            game.executablePath = targetPath;
+        }
+
+        wchar_t args[MAX_PATH] = { 0 };
+        if (SUCCEEDED(psl->GetArguments(args, MAX_PATH))) {
+            game.launchArguments = args;
+        }
+
+        wchar_t workDir[MAX_PATH] = { 0 };
+        if (SUCCEEDED(psl->GetWorkingDirectory(workDir, MAX_PATH))) {
+            game.workingDirectory = workDir;
+            game.installPath = workDir;
+        }
+
+        wchar_t desc[512] = { 0 };
+        if (SUCCEEDED(psl->GetDescription(desc, 512))) {
+            game.synopsis = desc;
+        }
+
+        wchar_t iconPath[MAX_PATH] = { 0 };
+        int iconIdx = 0;
+        if (SUCCEEDED(psl->GetIconLocation(iconPath, MAX_PATH, &iconIdx))) {
+            game.iconPath = iconPath;
+        }
+
+        psl->Release();
+
+        if (!game.executablePath.empty() || !game.title.empty()) {
+            result.push_back(std::move(game));
+        }
+    }
+
+    if (needCoUninit) {
+        CoUninitialize();
+    }
+
+    return result;
+}
+
+void StorefrontScanner::CreateGameShortcuts(const std::vector<GameItem>& games) {
+    wchar_t userProfile[MAX_PATH] = { 0 };
+    if (GetEnvironmentVariableW(L"USERPROFILE", userProfile, MAX_PATH) == 0) return;
+
+    const std::filesystem::path gamesFolder = std::filesystem::path(userProfile) / L"Games";
+    std::error_code ec;
+    std::filesystem::create_directories(gamesFolder, ec);
+
+    // Ensure folder is read-only + system for Desktop.ini processing
+    DWORD attrs = GetFileAttributesW(gamesFolder.c_str());
+    if (attrs != INVALID_FILE_ATTRIBUTES) {
+        SetFileAttributesW(gamesFolder.c_str(), attrs | FILE_ATTRIBUTE_READONLY | FILE_ATTRIBUTE_SYSTEM);
+    }
+
+    // Write Desktop.ini if not present
+    const std::filesystem::path desktopIni = gamesFolder / L"Desktop.ini";
+    if (!std::filesystem::exists(desktopIni)) {
+        std::wofstream ini(desktopIni, std::ios::trunc);
+        ini << L"[.ShellClassInfo]\n";
+        ini << L"CLSID={1666B3DF-60A5-4EF3-8B80-962C82401CD1}\n";
+        ini.close();
+        SetFileAttributesW(desktopIni.c_str(), FILE_ATTRIBUTE_HIDDEN | FILE_ATTRIBUTE_SYSTEM);
+    }
+
+    const HRESULT hrCo = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+    const bool needCoUninit = (hrCo == S_OK);
+
+    for (const auto& game : games) {
+        if (game.title.empty() || game.executablePath.empty()) continue;
+
+        // Sanitize filename
+        std::wstring safeName = game.title;
+        for (auto& c : safeName) {
+            if (c == L'\\' || c == L'/' || c == L':' || c == L'*' || c == L'?' ||
+                c == L'"' || c == L'<' || c == L'>' || c == L'|') {
+                c = L'_';
+            }
+        }
+        const std::filesystem::path lnkPath = gamesFolder / (safeName + L".lnk");
+
+        // Skip if shortcut already exists
+        if (std::filesystem::exists(lnkPath)) continue;
+
+        IShellLinkW* psl = nullptr;
+        HRESULT hr = CoCreateInstance(CLSID_ShellLink, nullptr, CLSCTX_INPROC_SERVER,
+                                     IID_IShellLinkW, reinterpret_cast<void**>(&psl));
+        if (SUCCEEDED(hr) && psl != nullptr) {
+            psl->SetPath(game.executablePath.c_str());
+            if (!game.launchArguments.empty()) {
+                psl->SetArguments(game.launchArguments.c_str());
+            }
+            if (!game.installPath.empty()) {
+                psl->SetWorkingDirectory(game.installPath.c_str());
+            }
+            psl->SetDescription(game.title.c_str());
+
+            // Use game's icon if available
+            if (!game.iconPath.empty() && std::filesystem::exists(game.iconPath)) {
+                psl->SetIconLocation(game.iconPath.c_str(), 0);
+            } else {
+                psl->SetIconLocation(game.executablePath.c_str(), 0);
+            }
+
+            IPersistFile* ppf = nullptr;
+            hr = psl->QueryInterface(IID_IPersistFile, reinterpret_cast<void**>(&ppf));
+            if (SUCCEEDED(hr) && ppf != nullptr) {
+                ppf->Save(lnkPath.c_str(), TRUE);
+                ppf->Release();
+            }
+            psl->Release();
+        }
+    }
+
+    if (needCoUninit) {
+        CoUninitialize();
+    }
 }
 
 } // namespace GameExplorer

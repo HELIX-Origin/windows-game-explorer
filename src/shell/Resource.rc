@@ -1,5 +1,4 @@
 #define IDI_GAME_EXPLORER 100
-#define IDI_GAME_EXPLORER_WIN10 101
 
 // rc.exe does not predefine RT_MANIFEST unless windows.h is included; without the numeric type
 // the resource is stored under the literal type name "RT_MANIFEST" and the loader never finds it.
@@ -8,7 +7,6 @@
 #endif
 
 IDI_GAME_EXPLORER ICON "Resource.ico"
-IDI_GAME_EXPLORER_WIN10 ICON "ResourceWin10.ico"
 
 // Visual styles live in an embedded manifest instead of the linker-generated one (see
 // /MANIFEST:NO on the executable targets). Common Controls v6 is what gives native controls the

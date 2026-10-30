@@ -41,7 +41,7 @@ Windows Game Explorer never stores your library inside a storefront's folder. Ev
 under your own profile:
 
 ```text
-%USERPROFILE%\Game Explorer\
+%LOCALAPPDATA%\Game Explorer\
 ├── library.db                  SQLite library, achievements and saved settings
 ├── metadata\<appId>.json       per-game overrides (human-editable)
 ├── cache\art\                  downloaded box art, hero banners, icons

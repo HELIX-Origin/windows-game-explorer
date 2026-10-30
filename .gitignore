@@ -33,6 +33,10 @@ Thumbs.db
 *.pfx
 *.p12
 
+# Signing certificates (private keys never committed)
+certs/
+*.pfx
+
 # Logging
 logs/*
 *.log
