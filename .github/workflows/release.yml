@@ -152,7 +152,5 @@ jobs:
           $prNumber = ($prUrl -split '/')[-1]
           # Accept CLA (exact phrase required by Microsoft bot)
           gh pr comment $prNumber --repo microsoft/winget-pkgs --body "I agree"
-          # Trigger verification
-          gh pr comment $prNumber --repo microsoft/winget-pkgs --body "/verify"
-          Write-Host "Winget PR submitted. CLA accepted and verification triggered."
+          Write-Host "Winget PR submitted. CLA accepted."
         continue-on-error: true
