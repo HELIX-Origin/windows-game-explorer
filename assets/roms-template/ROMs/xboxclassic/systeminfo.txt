@@ -1,0 +1,17 @@
+﻿System name:
+xboxclassic
+
+Full system name:
+Microsoft Xbox
+
+Supported file extensions:
+.iso .ISO .xiso .XISO .7z .7Z .zip .ZIP
+
+Launch command:
+%EMULATOR_RETROARCH% %EXTRA_CONFIGFILE%=%EXTERNALDATA%/Android/data/%ANDROIDPACKAGE%/files/retroarch.cfg %EXTRA_LIBRETRO%=%INTERNALDATA%/%ANDROIDPACKAGE%/cores/xemu_libretro_android.so %EXTRA_ROM%=%ROM%
+
+Platform (for scraping):
+xbox
+
+Theme folder:
+xbox
