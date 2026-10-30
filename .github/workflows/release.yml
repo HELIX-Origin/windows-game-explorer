@@ -68,7 +68,7 @@ jobs:
           if ($signtoolDir) { echo $signtoolDir >> $env:GITHUB_PATH }
           Write-Host "signtool found at: $signtoolDir"
 
-      - name: Decode signing certificate
+      - name: Decode signing certificate from secrets
         shell: pwsh
         env:
           CERT_BASE64: ${{ secrets.CODE_SIGNING_CERT_BASE64 }}
@@ -134,6 +134,30 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Verify release assets uploaded
+        shell: pwsh
+        run: |
+          $ver = "${{ steps.version.outputs.version }}"
+          $expected = @("windows-game-explorer-v$ver-setup.exe", "windows-game-explorer-v$ver-win64.zip")
+          $maxRetries = 30
+          for ($i = 0; $i -lt $maxRetries; $i++) {
+            $assets = gh release view "v$ver" --repo HELIX-Origin/windows-game-explorer --json assets --jq '.assets[].name' 2>$null
+            $allFound = $true
+            foreach ($exp in $expected) {
+              if ($assets -notcontains $exp) { $allFound = $false; break }
+            }
+            if ($allFound) {
+              Write-Host "All release assets verified uploaded."
+              break
+            }
+            Write-Host "Waiting for assets... ($i/$maxRetries)"
+            Start-Sleep -Seconds 10
+          }
+          if (-not $allFound) {
+            Write-Error "Not all release assets were uploaded."
+            exit 1
+          }
+
       - name: Submit to Winget (optional)
         shell: pwsh
         env:
@@ -153,4 +177,3 @@ jobs:
           # Accept CLA (exact phrase required by Microsoft bot)
           gh pr comment $prNumber --repo microsoft/winget-pkgs --body "I agree"
           Write-Host "Winget PR submitted. CLA accepted."
-        continue-on-error: true
