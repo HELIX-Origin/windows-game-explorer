@@ -1,5 +1,6 @@
 #Requires -Version 5.1
 [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidUsingWriteHost', '', Justification = 'CLI cert generation runner status output')]
+[Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidUsingConvertToSecureStringWithPlainText', '', Justification = 'Self-signed dev cert generation; password is not a secret')]
 [CmdletBinding()]
 param(
     [string]$Subject = "CN=Windows Game Explorer Dev",
