@@ -41,14 +41,14 @@ foreach ($c in $candidates) {
         Sort-Object FullName -Descending |
         Select-Object -First 1
     if ($found) {
-        $SignTool = $found
+        $SignTool = $found.FullName
         break
     }
 }
 if (-not $SignTool) {
     $cmd = Get-Command "signtool.exe" -ErrorAction SilentlyContinue
     if ($cmd -and (Test-Path -LiteralPath $cmd.Source) -and ($cmd.Source -notmatch '\\arm64?\\' -and $cmd.Source -notmatch '\\arm\\')) {
-        $SignTool = $cmd
+        $SignTool = $cmd.Source
     }
 }
 if (-not $SignTool) {
@@ -58,7 +58,7 @@ if (-not $SignTool) {
 foreach ($bin in $Targets) {
     if (Test-Path -LiteralPath $bin) {
         Write-Host "[Windows Game Explorer] Signing $bin..." -ForegroundColor Cyan
-        & $SignTool.Source sign /sha1 $Thumbprint /fd SHA256 /tr $TimestampServer /td SHA256 $bin
+        & $SignTool sign /sha1 $Thumbprint /fd SHA256 /tr $TimestampServer /td SHA256 $bin
         if ($LASTEXITCODE -ne 0) { throw "signtool failed for $bin" }
     }
 }
