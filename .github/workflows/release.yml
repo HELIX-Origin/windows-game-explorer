@@ -69,12 +69,15 @@ jobs:
         run: ./scripts/submit-to-wdsi.ps1 -Configuration Release
         continue-on-error: true
 
-      - name: Submit to Winget (optional, requires PAT_TOKEN)
-        if: ${{ secrets.PAT_TOKEN != '' }}
+      - name: Submit to Winget (optional)
         shell: pwsh
         env:
           PAT_TOKEN: ${{ secrets.PAT_TOKEN }}
         run: |
+          if ([string]::IsNullOrEmpty($env:PAT_TOKEN)) {
+            Write-Host "PAT_TOKEN not set, skipping winget submission."
+            exit 0
+          }
           # Install wingetcreate
           $wc = (Get-Command wingetcreate -ErrorAction SilentlyContinue)
           if (-not $wc) {
