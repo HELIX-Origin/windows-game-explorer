@@ -60,22 +60,36 @@ jobs:
           if ($signtoolDir) { echo $signtoolDir >> $env:GITHUB_PATH }
           Write-Host "signtool found at: $signtoolDir"
 
-      - name: Generate self-signed certificate (CI)
+      - name: Decode signing certificate from secrets
+        if: ${{ secrets.CODE_SIGNING_CERT_BASE64 != '' }}
         shell: pwsh
+        env:
+          CERT_BASE64: ${{ secrets.CODE_SIGNING_CERT_BASE64 }}
+          CERT_PASSWORD: ${{ secrets.CODE_SIGNING_CERT_PASSWORD }}
         run: |
-          # Generate a self-signed code signing cert in CI (not committed to repo)
-          $cert = New-SelfSignedCertificate -Subject "CN=Windows Game Explorer Dev" -Type CodeSigningCert -KeyUsage DigitalSignature -KeyAlgorithm RSA -KeyLength 2048 -CertStoreLocation "Cert:\CurrentUser\My" -NotAfter (Get-Date).AddYears(1) -HashAlgorithm SHA256
-          $env:WINDOWS_CERT_THUMBPRINT = $cert.Thumbprint
+          $bytes = [Convert]::FromBase64String($env:CERT_BASE64)
+          [IO.File]::WriteAllBytes("signing-cert.pfx", $bytes)
           # Export public cert for distribution
           $certDir = "certs"
           if (-not (Test-Path $certDir)) { New-Item -ItemType Directory -Path $certDir -Force | Out-Null }
+          $password = ConvertTo-SecureString -String $env:CERT_PASSWORD -Force -AsPlainText
+          $cert = Get-PfxCertificate -FilePath "signing-cert.pfx" -Password $password
           Export-Certificate -Cert $cert -FilePath "$certDir\game-explorer-dev.cer" -Force | Out-Null
-          Write-Output "WINDOWS_CERT_THUMBPRINT=$($cert.Thumbprint)" >> $env:GITHUB_ENV
-          Write-Host "Generated cert: $($cert.Thumbprint)"
+          Write-Host "Certificate decoded and public cert exported."
 
       - name: Sign binaries
+        if: ${{ secrets.CODE_SIGNING_CERT_BASE64 != '' }}
         shell: pwsh
-        run: ./scripts/sign.ps1 -Configuration Release
+        env:
+          WINDOWS_CERT_THUMBPRINT: ${{ secrets.CODE_SIGNING_CERT_THUMBPRINT }}
+          CERT_PASSWORD: ${{ secrets.CODE_SIGNING_CERT_PASSWORD }}
+        run: |
+          # Import PFX to cert store
+          $password = ConvertTo-SecureString -String $env:CERT_PASSWORD -Force -AsPlainText
+          Import-PfxCertificate -FilePath "signing-cert.pfx" -CertStoreLocation "Cert:\CurrentUser\My" -Password $password | Out-Null
+          # Sign using thumbprint
+          $env:WINDOWS_CERT_THUMBPRINT = "${{ secrets.CODE_SIGNING_CERT_THUMBPRINT }}"
+          ./scripts/sign.ps1 -Configuration Release
         continue-on-error: true
 
       - name: Install NSIS

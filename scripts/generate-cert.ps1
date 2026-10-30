@@ -41,6 +41,18 @@ if (-not (Test-Path -LiteralPath $exportPath)) {
 $cerFile = Join-Path $exportPath "game-explorer-dev.cer"
 Export-Certificate -Cert $cert -FilePath $cerFile -Force | Out-Null
 Write-Host "Public certificate exported to: $cerFile" -ForegroundColor Cyan
+
+# Export PFX (private key) for CI/CD (store as base64 secret)
+$pfxFile = Join-Path $exportPath "game-explorer-dev.pfx"
+$pfxPassword = ConvertTo-SecureString -String "ChangeMeInProduction" -Force -AsPlainText
+Export-PfxCertificate -Cert $cert -FilePath $pfxFile -Password $pfxPassword -Force | Out-Null
+Write-Host "PFX exported to: $pfxFile" -ForegroundColor Cyan
+Write-Host ""
+Write-Host "To use in GitHub Actions, base64-encode the PFX and store as secret:" -ForegroundColor White
+$base64 = [Convert]::ToBase64String([IO.File]::ReadAllBytes($pfxFile))
+Write-Host "  `$env:CODE_SIGNING_CERT_BASE64 = '$base64'" -ForegroundColor Yellow
+Write-Host "  Secret CODE_SIGNING_CERT_PASSWORD = 'ChangeMeInProduction'" -ForegroundColor Yellow
+Write-Host "  Secret CODE_SIGNING_CERT_THUMBPRINT = '$($cert.Thumbprint)'" -ForegroundColor Yellow
 Write-Host ""
 Write-Host "To sign your builds, run:" -ForegroundColor White
 Write-Host "  `$env:WINDOWS_CERT_THUMBPRINT = '$($cert.Thumbprint)'" -ForegroundColor Yellow
