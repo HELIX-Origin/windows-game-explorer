@@ -28,7 +28,22 @@ if ([string]::IsNullOrWhiteSpace($Thumbprint)) {
 
 $SignTool = Get-Command "signtool.exe" -ErrorAction SilentlyContinue
 if (-not $SignTool) {
-    throw "signtool.exe not found on PATH."
+    # Search common locations
+    $candidates = @(
+        "C:\Program Files (x86)\Windows Kits\10\App Certification Kit\signtool.exe",
+        "C:\Program Files (x86)\Windows Kits\10\bin\*\x64\signtool.exe",
+        "C:\Program Files (x86)\Windows Kits\10\bin\*\x86\signtool.exe"
+    )
+    foreach ($c in $candidates) {
+        $found = Get-ChildItem -Path $c -ErrorAction SilentlyContinue | Select-Object -First 1
+        if ($found) {
+            $SignTool = $found
+            break
+        }
+    }
+}
+if (-not $SignTool) {
+    throw "signtool.exe not found on PATH or in common locations."
 }
 
 foreach ($bin in $Targets) {

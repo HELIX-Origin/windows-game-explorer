@@ -47,10 +47,34 @@ jobs:
           Install-Module PSScriptAnalyzer -Scope CurrentUser -Force -Confirm:$false
           ./scripts/lint.ps1
 
-      - name: Sign binaries (if certificate available)
+      - name: Install Windows SDK (signtool)
         shell: pwsh
-        env:
-          WINDOWS_CERT_THUMBPRINT: ${{ secrets.WINDOWS_CERT_THUMBPRINT }}
+        run: |
+          # Download and install Windows SDK for signtool
+          $sdkUrl = "https://go.microsoft.com/fwlink/?linkid=2196241"
+          Invoke-WebRequest -Uri $sdkUrl -OutFile "$env:TEMP\winsdk.exe"
+          Start-Process -FilePath "$env:TEMP\winsdk.exe" -ArgumentList "/q", "/norestart" -Wait
+          # Add signtool to PATH
+          $sdkPath = "C:\Program Files (x86)\Windows Kits\10\bin"
+          $signtoolDir = Get-ChildItem -Path $sdkPath -Recurse -Filter "signtool.exe" -ErrorAction SilentlyContinue | Select-Object -First 1 | Select-Object -ExpandProperty DirectoryName
+          if ($signtoolDir) { echo $signtoolDir >> $env:GITHUB_PATH }
+          Write-Host "signtool found at: $signtoolDir"
+
+      - name: Generate self-signed certificate (CI)
+        shell: pwsh
+        run: |
+          # Generate a self-signed code signing cert in CI (not committed to repo)
+          $cert = New-SelfSignedCertificate -Subject "CN=Windows Game Explorer Dev" -Type CodeSigningCert -KeyUsage DigitalSignature -KeyAlgorithm RSA -KeyLength 2048 -CertStoreLocation "Cert:\CurrentUser\My" -NotAfter (Get-Date).AddYears(1) -HashAlgorithm SHA256
+          $env:WINDOWS_CERT_THUMBPRINT = $cert.Thumbprint
+          # Export public cert for distribution
+          $certDir = "certs"
+          if (-not (Test-Path $certDir)) { New-Item -ItemType Directory -Path $certDir -Force | Out-Null }
+          Export-Certificate -Cert $cert -FilePath "$certDir\game-explorer-dev.cer" -Force | Out-Null
+          Write-Output "WINDOWS_CERT_THUMBPRINT=$($cert.Thumbprint)" >> $env:GITHUB_ENV
+          Write-Host "Generated cert: $($cert.Thumbprint)"
+
+      - name: Sign binaries
+        shell: pwsh
         run: ./scripts/sign.ps1 -Configuration Release
         continue-on-error: true
 
