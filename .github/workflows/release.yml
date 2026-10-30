@@ -154,13 +154,17 @@ jobs:
         run: |
           $ver = "${{ steps.version.outputs.version }}"
           $expected = @("windows-game-explorer-v$ver-setup.exe", "windows-game-explorer-v$ver-win64.zip")
-          $maxRetries = 30
+          Start-Sleep -Seconds 15
+          $maxRetries = 60
           for ($i = 0; $i -lt $maxRetries; $i++) {
-            $assets = gh release view "v$ver" --repo HELIX-Origin/windows-game-explorer --json assets --jq '.assets[].name' 2>$null
-            $allFound = $true
-            foreach ($exp in $expected) {
-              if ($assets -notcontains $exp) { $allFound = $false; break }
-            }
+            $json = gh release view "v$ver" --repo HELIX-Origin/windows-game-explorer --json assets 2>$null
+          $release = $json | ConvertFrom-Json
+          $assets = @($release.assets | ForEach-Object { $_.name })
+          Write-Host "Found assets: $($assets -join ', ')"
+          $allFound = $true
+          foreach ($exp in $expected) {
+            if ($assets -notcontains $exp) { $allFound = $false; break }
+          }
             if ($allFound) {
               Write-Host "All release assets verified uploaded."
               break
@@ -169,7 +173,7 @@ jobs:
             Start-Sleep -Seconds 10
           }
           if (-not $allFound) {
-            Write-Error "Not all release assets were uploaded."
+            Write-Error "Not all release assets were uploaded. Found: $($assets -join ', ')"
             exit 1
           }
 
